@@ -1,0 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Premium Light Palette */
+  --color-background: #F8FAFC; /* bg-slate-50 */
+  --color-foreground: #0F172A; /* text-slate-900 */
+  
+  --color-card: #FFFFFF;
+  --color-card-foreground: #1E293B; /* text-slate-800 */
+  
+  --color-popover: #FFFFFF;
+  --color-popover-foreground: #0F172A;
+  
+  --color-primary: #4F46E5; /* indigo-600 */
+  --color-primary-foreground: #FFFFFF;
+  
+  --color-secondary: #F1F5F9; /* bg-slate-100 */
+  --color-secondary-foreground: #475569; /* text-slate-600 */
+  
+  --color-muted: #F1F5F9;
+  --color-muted-foreground: #64748B; /* text-slate-500 */
+  
+  --color-accent: #F1F5F9;
+  --color-accent-foreground: #0F172A;
+  
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-destructive: #EF4444;
+  
+  --color-border: #F1F5F9; /* border-slate-100 */
+  --color-input: #F8FAFC;
+  --color-ring: #4F46E5;
+
+  --color-premium-gold: #D97706; /* amber-600 */
+
+  --radius-lg: 0.75rem;
+  --radius-md: 0.5rem;
+  --radius-sm: 0.25rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  /* Custom Scrollbar for Light Theme */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-300;
+  }
+
+  /* Status Labels */
+  .status-paid {
+    @apply bg-indigo-50 text-indigo-700 border border-indigo-100;
+  }
+  .status-pending {
+    @apply bg-slate-100 text-slate-600 border border-slate-200;
+  }
+  .status-processing {
+    @apply bg-amber-50 text-amber-700 border border-amber-100;
+  }
+
+  /* Shadow Utility */
+  .shadow-premium {
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  }
+}
