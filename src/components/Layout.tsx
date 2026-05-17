@@ -8,6 +8,7 @@ import PromotionManagement from './PromotionManagement';
 import StockManagement from './StockManagement';
 import StaffManagement from './StaffManagement';
 import AuditLogs from './AuditLogs';
+import CoinPromoManagement from './CoinPromoManagement';
 import SalesReport from './SalesReport';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -25,7 +26,8 @@ export default function Layout() {
     'promotions': 'Manajer Papan Digital',
     'stock': 'Manajemen Stok & Gesture',
     'staff': 'Tim & Manajemen Shift',
-    'logs': 'Pusat Log & Audit Sistem'
+    'logs': 'Pusat Log & Audit Sistem',
+    'coin-promos': 'Manajemen Promo Koin'
   };
 
   const renderContent = () => {
@@ -39,6 +41,7 @@ export default function Layout() {
       case 'kds': return <KDS />;
       case 'promotions': return <PromotionManagement />;
       case 'logs': return <AuditLogs />;
+      case 'coin-promos': return <CoinPromoManagement />;
       default: return <Dashboard />;
     }
   };

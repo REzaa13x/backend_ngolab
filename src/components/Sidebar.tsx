@@ -12,7 +12,8 @@ import {
   CreditCard,
   ChefHat,
   Monitor,
-  Package
+  Package,
+  Coins
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
@@ -31,6 +32,7 @@ const navItems = [
   { id: 'stock', label: 'Stok & Gesture', icon: Package, section: 'Utama', roles: ['Admin', 'Koki'] },
   { id: 'kds', label: 'Tampilan Dapur', icon: ChefHat, section: 'Utama', roles: ['Admin', 'Koki', 'Kasir'] },
   { id: 'promotions', label: 'Papan Digital', icon: Monitor, section: 'Pemasaran', roles: ['Admin'] },
+  { id: 'coin-promos', label: 'Promo Koin', icon: Coins, section: 'Pemasaran', roles: ['Admin'] },
   { id: 'users', label: 'Database Pengguna', icon: Users, section: 'Manajemen', roles: ['Admin'] },
   { id: 'staff', label: 'Tim & Shift', icon: Users, section: 'Manajemen', roles: ['Admin'] },
   { id: 'logs', label: 'Log Audit', icon: History, section: 'Sistem', roles: ['Admin'] },

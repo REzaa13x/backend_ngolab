@@ -6,6 +6,8 @@ import sharp from "sharp";
 import fs from "fs";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import { testDbConnection } from "./src/db/db.js";
+import digitalBoardRouter from "./src/routes/digitalBoard.js";
 
 async function startServer() {
   const app = express();
@@ -20,6 +22,15 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Static file serving untuk file upload Papan Digital
+  app.use("/uploads", express.static(path.join(process.cwd(), "public", "uploads")));
+
+  // ─── Papan Digital API Routes ───────────────────────────────────────────────
+  app.use("/api/digital-board", digitalBoardRouter);
+
+  // Test koneksi MySQL
+  await testDbConnection();
 
   // Socket.io Connection Logic
   io.on("connection", (socket) => {
@@ -121,6 +132,85 @@ async function startServer() {
       order_index: 1,
       created_at: new Date().toISOString()
     }
+  ];
+
+  // ─── Coin Promo System ──────────────────────────────────────────────────────
+  let coinPromos = [
+    {
+      id: "cp-1",
+      title: "Diskon 20% Semua Menu",
+      description: "Potongan 20% untuk semua menu makanan dan minuman. Berlaku 1x per transaksi.",
+      coin_cost: 500,
+      discount_type: "percentage" as const,
+      discount_value: 20,
+      min_order: 20000,
+      max_usage: 100,
+      used_count: 23,
+      valid_until: "2026-06-30T23:59:59.000Z",
+      is_active: true,
+      image_url: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=600&q=80",
+      category: "Makanan",
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5).toISOString()
+    },
+    {
+      id: "cp-2",
+      title: "Gratis Es Teh Manis",
+      description: "Tukarkan koin Anda untuk mendapatkan 1 Es Teh Manis gratis!",
+      coin_cost: 200,
+      discount_type: "fixed" as const,
+      discount_value: 5000,
+      min_order: 0,
+      max_usage: 50,
+      used_count: 31,
+      valid_until: "2026-07-15T23:59:59.000Z",
+      is_active: true,
+      image_url: "https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=600&q=80",
+      category: "Minuman",
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString()
+    },
+    {
+      id: "cp-3",
+      title: "Cashback Rp 10.000",
+      description: "Dapatkan cashback Rp 10.000 untuk pesanan minimum Rp 50.000.",
+      coin_cost: 1000,
+      discount_type: "fixed" as const,
+      discount_value: 10000,
+      min_order: 50000,
+      max_usage: 30,
+      used_count: 12,
+      valid_until: "2026-06-15T23:59:59.000Z",
+      is_active: true,
+      image_url: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=600&q=80",
+      category: "Semua",
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 1).toISOString()
+    },
+    {
+      id: "cp-4",
+      title: "Beli 1 Gratis 1 Snack",
+      description: "Promo spesial! Beli 1 snack gratis 1 snack pilihan.",
+      coin_cost: 750,
+      discount_type: "percentage" as const,
+      discount_value: 50,
+      min_order: 10000,
+      max_usage: 20,
+      used_count: 20,
+      valid_until: "2026-05-10T23:59:59.000Z",
+      is_active: false,
+      image_url: "https://images.unsplash.com/photo-1573080496219-bb080dd4f877?w=600&q=80",
+      category: "Snack",
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 15).toISOString()
+    },
+  ];
+
+  let coinTransactions: Array<{
+    id: string; user_id: string; user_name: string; type: 'earn' | 'redeem';
+    amount: number; description: string; promo_id?: string; created_at: string;
+  }> = [
+    { id: "ct-1", user_id: "1", user_name: "Ahmad Fauzi", type: "earn", amount: 2150, description: "Cashback 5% dari INV-001", created_at: new Date(Date.now() - 1000*60*60*2).toISOString() },
+    { id: "ct-2", user_id: "2", user_name: "Siti Aminah", type: "earn", amount: 1600, description: "Cashback 5% dari INV-002", created_at: new Date(Date.now() - 1000*60*60*4).toISOString() },
+    { id: "ct-3", user_id: "1", user_name: "Ahmad Fauzi", type: "redeem", amount: 500, description: "Tukar: Diskon 20% Semua Menu", promo_id: "cp-1", created_at: new Date(Date.now() - 1000*60*60*6).toISOString() },
+    { id: "ct-4", user_id: "3", user_name: "Budi Santoso", type: "earn", amount: 750, description: "Cashback 5% dari INV-003", created_at: new Date(Date.now() - 1000*60*60*8).toISOString() },
+    { id: "ct-5", user_id: "3", user_name: "Budi Santoso", type: "redeem", amount: 200, description: "Tukar: Gratis Es Teh Manis", promo_id: "cp-2", created_at: new Date(Date.now() - 1000*60*60*10).toISOString() },
   ];
 
   // Mock Sales Data for Chart
@@ -315,6 +405,101 @@ async function startServer() {
     const { id } = req.params;
     promotions = promotions.filter(p => p.id !== id);
     res.json({ message: "Dihapus" });
+  });
+
+  // ─── Coin Promo API Routes ──────────────────────────────────────────────────
+  app.get("/api/coin-promos", (req, res) => {
+    res.json(coinPromos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+  });
+
+  app.post("/api/coin-promos", (req, res) => {
+    const { title, description, coin_cost, discount_type, discount_value, min_order, max_usage, valid_until, image_url, category } = req.body;
+    if (!title || !coin_cost || !discount_value) {
+      return res.status(400).json({ message: "Judul, biaya koin, dan nilai diskon wajib diisi" });
+    }
+    const newPromo = {
+      id: `cp-${Date.now()}`,
+      title, description: description || "",
+      coin_cost: parseInt(coin_cost), discount_type: discount_type || "fixed",
+      discount_value: parseInt(discount_value), min_order: parseInt(min_order) || 0,
+      max_usage: parseInt(max_usage) || 100, used_count: 0,
+      valid_until: valid_until || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
+      is_active: true, image_url: image_url || "",
+      category: category || "Semua",
+      created_at: new Date().toISOString()
+    };
+    coinPromos.push(newPromo);
+    addAuditLog("Admin Bagus", "Buat Promo Koin", `${title} (${coin_cost} koin)`);
+    res.status(201).json(newPromo);
+  });
+
+  app.put("/api/coin-promos/:id", (req, res) => {
+    const { id } = req.params;
+    const idx = coinPromos.findIndex(p => p.id === id);
+    if (idx === -1) return res.status(404).json({ message: "Promo tidak ditemukan" });
+    coinPromos[idx] = { ...coinPromos[idx], ...req.body, id };
+    res.json(coinPromos[idx]);
+  });
+
+  app.delete("/api/coin-promos/:id", (req, res) => {
+    const { id } = req.params;
+    const promo = coinPromos.find(p => p.id === id);
+    coinPromos = coinPromos.filter(p => p.id !== id);
+    if (promo) addAuditLog("Admin Bagus", "Hapus Promo Koin", promo.title, "warning");
+    res.json({ message: "Promo dihapus" });
+  });
+
+  app.patch("/api/coin-promos/:id/toggle", (req, res) => {
+    const { id } = req.params;
+    const promo = coinPromos.find(p => p.id === id);
+    if (!promo) return res.status(404).json({ message: "Promo tidak ditemukan" });
+    promo.is_active = !promo.is_active;
+    res.json(promo);
+  });
+
+  app.post("/api/coin-promos/:id/redeem", (req, res) => {
+    const { id } = req.params;
+    const { user_id } = req.body;
+    const promo = coinPromos.find(p => p.id === id);
+    if (!promo) return res.status(404).json({ message: "Promo tidak ditemukan" });
+    if (!promo.is_active) return res.status(400).json({ message: "Promo tidak aktif" });
+    if (promo.used_count >= promo.max_usage) return res.status(400).json({ message: "Kuota promo habis" });
+    const user = users.find(u => u.id === user_id);
+    if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
+    if (user.coin_balance < promo.coin_cost) return res.status(400).json({ message: `Koin tidak cukup. Butuh ${promo.coin_cost}, saldo ${user.coin_balance}` });
+
+    user.coin_balance -= promo.coin_cost;
+    promo.used_count += 1;
+    const tx = {
+      id: `ct-${Date.now()}`, user_id, user_name: user.nama, type: "redeem" as const,
+      amount: promo.coin_cost, description: `Tukar: ${promo.title}`, promo_id: id,
+      created_at: new Date().toISOString()
+    };
+    coinTransactions.unshift(tx);
+    addAuditLog("Sistem", "Penukaran Promo Koin", `${user.nama} → ${promo.title} (${promo.coin_cost} koin)`);
+    io.emit("stats_updated");
+    res.json({ message: "Promo berhasil ditukar!", transaction: tx, new_balance: user.coin_balance });
+  });
+
+  app.get("/api/users/:id/recommendations", (req, res) => {
+    const { id } = req.params;
+    const user = users.find(u => u.id === id);
+    if (!user) return res.status(404).json({ message: "User tidak ditemukan" });
+    const now = new Date();
+    const activePromos = coinPromos.filter(p => p.is_active && p.used_count < p.max_usage && new Date(p.valid_until) > now);
+    const recommendations = activePromos.map(p => ({
+      ...p,
+      can_redeem: user.coin_balance >= p.coin_cost,
+      coins_needed: Math.max(0, p.coin_cost - user.coin_balance),
+      progress: Math.min(100, Math.round((user.coin_balance / p.coin_cost) * 100)),
+    })).sort((a, b) => (a.can_redeem === b.can_redeem ? a.coin_cost - b.coin_cost : a.can_redeem ? -1 : 1));
+    res.json({ user: { id: user.id, nama: user.nama, coin_balance: user.coin_balance }, recommendations });
+  });
+
+  app.get("/api/coin-transactions", (req, res) => {
+    const { user_id } = req.query;
+    if (user_id) return res.json(coinTransactions.filter(t => t.user_id === user_id));
+    res.json(coinTransactions);
   });
 
   app.get("/api/stats", (req, res) => {
