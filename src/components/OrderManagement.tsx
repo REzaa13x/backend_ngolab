@@ -43,6 +43,7 @@ interface Order {
   amount_paid?: number;
   external_id?: string;
   payment_proof?: string;
+  source: string;
   created_at: string;
   items: OrderItem[];
 }
@@ -55,24 +56,27 @@ export default function OrderManagement() {
   const [summary, setSummary] = useState<any>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [period, setPeriod] = useState<'all' | 'day' | 'week' | 'month' | 'year'>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [isCashModalOpen, setIsCashModalOpen] = useState(false);
   const [cashAmount, setCashAmount] = useState<string>('');
   const [cashOrder, setCashOrder] = useState<Order | null>(null);
-
-  // Manual Order States
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
-  const [manualCustomerName, setManualCustomerName] = useState('');
-  const [selectedItems, setSelectedItems] = useState<{ id: number, quantity: number }[]>([]);
-  const [menuItems, setMenuItems] = useState<any[]>([]);
-  const [searchMenu, setSearchMenu] = useState('');
-  const [manualSubmitting, setManualSubmitting] = useState(false);
 
   const fetchOrders = () => {
     setLoading(true);
     fetch('/api/orders')
       .then(res => res.json())
       .then(data => {
-        setOrders(data);
+        if (Array.isArray(data)) {
+          setOrders(data);
+        } else {
+          console.error("API did not return an array:", data);
+          setOrders([]);
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to fetch orders:", err);
+        setOrders([]);
         setLoading(false);
       });
   };
@@ -84,17 +88,9 @@ export default function OrderManagement() {
       .catch(err => console.error("Summary fetch failed:", err));
   };
 
-  const fetchMenu = () => {
-    fetch('/api/menu')
-      .then(res => res.json())
-      .then(data => setMenuItems(data))
-      .catch(err => console.error("Menu fetch failed:", err));
-  };
-
   useEffect(() => {
     fetchOrders();
     fetchSummary();
-    fetchMenu();
 
     // Listen for real-time updates
     socket.on("new_order", (newOrder: Order) => {
@@ -114,11 +110,16 @@ export default function OrderManagement() {
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
       const matchesSearch = 
-        order.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.id.toLowerCase().includes(searchTerm.toLowerCase());
+        (order.invoice_number || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (order.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(order.id || '').toLowerCase().includes(searchTerm.toLowerCase());
       
       if (!matchesSearch) return false;
+
+      const orderSource = order.source || 'ngolab';
+      if (orderSource !== 'ngolab' && orderSource !== 'smart_tag_qr') {
+        return false;
+      }
 
       if (period === 'all') return true;
 
@@ -145,7 +146,7 @@ export default function OrderManagement() {
 
       return true;
     });
-  }, [orders, searchTerm, period]);
+  }, [orders, searchTerm, period, sourceFilter]);
 
   const verifyPayment = async (id: string, paymentDetails?: { method: string, amount: number }) => {
     try {
@@ -205,67 +206,6 @@ export default function OrderManagement() {
       console.error("Delete failed:", err);
     }
   };
-
-  const submitManualOrder = async () => {
-    if (!manualCustomerName || selectedItems.length === 0) return;
-    setManualSubmitting(true);
-    try {
-      const res = await fetch('/api/orders/manual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customer_name: manualCustomerName,
-          items: selectedItems,
-          payment_status: 'belum_bayar' // Initially pending
-        })
-      });
-      if (res.ok) {
-        setIsManualModalOpen(false);
-        setManualCustomerName('');
-        setSelectedItems([]);
-        fetchOrders();
-        fetchSummary();
-      }
-    } catch (err) {
-      console.error("Manual order failed:", err);
-    } finally {
-      setManualSubmitting(false);
-    }
-  };
-
-  const addToManualOrder = (id: number) => {
-    setSelectedItems(prev => {
-      const existing = prev.find(i => i.id === id);
-      if (existing) {
-        return prev.map(i => i.id === id ? { ...i, quantity: i.quantity + 1 } : i);
-      }
-      return [...prev, { id, quantity: 1 }];
-    });
-  };
-
-  const removeFromManualOrder = (id: number) => {
-    setSelectedItems(prev => {
-      const existing = prev.find(i => i.id === id);
-      if (existing && existing.quantity > 1) {
-        return prev.map(i => i.id === id ? { ...i, quantity: i.quantity - 1 } : i);
-      }
-      return prev.filter(i => i.id !== id);
-    });
-  };
-
-  const manualOrderTotal = useMemo(() => {
-    return selectedItems.reduce((acc, curr) => {
-      const item = menuItems.find(m => m.id === curr.id);
-      return acc + (item ? item.price * curr.quantity : 0);
-    }, 0);
-  }, [selectedItems, menuItems]);
-
-  const filteredMenu = useMemo(() => {
-    return menuItems.filter(m => 
-      m.name.toLowerCase().includes(searchMenu.toLowerCase()) || 
-      m.category.toLowerCase().includes(searchMenu.toLowerCase())
-    );
-  }, [menuItems, searchMenu]);
 
   const updateStatus = async (id: string, status: string) => {
     try {
@@ -328,17 +268,10 @@ export default function OrderManagement() {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black tracking-tight text-slate-900">Verifikasi Transaksi</h2>
+          <h2 className="text-2xl font-black tracking-tight text-slate-900">Verifikasi Transaksi (Ngolab)</h2>
           <p className="text-sm text-slate-500 font-medium tracking-tight">Validasi pembayaran dan monitoring arus pesanan real-time.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setIsManualModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
-          >
-            <PhoneCall size={14} />
-            Pesanan Manual
-          </button>
           <button 
             onClick={exportToPDF}
             disabled={isExporting || filteredOrders.length === 0}
@@ -375,33 +308,29 @@ export default function OrderManagement() {
               className="w-full bg-white border border-slate-100 rounded-2xl pl-12 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
             />
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-             <div className="flex items-center gap-1 bg-white border border-slate-100 rounded-2xl p-1 shadow-sm">
-                {[
-                  { id: 'all', label: 'Semua' },
-                  { id: 'day', label: 'Hari Ini' },
-                  { id: 'week', label: 'Minggu' },
-                  { id: 'month', label: 'Bulan' },
-                  { id: 'year', label: 'Tahun' }
-                ].map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setPeriod(p.id as any)}
-                    className={cn(
-                      "px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all",
-                      period === p.id 
-                        ? "bg-slate-900 text-white shadow-md shadow-slate-200" 
-                        : "text-slate-400 hover:text-slate-600"
-                    )}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-             </div>
-             <button className="px-5 py-3 bg-white border border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors shadow-sm flex items-center gap-2 shrink-0">
-                <Filter size={16} /> Filter
-             </button>
-          </div>
+           <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+              <div className="flex items-center gap-1 bg-white border border-slate-100 rounded-2xl p-1 shadow-sm">
+                 {[
+                   { id: 'all', label: 'Semua Waktu' },
+                   { id: 'day', label: 'Hari Ini' },
+                   { id: 'week', label: 'Minggu Ini' },
+                   { id: 'month', label: 'Bulan Ini' }
+                 ].map(p => (
+                   <button
+                     key={p.id}
+                     onClick={() => setPeriod(p.id as any)}
+                     className={cn(
+                       "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                       period === p.id 
+                         ? "bg-slate-900 text-white shadow-md" 
+                         : "text-slate-500 hover:bg-slate-50"
+                     )}
+                   >
+                     {p.label}
+                   </button>
+                 ))}
+              </div>
+           </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -412,7 +341,7 @@ export default function OrderManagement() {
                 <th className="px-6 py-5">Info Bayar</th>
                 <th className="px-6 py-5 text-right">Total</th>
                 <th className="px-6 py-5 text-center">Status</th>
-                <th className="px-6 py-5">Validasi</th>
+                <th className="px-6 py-5 text-center">Validasi</th>
                 <th className="px-6 py-5 text-right">Aksi</th>
               </tr>
             </thead>
@@ -439,12 +368,20 @@ export default function OrderManagement() {
                   <td className="px-6 py-5">
                     <div className="flex flex-col">
                       <span className="text-sm font-black text-slate-900 leading-none">{order.invoice_number}</span>
-                      <div className="flex items-center gap-1.5 mt-1.5">
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                         <span className="text-[9px] text-indigo-600 font-black uppercase tracking-widest leading-none">
                           {order.customer_name}
                         </span>
                         <span className="text-[9px] bg-slate-100 text-slate-400 px-1 py-0.5 rounded leading-none">
-                          ID:{order.user_id}
+                          ID:{order.user_id || 'Tamu'}
+                        </span>
+                        <span className={cn(
+                          "text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-widest leading-none",
+                          ((order.source || 'ngolab') === 'ngolab' || order.source === 'smart_tag_qr') ? "bg-orange-50 text-orange-600" :
+                          (order.source || 'ngolab') === 'coworking' ? "bg-blue-50 text-blue-600" :
+                          "bg-purple-50 text-purple-600"
+                        )}>
+                          {order.source === 'smart_tag_qr' ? 'ngolab' : (order.source || 'ngolab').replace(/_/g, ' ')}
                         </span>
                       </div>
                     </div>
@@ -463,60 +400,66 @@ export default function OrderManagement() {
                     </div>
                   </td>
                   <td className="px-6 py-5 text-right">
-                    <span className="text-sm font-black text-slate-900">Rp {order.total_price.toLocaleString()}</span>
+                    <span className="text-sm font-black text-slate-900">Rp {(order.total_price || 0).toLocaleString()}</span>
                   </td>
-                  <td className="px-6 py-5">
-                    <div className="flex justify-center">
-                      <span className={cn(
-                        "px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5",
-                        order.payment_status === 'lunas' 
-                          ? "bg-emerald-50 text-emerald-600 border border-emerald-100" 
-                          : order.payment_status === 'pending_verifikasi'
-                            ? "bg-amber-50 text-amber-600 border border-amber-100"
-                            : "bg-rose-50 text-rose-600 border border-rose-100"
-                      )}>
-                        {order.payment_status.replace('_', ' ')}
-                      </span>
-                    </div>
+                  {/* KOLOM STATUS (Read Only) */}
+                  <td className="px-6 py-5 text-center">
+                    <span className={cn(
+                      "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest inline-flex items-center gap-1.5",
+                      order.payment_status === 'lunas' 
+                        ? "bg-emerald-50 text-emerald-600 border border-emerald-200" 
+                        : "bg-rose-50 text-rose-600 border border-rose-200"
+                    )}>
+                      {order.payment_status === 'lunas' ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+                      {order.payment_status === 'lunas' ? 'Lunas' : 'Belum Bayar'}
+                    </span>
                   </td>
+
+                  {/* KOLOM VALIDASI */}
                   <td className="px-6 py-5">
-                    <div className="flex flex-col gap-1.5">
-                      {order.payment_proof ? (
-                        <button 
-                          onClick={() => setSelectedOrder(order)}
-                          className="w-full text-center py-1.5 bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm"
+                    {order.payment_status !== 'lunas' ? (
+                      <div className="flex items-center gap-1.5 justify-center">
+                        <button
+                          onClick={() => verifyPayment(order.id, { method: 'QRIS', amount: order.total_price })}
+                          className="px-2.5 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all shadow-sm"
                         >
-                          Cek Bukti
+                          QRIS
                         </button>
-                      ) : (order.payment_status === 'pending_verifikasi' || order.payment_status === 'belum_bayar') ? (
-                        <div className="flex flex-col gap-1">
-                          <button 
-                            onClick={() => handleCashPayment(order)}
-                            className="w-full text-center py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-sm"
-                          >
-                            Bayar Tunai
-                          </button>
-                          {order.payment_status === 'pending_verifikasi' && (
-                            <button 
-                              onClick={() => verifyPayment(order.id, { method: 'QRIS', amount: order.total_price })}
-                              className="w-full text-center py-1.2 bg-indigo-50 text-indigo-600 rounded-lg text-[9px] font-bold uppercase tracking-tighter hover:bg-indigo-100 transition-all border border-indigo-100"
-                            >
-                              Verifikasi QRIS
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest text-center italic">Menunggu...</span>
-                      )}
-                    </div>
+                        <button
+                          onClick={() => handleCashPayment(order)}
+                          className="px-2.5 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all shadow-sm"
+                        >
+                          Tunai
+                        </button>
+                        <button
+                          onClick={() => rejectOrder(order.id)}
+                          className="px-2.5 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all shadow-sm"
+                        >
+                          Tolak
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 justify-center">
+                        <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest italic bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                          Sudah Diverifikasi
+                        </span>
+                      </div>
+                    )}
                   </td>
+                  
                   <td className="px-6 py-5 text-right">
                     <div className="flex items-center justify-end gap-2">
                        <button 
-                        onClick={() => deleteOrder(order.id)}
-                        className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                         onClick={() => setSelectedOrder(order)}
+                         className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all flex items-center gap-1"
                        >
-                         <Trash2 size={16} />
+                         Lihat Struk
+                       </button>
+                       <button 
+                        onClick={() => deleteOrder(order.id)}
+                        className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                       >
+                         <Trash2 size={14} />
                        </button>
                     </div>
                   </td>
@@ -526,158 +469,6 @@ export default function OrderManagement() {
           </table>
         </div>
       </div>
-
-      <AnimatePresence>
-        {isManualModalOpen && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-            <motion.div 
-              initial={{ opacity: 0, y: 30, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 30, scale: 0.95 }}
-              className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden"
-            >
-              {/* Modal Header */}
-              <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/30">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-100">
-                    <PhoneCall size={24} />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-black text-slate-900">Buat Pesanan Manual</h3>
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Input pesanan via Telepon atau Walk-in</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setIsManualModalOpen(false)}
-                  className="p-3 bg-white text-slate-300 hover:text-slate-600 rounded-2xl transition-all border border-slate-100 shadow-sm"
-                >
-                  <XCircle size={24} />
-                </button>
-              </div>
-
-              <div className="flex-1 flex overflow-hidden">
-                {/* Left Side: Product Selector */}
-                <div className="flex-[3] p-8 overflow-y-auto bg-white space-y-6">
-                   <div className="relative">
-                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                      <input 
-                        type="text" 
-                        placeholder="Cari Menu atau Kategori..."
-                        value={searchMenu}
-                        onChange={(e) => setSearchMenu(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-                      />
-                   </div>
-
-                   <div className="grid grid-cols-2 gap-4">
-                      {filteredMenu.map((item) => (
-                        <div 
-                          key={item.id}
-                          className="group bg-white border border-slate-100 p-4 rounded-3xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-50/50 transition-all cursor-pointer relative"
-                          onClick={() => addToManualOrder(item.id)}
-                        >
-                           <div className="flex gap-4">
-                              <img src={item.image} className="w-16 h-16 rounded-2xl object-cover shadow-sm border border-slate-50" referrerPolicy="no-referrer" />
-                              <div className="flex-1">
-                                 <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-1 block">{item.category}</span>
-                                 <h4 className="text-xs font-black text-slate-900 line-clamp-2 leading-tight">{item.name}</h4>
-                                 <p className="text-sm font-black text-slate-900 mt-1">Rp {item.price.toLocaleString()}</p>
-                              </div>
-                           </div>
-                           <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <div className="p-1.5 bg-indigo-600 text-white rounded-xl shadow-lg">
-                                 <Plus size={14} />
-                              </div>
-                           </div>
-                        </div>
-                      ))}
-                   </div>
-                </div>
-
-                {/* Right Side: Cart Summary */}
-                <div className="flex-[2] bg-slate-50 p-8 flex flex-col border-l border-slate-100">
-                   <div className="mb-6">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block">Identitas Pelanggan</label>
-                      <div className="relative">
-                         <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                         <input 
-                           type="text" 
-                           placeholder="Nama Pelanggan / No. Telp"
-                           value={manualCustomerName}
-                           onChange={(e) => setManualCustomerName(e.target.value)}
-                           className="w-full bg-white border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-xs font-black text-slate-900 focus:outline-none focus:border-indigo-600 transition-all"
-                         />
-                      </div>
-                   </div>
-
-                   <div className="flex-1 overflow-y-auto space-y-4 mb-6">
-                      <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                         <span className="text-[10px] font-black text-slate-400 uppercase">Keranjang Pesanan</span>
-                         <span className="text-[10px] font-black text-slate-400">{selectedItems.length} Item</span>
-                      </div>
-
-                      {selectedItems.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-12 text-center opacity-40">
-                           <ShoppingBag size={48} className="text-slate-300 mb-4" />
-                           <p className="text-[10px] font-black uppercase tracking-widest">Pilih menu di sisi kiri</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                           {selectedItems.map((cartItem) => {
-                             const menu = menuItems.find(m => m.id === cartItem.id);
-                             if (!menu) return null;
-                             return (
-                               <div key={cartItem.id} className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
-                                  <div className="flex-1">
-                                     <h5 className="text-[11px] font-black text-slate-900 leading-tight">{menu.name}</h5>
-                                     <span className="text-[10px] font-bold text-indigo-600">Rp {(menu.price * cartItem.quantity).toLocaleString()}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-100">
-                                     <button 
-                                      onClick={(e) => { e.stopPropagation(); removeFromManualOrder(menu.id); }}
-                                      className="p-1 text-slate-400 hover:text-rose-500 hover:bg-white rounded-lg transition-all"
-                                     >
-                                        <Minus size={12} />
-                                     </button>
-                                     <span className="text-[11px] font-black text-slate-900 min-w-[20px] text-center">{cartItem.quantity}</span>
-                                     <button 
-                                      onClick={(e) => { e.stopPropagation(); addToManualOrder(menu.id); }}
-                                      className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-all"
-                                     >
-                                        <Plus size={12} />
-                                     </button>
-                                  </div>
-                               </div>
-                             );
-                           })}
-                        </div>
-                      )}
-                   </div>
-
-                   <div className="space-y-4 pt-6 border-t-2 border-dashed border-slate-200">
-                      <div className="flex justify-between items-center">
-                         <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Total Bayar:</span>
-                         <span className="text-2xl font-black text-slate-900">Rp {manualOrderTotal.toLocaleString()}</span>
-                      </div>
-
-                      <button 
-                        disabled={!manualCustomerName || selectedItems.length === 0 || manualSubmitting}
-                        onClick={submitManualOrder}
-                        className="w-full py-5 bg-slate-900 text-white rounded-[1.5rem] text-sm font-black uppercase tracking-[0.2em] hover:bg-black transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-3 disabled:opacity-50"
-                      >
-                         {manualSubmitting ? (
-                           <RefreshCw size={20} className="animate-spin" />
-                         ) : (
-                           <>Simpan & Lanjutkan <Check size={20}/></>
-                         )}
-                      </button>
-                   </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {isCashModalOpen && cashOrder && (
@@ -777,7 +568,7 @@ export default function OrderManagement() {
                   <CheckCircle2 size={32} />
                 </div>
                 <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Kwitansi Digital</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Status: {selectedOrder.payment_status.replace('_', ' ')}</p>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Status: {(selectedOrder.payment_status || 'belum_bayar').replace('_', ' ')}</p>
               </div>
 
               <div className="px-8 space-y-4">
@@ -812,7 +603,7 @@ export default function OrderManagement() {
 
                  <div className="border-t-2 border-slate-900 pt-4 flex justify-between items-center">
                     <span className="text-[13px] font-black text-slate-900 uppercase">Total Bayar</span>
-                    <span className="text-lg font-black text-slate-900">Rp {selectedOrder.total_price.toLocaleString()}</span>
+                    <span className="text-lg font-black text-slate-900">Rp {(selectedOrder.total_price || 0).toLocaleString()}</span>
                  </div>
 
                  {/* Bukti Bayar Image Preview */}

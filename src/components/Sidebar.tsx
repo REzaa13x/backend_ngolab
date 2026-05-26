@@ -13,35 +13,47 @@ import {
   ChefHat,
   Monitor,
   Package,
-  Coins
+  Coins,
+  PhoneCall,
+  Coffee,
+  UtensilsCrossed,
+  TrendingUp
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
+
+import { useAuth } from '../contexts/AuthContext';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
 }
 
-export type UserRole = 'Admin' | 'Kasir' | 'Koki';
+export type UserRole = 'Admin' | 'Kasir' | 'Koki' | 'Support';
 
 const navItems = [
   { id: 'dashboard', label: 'Ringkasan', icon: LayoutDashboard, section: 'Utama', roles: ['Admin'] },
   { id: 'orders', label: 'Verifikasi & Transaksi', icon: ShoppingBag, section: 'Utama', roles: ['Admin', 'Kasir'] },
+  { id: 'manual-order', label: 'Pesanan Manual', icon: PhoneCall, section: 'Utama', roles: ['Admin', 'Kasir'] },
   { id: 'reports', label: 'Laporan Penjualan', icon: History, section: 'Utama', roles: ['Admin'] },
-  { id: 'stock', label: 'Stok & Gesture', icon: Package, section: 'Utama', roles: ['Admin', 'Koki'] },
+  { id: 'sales-history', label: 'History Penjualan', icon: TrendingUp, section: 'Utama', roles: ['Admin'] },
+  { id: 'stock', label: 'Katalog Ngolab', icon: Package, section: 'Utama', roles: ['Admin', 'Koki'] },
+  { id: 'coworking-menu', label: 'Katalog Coworking', icon: Coffee, section: 'Utama', roles: ['Admin'] },
   { id: 'kds', label: 'Tampilan Dapur', icon: ChefHat, section: 'Utama', roles: ['Admin', 'Koki', 'Kasir'] },
   { id: 'promotions', label: 'Papan Digital', icon: Monitor, section: 'Pemasaran', roles: ['Admin'] },
   { id: 'coin-promos', label: 'Promo Koin', icon: Coins, section: 'Pemasaran', roles: ['Admin'] },
   { id: 'users', label: 'Database Pengguna', icon: Users, section: 'Manajemen', roles: ['Admin'] },
   { id: 'staff', label: 'Tim & Shift', icon: Users, section: 'Manajemen', roles: ['Admin'] },
+  { id: 'menu-management', label: 'Manajemen Menu', icon: UtensilsCrossed, section: 'Manajemen', roles: ['Admin'] },
   { id: 'logs', label: 'Log Audit', icon: History, section: 'Sistem', roles: ['Admin'] },
   { id: 'settings', label: 'Pengaturan Admin', icon: Settings, section: 'Sistem', roles: ['Admin'] },
 ];
 
 export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [currentRole, setCurrentRole] = useState<UserRole>('Admin');
+  const { user, logout } = useAuth();
+  
+  const currentRole = user?.role || 'Kasir';
 
   const filteredNavItems = navItems.filter(item => item.roles.includes(currentRole));
   const sections = Array.from(new Set(filteredNavItems.map(item => item.section)));
@@ -75,32 +87,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         )}
       </div>
 
-      {/* Role Switcher (Simulator) */}
-      {!isCollapsed && (
-        <div className="px-6 py-4 border-b border-slate-50">
-          <label className="text-[9px] font-black uppercase text-slate-400 tracking-widest block mb-2">Simulasi Peran</label>
-          <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100">
-            {(['Admin', 'Kasir', 'Koki'] as UserRole[]).map(r => (
-              <button
-                key={r}
-                onClick={() => {
-                  setCurrentRole(r);
-                  const available = navItems.filter(n => n.roles.includes(r));
-                  if (!available.find(a => a.id === activeTab)) {
-                    setActiveTab(available[0].id);
-                  }
-                }}
-                className={cn(
-                  "flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-tight transition-all",
-                  currentRole === r ? "bg-white text-indigo-600 shadow-sm border border-slate-100" : "text-slate-400 hover:text-slate-600"
-                )}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Role Switcher Removed - Using Real Auth */}
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto py-6 space-y-8 custom-scrollbar">
@@ -144,20 +131,32 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
 
       {/* Footer / Profile */}
       <div className="p-4 border-t border-slate-100">
-        <div className={cn("flex items-center gap-3 p-2 rounded-xl bg-slate-50/50", isCollapsed ? "justify-center" : "")}>
+        <div className={cn("flex items-center gap-3 p-2 rounded-xl bg-slate-50/50 mb-2", isCollapsed ? "justify-center" : "")}>
           <div className="relative shrink-0">
             <div className="w-9 h-9 rounded-full bg-white border border-slate-200 overflow-hidden flex items-center justify-center font-bold text-xs text-indigo-600 uppercase">
-              {currentRole.substring(0, 2)}
+              {(user?.name || 'User').substring(0, 2)}
             </div>
             <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white" />
           </div>
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-slate-900 truncate">Petugas {currentRole}</p>
-              <p className="text-[10px] text-slate-500 font-medium">{currentRole === 'Admin' ? 'Superuser' : 'User Akses Terbatas'}</p>
+              <p className="text-xs font-bold text-slate-900 truncate">{user?.name}</p>
+              <p className="text-[10px] text-slate-500 font-medium">{currentRole}</p>
             </div>
           )}
         </div>
+        
+        <button 
+          onClick={logout}
+          className={cn(
+            "w-full flex items-center justify-center gap-2 p-2 rounded-lg text-red-600 hover:bg-red-50 transition-colors",
+            isCollapsed ? "px-0" : ""
+          )}
+          title="Keluar"
+        >
+          <LogOut size={16} />
+          {!isCollapsed && <span className="text-xs font-bold">Keluar</span>}
+        </button>
       </div>
 
       {/* Collapse Toggle */}

@@ -10,19 +10,22 @@ import {
   Volume2,
   Zap,
   Upload,
-  Image as ImageIcon
+  Image as ImageIcon,
+  RefreshCcw,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 
 interface MenuItem {
-  id: number;
+  id: string | number;
   name: string;
   category: string;
   price: number;
   inStock: boolean;
   stock: number;
   image: string;
+  description?: string;
 }
 
 interface Point {
@@ -56,6 +59,8 @@ export default function StockManagement() {
   const [selectedIngredient, setSelectedIngredient] = useState<Ingredient | null>(null);
   const [restockAmount, setRestockAmount] = useState('');
   const [editingProduct, setEditingProduct] = useState<MenuItem | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<MenuItem | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const fetchIngredients = async () => {
     try {
@@ -93,7 +98,8 @@ export default function StockManagement() {
     category: 'Main Course',
     price: '',
     stock: '',
-    image: ''
+    image: '',
+    description: ''
   });
   
   const [dragActive, setDragActive] = useState(false);
@@ -136,23 +142,15 @@ export default function StockManagement() {
       reader.readAsDataURL(file);
     }
   };
-  
-  // Hand tracking / Hover simulation state
-  const [cursorPos, setCursorPos] = useState<Point>({ x: 0, y: 0 });
-  const [hoveredId, setHoveredId] = useState<number | null>(null);
-  const [dwellProgress, setDwellProgress] = useState(0);
-  const DWELL_TIME_MS = 2000;
-  
-  const dwellTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const startTimeRef = useRef<number | null>(null);
+
   const audioContextRef = useRef<AudioContext | null>(null);
 
   // Fetch menu on mount
   const fetchMenu = useCallback(async () => {
     try {
       const url = selectedCategory === 'Semua' 
-        ? '/api/menu' 
-        : `/api/menu?category=${encodeURIComponent(selectedCategory)}`;
+        ? '/api/menu?outlet=ngolab' 
+        : `/api/menu?outlet=ngolab&category=${encodeURIComponent(selectedCategory)}`;
       const res = await fetch(url);
       const data = await res.json();
       setMenuItems(data);
@@ -177,7 +175,7 @@ export default function StockManagement() {
       });
       if (res.ok) {
         setIsAddModalOpen(false);
-        setNewProduct({ name: '', category: 'Main Course', price: '', stock: '', image: '' });
+        setNewProduct({ name: '', category: 'Main Course', price: '', stock: '', image: '', description: '' });
         fetchMenu();
         playBeep(1000, 0.2);
       }
@@ -205,6 +203,41 @@ export default function StockManagement() {
     }
   };
 
+  const handleSyncSmartTag = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/menu/sync-smart-tag', { method: 'POST' });
+      if (res.ok) {
+        const result = await res.json();
+        alert(result.message);
+        fetchMenu();
+        playBeep(1500, 0.3);
+      } else {
+        alert("Gagal sinkronisasi data.");
+      }
+    } catch (err) {
+      console.error("Failed to sync:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDeleteProduct = async (item: MenuItem) => {
+    try {
+      const res = await fetch(`/api/menu/${item.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setDeleteConfirm(null);
+        fetchMenu();
+        playBeep(600, 0.15);
+      } else {
+        alert("Gagal menghapus menu.");
+      }
+    } catch (err) {
+      console.error("Failed to delete:", err);
+      alert("Terjadi kesalahan saat menghapus menu.");
+    }
+  };
+
   // Audio Feedback Implementation
   const playBeep = (freq: number = 880, duration: number = 0.1) => {
     if (!audioContextRef.current) {
@@ -227,7 +260,7 @@ export default function StockManagement() {
     osc.stop(ctx.currentTime + duration);
   };
 
-  const toggleStock = async (id: number) => {
+  const toggleStock = async (id: string | number) => {
     try {
       const res = await fetch(`/api/menu/${id}/toggle-stock`, { method: 'PATCH' });
       if (res.ok) {
@@ -236,61 +269,17 @@ export default function StockManagement() {
         
         // Success Feedback
         playBeep(result.item.inStock ? 1200 : 600, 0.15);
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        alert(errorData.message || "Gagal mengubah status menu.");
       }
     } catch (err) {
       console.error("Failed to toggle stock:", err);
+      alert("Terjadi kesalahan koneksi saat merubah status menu.");
     }
   };
 
-  // Dwell Logic Implementation
-  const handleHoverStart = (id: number) => {
-    if (hoveredId === id) return;
-    
-    // Clear previous timer
-    if (dwellTimerRef.current) clearInterval(dwellTimerRef.current);
-    
-    setHoveredId(id);
-    setDwellProgress(0);
-    startTimeRef.current = Date.now();
-    
-    dwellTimerRef.current = setInterval(() => {
-      const elapsed = Date.now() - (startTimeRef.current || 0);
-      const progress = Math.min((elapsed / DWELL_TIME_MS) * 100, 100);
-      
-      setDwellProgress(progress);
-      
-      if (progress >= 100) {
-        if (dwellTimerRef.current) clearInterval(dwellTimerRef.current);
-        toggleStock(id);
-        setHoveredId(null);
-        setDwellProgress(0);
-      }
-    }, 50);
-  };
 
-  const handleHoverEnd = () => {
-    setHoveredId(null);
-    setDwellProgress(0);
-    if (dwellTimerRef.current) clearInterval(dwellTimerRef.current);
-    startTimeRef.current = null;
-  };
-
-  // Cursor Simulation (Mouse -> Virtual Hand)
-  // INTEGRASI HAND TRACKING:
-  // Dalam implementasi nyata dengan MediaPipe/TensorFlow.js:
-  // 1. Module tracking akan berjalan (biasanya dalam Web Worker atau requestAnimationFrame).
-  // 2. Output koordinat (x, y) dari landmark tangan (misal: INDEX_FINGER_TIP) akan dipetakan
-  //    ke ukuran layar (viewport).
-  // 3. State 'cursorPos' akan diupdate secara kontinu oleh listener dari module tracking tersebut.
-  // 4. Logika 'hoveredId' dan 'dwellProgress' di bawah ini akan tetap sama, 
-  //    karena mereka hanya bergantung pada posisi koordinat kursor.
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      setCursorPos({ x: e.clientX, y: e.clientY });
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
 
   const filteredMenu = menuItems.filter(item => 
     item.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -301,10 +290,9 @@ export default function StockManagement() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 leading-tight">Manajemen Menu & Inventaris Bahan</h2>
-          <p className="text-sm text-slate-500 font-medium tracking-tight flex items-center gap-2 mt-1">
-            <Zap size={14} className="text-amber-500" />
-            Mode Gesture Aktif: Arahkan kursor & tahan 2 detik untuk ubah status.
+          <h2 className="text-2xl font-bold text-slate-900 leading-tight">Katalog Menu Ngolab</h2>
+          <p className="text-sm text-slate-500 font-medium tracking-tight mt-1">
+            Tampilan katalog produk Ngolab. Untuk menambah, mengubah, atau menghapus menu — gunakan halaman <span className="font-bold text-indigo-600">Manajemen Menu</span>.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -364,11 +352,12 @@ export default function StockManagement() {
             </div>
 
             <button 
-              onClick={() => setIsAddModalOpen(true)}
-              className="bg-indigo-600 text-white px-5 py-3.5 rounded-2xl hover:bg-indigo-700 transition-all font-bold text-xs shadow-lg shadow-indigo-200 flex items-center gap-2 whitespace-nowrap"
+              onClick={handleSyncSmartTag}
+              disabled={isSyncing}
+              className="bg-emerald-600 text-white px-5 py-3.5 rounded-2xl hover:bg-emerald-700 transition-all font-bold text-xs shadow-lg shadow-emerald-200 flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
             >
-              <Package size={18} />
-              Tambah Produk
+              <RefreshCcw size={18} className={cn(isSyncing && "animate-spin")} />
+              {isSyncing ? "Menyelaraskan..." : "Sync Smart Tag"}
             </button>
           </div>
 
@@ -377,13 +366,9 @@ export default function StockManagement() {
               <motion.div
                 key={item.id}
                 layout
-                onMouseEnter={() => handleHoverStart(item.id)}
-                onMouseLeave={handleHoverEnd}
                 className={cn(
                   "relative bg-white rounded-[2rem] border-2 transition-all duration-300 overflow-hidden group p-2",
-                  hoveredId === item.id ? "border-indigo-500/50 shadow-2xl scale-[1.02]" : "border-slate-100 shadow-premium",
-                  !item.inStock && "hover:border-emerald-500/50",
-                  item.inStock && hoveredId === item.id && "hover:border-rose-500/50"
+                  "border-slate-100 shadow-premium hover:border-indigo-500/50"
                 )}
               >
                 {/* Stock Toggle Visual Helper */}
@@ -413,48 +398,7 @@ export default function StockManagement() {
                     )}
                   </div>
 
-                  {/* Dwell Progress Circle Overlay */}
-                  <AnimatePresence>
-                    {hoveredId === item.id && (
-                      <motion.div 
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="absolute inset-0 flex items-center justify-center bg-indigo-900/30 backdrop-blur-[2px] pointer-events-none"
-                      >
-                        <div className="relative w-20 h-20">
-                          <svg className="w-full h-full transform -rotate-90">
-                            <circle
-                              cx="40"
-                              cy="40"
-                              r="35"
-                              stroke="currentColor"
-                              strokeWidth="6"
-                              fill="transparent"
-                              className="text-white/20"
-                            />
-                            <motion.circle
-                              cx="40"
-                              cy="40"
-                              r="35"
-                              stroke="currentColor"
-                              strokeWidth="6"
-                              fill="transparent"
-                              strokeDasharray={220}
-                              strokeDashoffset={220 - (220 * dwellProgress) / 100}
-                              className={cn(
-                                "transition-all duration-75",
-                                item.inStock ? "text-rose-500" : "text-emerald-500"
-                              )}
-                            />
-                          </svg>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <Hand size={24} className="text-white animate-pulse" />
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+
                 </div>
 
                 <div className="p-5 flex-1 flex flex-col justify-between">
@@ -467,6 +411,11 @@ export default function StockManagement() {
                         <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-tight">
                           {item.name}
                         </h3>
+                        {item.description && (
+                          <p className="text-[11px] text-slate-400 font-medium mt-1 line-clamp-2 leading-snug">
+                            {item.description}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -496,15 +445,9 @@ export default function StockManagement() {
 
                   <div className="flex gap-2 mt-5">
                     <button 
-                      onClick={() => setEditingProduct(item)}
-                      className="flex-1 py-2.5 bg-white text-slate-600 rounded-xl text-[10px] font-bold uppercase transition-all hover:bg-slate-50 hover:text-indigo-600 border border-slate-200 active:scale-95 shadow-sm"
-                    >
-                      Edit
-                    </button>
-                    <button 
                       onClick={() => toggleStock(item.id)}
                       className={cn(
-                        "flex-[2] py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-md",
+                        "w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-md",
                         item.inStock 
                           ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 shadow-rose-100/50" 
                           : "bg-indigo-600 text-white shadow-indigo-100/50 hover:bg-indigo-700"
@@ -655,50 +598,7 @@ export default function StockManagement() {
         )}
       </AnimatePresence>
 
-      {/* Floating Gesture Simulator Tutorial */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white rounded-3xl px-8 py-4 shadow-2xl flex items-center gap-6 z-50 border border-white/10 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-500 rounded-xl">
-            <Hand size={20} />
-          </div>
-          <div className="pr-6 border-r border-white/10">
-            <p className="text-xs font-bold">Simulator Gesture</p>
-            <p className="text-[10px] text-slate-400 font-medium">Arahkan kursor mouse (simulasi tangan) ke kartu menu</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full" />
-            Tahan 2s → Tersedia
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-rose-500 rounded-full" />
-            Tahan 2s → Habis
-          </div>
-        </div>
-      </div>
 
-      {/* Virtual Hand Cursor (Follows Mouse) */}
-      <motion.div
-        className="fixed pointer-events-none z-[100] transition-colors duration-300"
-        animate={{ 
-          x: cursorPos.x - 24, 
-          y: cursorPos.y - 24,
-          scale: hoveredId ? 1.4 : 1,
-          color: hoveredId ? (dwellProgress > 50 ? '#ef4444' : '#4f46e5') : '#475569'
-        }}
-      >
-        <div className="relative">
-          <Hand size={48} className={cn(hoveredId && "drop-shadow-lg")} />
-          {hoveredId && (
-            <motion.div 
-              className="absolute -top-1 -right-1 w-3 h-3 bg-indigo-500 rounded-full"
-              animate={{ scale: [1, 1.5, 1] }}
-              transition={{ repeat: Infinity, duration: 1 }}
-            />
-          )}
-        </div>
-      </motion.div>
 
       {/* MODAL TAMBAH PRODUK */}
       <AnimatePresence>
@@ -740,7 +640,18 @@ export default function StockManagement() {
                       value={newProduct.name}
                       onChange={e => setNewProduct({...newProduct, name: e.target.value})}
                       placeholder="Contoh: Nasi Goreng Gila"
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
+                    />
+                  </div>
+                  
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Deskripsi Produk</label>
+                    <textarea 
+                      value={newProduct.description}
+                      onChange={e => setNewProduct({...newProduct, description: e.target.value})}
+                      placeholder="Masukkan deskripsi singkat..."
+                      rows={2}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none"
                     />
                   </div>
                   
@@ -892,6 +803,17 @@ export default function StockManagement() {
                     />
                   </div>
                   
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Deskripsi</label>
+                    <textarea 
+                      value={editingProduct.description || ''}
+                      onChange={e => setEditingProduct({...editingProduct, description: e.target.value})}
+                      placeholder="Masukkan deskripsi singkat..."
+                      rows={2}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none"
+                    />
+                  </div>
+                  
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Kategori</label>
                     <select 
@@ -988,6 +910,45 @@ export default function StockManagement() {
         <Volume2 size={16} className="text-slate-400" />
         <span className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Audio Aktif</span>
       </div>
+
+      {/* DELETE CONFIRM MODAL */}
+      <AnimatePresence>
+        {deleteConfirm && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDeleteConfirm(null)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="relative bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={28} className="text-rose-500" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 mb-2">Hapus Menu?</h3>
+              <p className="text-sm text-slate-500 mb-6">
+                <span className="font-bold text-slate-900">"{deleteConfirm.name}"</span> akan dihapus secara permanen dari Katalog Ngolab.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => handleDeleteProduct(deleteConfirm)}
+                  className="flex-[2] py-3.5 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-rose-700 transition-all"
+                >
+                  Ya, Hapus
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

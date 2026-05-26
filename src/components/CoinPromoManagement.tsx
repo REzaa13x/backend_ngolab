@@ -5,7 +5,8 @@ import { cn } from '@/src/lib/utils';
 
 interface CoinPromo {
   id: string; title: string; description: string; coin_cost: number;
-  discount_type: 'percentage' | 'fixed'; discount_value: number;
+  discount_type: 'percentage' | 'fixed' | 'free_item'; discount_value: number;
+  free_item_name: string | null; required_item_name: string | null;
   min_order: number; max_usage: number; used_count: number;
   valid_until: string; is_active: boolean; image_url: string;
   category: string; created_at: string;
@@ -30,7 +31,10 @@ export default function CoinPromoManagement() {
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState<'all'|'active'|'inactive'>('all');
   const [toast, setToast] = useState('');
-  const [form, setForm] = useState({ title:'', description:'', coin_cost:'', discount_type:'percentage', discount_value:'', min_order:'0', max_usage:'100', valid_until:'', image_url:'', category:'Semua' });
+  const [form, setForm] = useState({ title:'', description:'', coin_cost:'', discount_type:'percentage', discount_value:'', free_item_name:'', required_item_name:'', min_order:'0', max_usage:'100', valid_until:'', image_url:'', category:'Semua' });
+  const [selectedFile, setSelectedFile] = useState<File|null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const fetchAll = async () => {
     const [p, u, t] = await Promise.all([
@@ -51,8 +55,28 @@ export default function CoinPromoManagement() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('/api/coin-promos', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form) });
-    if (res.ok) { showToast('Promo berhasil dibuat!'); setShowForm(false); setForm({ title:'', description:'', coin_cost:'', discount_type:'percentage', discount_value:'', min_order:'0', max_usage:'100', valid_until:'', image_url:'', category:'Semua' }); fetchAll(); }
+    setIsUploading(true);
+    let finalImageUrl = form.image_url;
+
+    if (selectedFile) {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+      try {
+        const uploadRes = await fetch('/api/coin-promos/upload', { method: 'POST', body: formData });
+        if (uploadRes.ok) {
+          const data = await uploadRes.json();
+          finalImageUrl = data.file_url;
+        }
+      } catch (err) {
+        console.error("Gagal upload gambar", err);
+      }
+    }
+
+    const payload = { ...form, image_url: finalImageUrl };
+
+    const res = await fetch('/api/coin-promos', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    setIsUploading(false);
+    if (res.ok) { showToast('Promo berhasil dibuat!'); setShowForm(false); setForm({ title:'', description:'', coin_cost:'', discount_type:'percentage', discount_value:'', free_item_name:'', required_item_name:'', min_order:'0', max_usage:'100', valid_until:'', image_url:'', category:'Semua' }); setSelectedFile(null); fetchAll(); }
   };
 
   const handleToggle = async (id: string) => {
@@ -158,20 +182,33 @@ export default function CoinPromoManagement() {
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tipe Diskon</label>
                   <div className="flex gap-2">
-                    {(['percentage','fixed'] as const).map(t=>(
+                    {(['percentage','fixed','free_item'] as const).map(t=>(
                       <button type="button" key={t} onClick={()=>setForm({...form, discount_type:t})} className={cn("flex-1 py-3 rounded-xl text-xs font-bold border transition-all", form.discount_type===t ? "bg-amber-50 text-amber-700 border-amber-300" : "bg-slate-50 text-slate-400 border-slate-100")}>
-                        {t==='percentage' ? '% Persentase' : 'Rp Nominal'}
+                        {t==='percentage' ? '% Persentase' : t==='fixed' ? 'Rp Nominal' : 'Gratis Item'}
                       </button>
                     ))}
                   </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nilai Diskon *</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">{form.discount_type==='percentage' ? '%' : 'Rp'}</span>
-                    <input required type="number" min={1} value={form.discount_value} onChange={e=>setForm({...form, discount_value:e.target.value})} placeholder={form.discount_type==='percentage' ? "20" : "10000"} className="w-full bg-slate-50 border border-slate-100 rounded-xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"/>
+                {form.discount_type !== 'free_item' ? (
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nilai Diskon *</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">{form.discount_type==='percentage' ? '%' : 'Rp'}</span>
+                      <input required type="number" min={1} value={form.discount_value} onChange={e=>setForm({...form, discount_value:e.target.value})} placeholder={form.discount_type==='percentage' ? "20" : "10000"} className="w-full bg-slate-50 border border-slate-100 rounded-xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"/>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Item Syarat (Beli...)</label>
+                      <input value={form.required_item_name} onChange={e=>setForm({...form, required_item_name:e.target.value})} placeholder="misal: Mie Yamin (Opsional)" className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"/>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Item Gratis (Dapat...) *</label>
+                      <input required value={form.free_item_name} onChange={e=>setForm({...form, free_item_name:e.target.value})} placeholder="misal: Es Teh Manis" className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"/>
+                    </div>
+                  </>
+                )}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Min. Order (Rp)</label>
                   <input type="number" min={0} value={form.min_order} onChange={e=>setForm({...form, min_order:e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"/>
@@ -184,13 +221,23 @@ export default function CoinPromoManagement() {
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Berlaku Sampai</label>
                   <input type="date" value={form.valid_until} onChange={e=>setForm({...form, valid_until:e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"/>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">URL Gambar (opsional)</label>
-                  <input value={form.image_url} onChange={e=>setForm({...form, image_url:e.target.value})} placeholder="https://..." className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"/>
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Gambar Promo (Upload)</label>
+                  <div 
+                    className="border-2 border-dashed border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+                    {selectedFile ? (
+                      <p className="text-sm font-bold text-amber-600">{selectedFile.name}</p>
+                    ) : (
+                      <p className="text-sm text-slate-400">Klik untuk memilih gambar</p>
+                    )}
+                  </div>
                 </div>
                 <div className="md:col-span-2">
-                  <button type="submit" className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl text-sm font-bold hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg shadow-amber-200 flex items-center justify-center gap-2">
-                    <Coins size={16}/> Simpan Promo
+                  <button type="submit" disabled={isUploading} className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl text-sm font-bold hover:from-amber-600 hover:to-orange-600 transition-all shadow-lg shadow-amber-200 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
+                    <Coins size={16}/> {isUploading ? 'Menyimpan...' : 'Simpan Promo'}
                   </button>
                 </div>
               </form>
@@ -239,7 +286,7 @@ export default function CoinPromoManagement() {
                           <Coins size={10}/> {p.coin_cost} Koin
                         </span>
                         <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
-                          {p.discount_type==='percentage' ? `${p.discount_value}%` : `Rp ${p.discount_value.toLocaleString()}`}
+                          {p.discount_type==='percentage' ? `${p.discount_value}%` : p.discount_type==='fixed' ? `Rp ${p.discount_value.toLocaleString()}` : (p.required_item_name ? `Beli ${p.required_item_name} Gratis ${p.free_item_name}` : `Gratis ${p.free_item_name}`)}
                         </span>
                         <span className="text-[10px] font-semibold text-slate-400">
                           {p.used_count}/{p.max_usage} dipakai
@@ -297,7 +344,7 @@ export default function CoinPromoManagement() {
                     <div className="flex items-center gap-2 mb-2">
                       <span className="text-[10px] font-bold text-amber-600"><Coins size={10} className="inline mr-0.5"/>{r.coin_cost}</span>
                       <span className="text-[10px] text-slate-400">•</span>
-                      <span className="text-[10px] text-slate-500">{r.discount_type==='percentage' ? `${r.discount_value}% off` : `Rp ${r.discount_value.toLocaleString()}`}</span>
+                      <span className="text-[10px] text-slate-500">{r.discount_type==='percentage' ? `${r.discount_value}% off` : r.discount_type==='fixed' ? `Rp ${r.discount_value.toLocaleString()}` : (r.required_item_name ? `Beli ${r.required_item_name} Gratis ${r.free_item_name}` : `Gratis ${r.free_item_name}`)}</span>
                     </div>
                     {/* Progress bar */}
                     <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-2">

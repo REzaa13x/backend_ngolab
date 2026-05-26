@@ -241,10 +241,11 @@ function UploadForm({ onSuccess }: { onSuccess: () => void }) {
 
 // ─── Media Card ───────────────────────────────────────────────────────────────
 function MediaCard({ media, onDelete, onPreview, onToggle }: {
-  media: MediaFile;
-  onDelete: (id: number) => void;
-  onPreview: (media: MediaFile) => void;
-  onToggle: (id: number) => void;
+  key?: any;
+  media: any;
+  onDelete: (id: number) => any;
+  onPreview: (media: any) => any;
+  onToggle: (id: number) => any;
 }) {
   const isVideo = media.file_type === 'video';
   const isActive = media.is_active === 1;

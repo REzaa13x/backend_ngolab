@@ -9,8 +9,7 @@ import {
   ResponsiveContainer, 
   Cell,
   PieChart, 
-  Pie,
-  Legend
+  Pie
 } from 'recharts';
 import { 
   TrendingUp, 
@@ -18,16 +17,19 @@ import {
   ArrowDownRight, 
   Calendar, 
   Download, 
-  Filter,
   PieChart as PieChartIcon,
   BarChart3,
   DollarSign,
   Package,
   Users,
-  RefreshCw
+  RefreshCw,
+  CheckCircle2,
+  XCircle,
+  ExternalLink,
+  FileText
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -48,6 +50,8 @@ interface Order {
   status: string;
   payment_status: string;
   payment_method?: string;
+  payment_proof?: string;
+  source?: string;
   created_at: string;
   items: OrderItem[];
 }
@@ -57,6 +61,8 @@ export default function SalesReport() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [reportData, setReportData] = useState<any>(null);
   const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'year' | 'all'>('month');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'ngolab' | 'coworking' | 'smart_tag_qr'>('all');
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
   const fetchFullData = async () => {
@@ -87,8 +93,22 @@ export default function SalesReport() {
     if (!orders.length) return [];
     
     return orders.filter(order => {
+      // Hanya tampilkan lunas atau gagal/tolak
+      const isPaidOrFailed = 
+        order.payment_status === 'lunas' || 
+        order.payment_status === 'ditolak' || 
+        order.status === 'dibatalkan';
+        
+      if (!isPaidOrFailed) return false;
+
+      // Filter Sumber
+      if (sourceFilter !== 'all') {
+         const orderSource = order.source || 'ngolab';
+         if (orderSource !== sourceFilter) return false;
+      }
+
+      // Filter Waktu
       if (period === 'all') return true;
-      if (order.payment_status !== 'lunas') return false;
 
       const orderDate = new Date(order.created_at);
       const now = new Date();
@@ -113,19 +133,19 @@ export default function SalesReport() {
 
       return true;
     });
-  }, [orders, period]);
+  }, [orders, period, sourceFilter]);
 
   const metrics = useMemo(() => {
-    const totalRevenue = filteredOrders.reduce((acc, o) => acc + o.total_price, 0);
-    const totalOrders = filteredOrders.length;
+    const lunasOrders = filteredOrders.filter(o => o.payment_status === 'lunas');
+    const totalRevenue = lunasOrders.reduce((acc, o) => acc + o.total_price, 0);
+    const totalOrders = lunasOrders.length;
     const avgOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0;
     
-    // In a real app we'd compare with previous period
     return {
       revenue: totalRevenue,
       orders: totalOrders,
       avgOrder,
-      customers: new Set(filteredOrders.map(o => o.user_id)).size
+      customers: new Set(lunasOrders.map(o => o.user_id)).size
     };
   }, [filteredOrders]);
 
@@ -136,16 +156,16 @@ export default function SalesReport() {
     
     // Header Branding
     doc.setFontSize(24);
-    doc.setTextColor(15, 23, 42); // slate-900
+    doc.setTextColor(15, 23, 42); 
     doc.text('LAPORAN PENJUALAN', 14, 25);
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Periode: ${period.toUpperCase()}`, 14, 32);
+    doc.text(`Periode: ${period.toUpperCase()} | Sumber: ${sourceFilter.toUpperCase()}`, 14, 32);
     doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 14, 37);
 
     // Metrics Summary Box
-    doc.setFillColor(248, 250, 252); // slate-50
+    doc.setFillColor(248, 250, 252);
     doc.roundedRect(14, 45, 182, 30, 3, 3, 'F');
     
     doc.setFontSize(10);
@@ -157,17 +177,18 @@ export default function SalesReport() {
     doc.setFontSize(14);
     doc.setTextColor(15, 23, 42);
     doc.text(`Rp ${metrics.revenue.toLocaleString()}`, 20, 65);
-    doc.text(`${metrics.orders} Pesanan`, 75, 65);
+    doc.text(`${metrics.orders} Lunas`, 75, 65);
     doc.text(`Rp ${Math.round(metrics.avgOrder).toLocaleString()}`, 130, 65);
 
     // Table
     autoTable(doc, {
       startY: 85,
-      head: [['Invoice', 'Pelanggan', 'Tanggal', 'Metode', 'Total']],
+      head: [['Invoice', 'Pelanggan', 'Sumber', 'Status', 'Metode', 'Total']],
       body: filteredOrders.map(o => [
         o.invoice_number,
         o.customer_name,
-        new Date(o.created_at).toLocaleDateString('id-ID'),
+        (o.source || 'ngolab').toUpperCase(),
+        o.payment_status === 'lunas' ? 'LUNAS' : 'GAGAL',
         o.payment_method || 'Tunai',
         `Rp ${o.total_price.toLocaleString()}`
       ]),
@@ -175,11 +196,11 @@ export default function SalesReport() {
       theme: 'striped',
       styles: { fontSize: 8 },
       columnStyles: {
-        4: { halign: 'right' }
+        5: { halign: 'right' }
       }
     });
 
-    doc.save(`Laporan_Penjualan_${period}_${Date.now()}.pdf`);
+    doc.save(`Laporan_${period}_${sourceFilter}_${Date.now()}.pdf`);
     setTimeout(() => setIsExporting(false), 800);
   };
 
@@ -194,14 +215,15 @@ export default function SalesReport() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      {/* Header and Controls */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
         <div>
-          <h2 className="text-3xl font-black tracking-tight text-slate-900">Statistik Penjualan</h2>
-          <p className="text-sm text-slate-500 font-medium mt-1">Analisis performa bisnis berdasarkan periode waktu terpilih.</p>
+          <h2 className="text-3xl font-black tracking-tight text-slate-900">Analisis Penjualan</h2>
+          <p className="text-sm text-slate-500 font-medium mt-1">Laporan finansial dan daftar master riwayat transaksi.</p>
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex bg-white border border-slate-100 p-1 rounded-xl shadow-sm">
+          <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-xl shadow-inner">
             {[
               { id: 'day', label: 'Hari' },
               { id: 'week', label: 'Minggu' },
@@ -213,9 +235,9 @@ export default function SalesReport() {
                 key={p.id}
                 onClick={() => setPeriod(p.id as any)}
                 className={cn(
-                  "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                  "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
                   period === p.id 
-                    ? "bg-slate-900 text-white shadow-md" 
+                    ? "bg-white text-indigo-600 shadow-sm border border-slate-200" 
                     : "text-slate-400 hover:text-slate-600"
                 )}
               >
@@ -234,54 +256,166 @@ export default function SalesReport() {
         </div>
       </div>
 
+      {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { label: 'Total Pendapatan', value: `Rp ${metrics.revenue.toLocaleString()}`, trend: '+12.5%', isUp: true, icon: DollarSign, color: 'indigo' },
-          { label: 'Pesanan Sukses', value: metrics.orders, trend: '+8.2%', isUp: true, icon: Package, color: 'emerald' },
-          { label: 'Rata-rata Order', value: `Rp ${Math.round(metrics.avgOrder).toLocaleString()}`, trend: '-2.4%', isUp: false, icon: TrendingUp, color: 'amber' },
+          { label: 'Pendapatan Bersih', value: `Rp ${metrics.revenue.toLocaleString()}`, trend: '+12.5%', isUp: true, icon: DollarSign, color: 'emerald' },
+          { label: 'Pesanan Sukses', value: metrics.orders, trend: '+8.2%', isUp: true, icon: Package, color: 'indigo' },
+          { label: 'Rata-rata Tagihan', value: `Rp ${Math.round(metrics.avgOrder).toLocaleString()}`, trend: '-2.4%', isUp: false, icon: TrendingUp, color: 'amber' },
           { label: 'Pelanggan Unik', value: metrics.customers, trend: '+18.7%', isUp: true, icon: Users, color: 'violet' },
         ].map((stat, idx) => (
-          <motion.div
-            key={idx}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.1 }}
-            className="group relative bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
-          >
-            <div className={cn(
-              "w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110",
-              stat.color === 'indigo' ? "bg-indigo-50 text-indigo-600 shadow-indigo-100/50" :
-              stat.color === 'emerald' ? "bg-emerald-50 text-emerald-600 shadow-emerald-100/50" :
-              stat.color === 'amber' ? "bg-amber-50 text-amber-600 shadow-amber-100/50" :
-              "bg-violet-50 text-violet-600 shadow-violet-100/50"
-            )}>
-              <stat.icon size={22} />
+          <div key={idx} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-lg transition-all duration-300">
+            <div className="flex justify-between items-start mb-4">
+               <div className={cn(
+                 "w-12 h-12 rounded-2xl flex items-center justify-center",
+                 stat.color === 'indigo' ? "bg-indigo-50 text-indigo-600" :
+                 stat.color === 'emerald' ? "bg-emerald-50 text-emerald-600" :
+                 stat.color === 'amber' ? "bg-amber-50 text-amber-600" :
+                 "bg-violet-50 text-violet-600"
+               )}>
+                 <stat.icon size={22} />
+               </div>
+               <div className={cn(
+                 "flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full",
+                 stat.isUp ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
+               )}>
+                 {stat.isUp ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                 {stat.trend}
+               </div>
             </div>
-            
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-1">{stat.label}</p>
-            <div className="flex items-end justify-between">
-              <h3 className="text-2xl font-black text-slate-900 leading-none">{stat.value}</h3>
-              <div className={cn(
-                "flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full",
-                stat.isUp ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
-              )}>
-                {stat.isUp ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                {stat.trend}
-              </div>
-            </div>
-          </motion.div>
+            <h3 className="text-2xl font-black text-slate-900 leading-none">{stat.value}</h3>
+          </div>
         ))}
       </div>
 
+      {/* Transaction Master History */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden flex flex-col">
+         {/* Filter Header */}
+         <div className="px-8 py-6 border-b border-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+               <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                 <FileText className="text-indigo-600" size={20} />
+                 Master Riwayat Transaksi
+               </h3>
+               <p className="text-xs text-slate-500 font-medium">Rekam jejak seluruh pesanan berdasarkan filter sumber.</p>
+            </div>
+            
+            <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-xl shadow-inner overflow-x-auto custom-scrollbar">
+               {[
+                 { id: 'all', label: 'Semua Sumber' },
+                 { id: 'ngolab', label: 'Ngolab' },
+                 { id: 'coworking', label: 'Coworking' },
+                 { id: 'smart_tag_qr', label: 'Smart Tag' }
+               ].map((s) => (
+                 <button
+                   key={s.id}
+                   onClick={() => setSourceFilter(s.id as any)}
+                   className={cn(
+                     "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
+                     sourceFilter === s.id 
+                       ? "bg-slate-900 text-white shadow-md" 
+                       : "text-slate-500 hover:text-slate-800 hover:bg-white/50"
+                   )}
+                 >
+                   {s.label}
+                 </button>
+               ))}
+            </div>
+         </div>
+
+         {/* Table */}
+         <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/50">
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Faktur & Waktu</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Pelanggan</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Sumber</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Total</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Status</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Metode</th>
+                  <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-8 py-16 text-center">
+                       <div className="inline-flex flex-col items-center gap-3 opacity-50">
+                          <Package size={40} className="text-slate-300" />
+                          <span className="text-sm font-bold text-slate-400 italic">Tidak ada transaksi ditemukan.</span>
+                       </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredOrders.map((row) => (
+                    <tr key={row.id} className="hover:bg-slate-50/40 transition-colors group">
+                      <td className="px-8 py-5">
+                         <div className="flex flex-col">
+                            <span className="text-sm font-black text-slate-900 leading-none">{row.invoice_number}</span>
+                            <span className="text-[10px] text-slate-400 font-medium mt-1">
+                               {new Date(row.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </span>
+                         </div>
+                      </td>
+                      <td className="px-8 py-5">
+                         <div className="flex flex-col">
+                            <span className="text-xs font-bold text-slate-700 uppercase">{row.customer_name}</span>
+                         </div>
+                      </td>
+                      <td className="px-8 py-5 text-center">
+                         <span className={cn(
+                           "px-2.5 py-1 rounded font-black uppercase tracking-widest text-[9px]",
+                           (row.source || 'ngolab') === 'ngolab' ? "bg-orange-50 text-orange-600" :
+                           (row.source || 'ngolab') === 'coworking' ? "bg-blue-50 text-blue-600" :
+                           "bg-purple-50 text-purple-600"
+                         )}>
+                           {(row.source || 'ngolab').replace(/_/g, ' ')}
+                         </span>
+                      </td>
+                      <td className="px-8 py-5 text-right">
+                        <span className="text-sm font-black text-slate-900">Rp {row.total_price.toLocaleString()}</span>
+                      </td>
+                      <td className="px-8 py-5 text-center">
+                         <span className={cn(
+                           "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border",
+                           row.payment_status === 'lunas' ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-rose-50 text-rose-600 border-rose-200"
+                         )}>
+                           {row.payment_status === 'lunas' ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                           {row.payment_status === 'lunas' ? 'Lunas' : 'Gagal'}
+                         </span>
+                      </td>
+                      <td className="px-8 py-5 text-center">
+                         <span className="px-2 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded font-black uppercase text-[9px]">
+                           {row.payment_method || 'Tunai'}
+                         </span>
+                      </td>
+                      <td className="px-8 py-5 text-right">
+                         <button 
+                           onClick={() => setSelectedOrder(row)}
+                           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-indigo-600 border border-indigo-100 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:border-indigo-200 transition-all shadow-sm opacity-0 group-hover:opacity-100 focus:opacity-100"
+                         >
+                           <FileText size={12} /> Struk
+                         </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+         </div>
+      </div>
+
+      {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden flex flex-col">
+        <div className="lg:col-span-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
           <div className="p-8 border-b border-slate-50 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
                 <BarChart3 className="text-indigo-600" size={20} />
                 Tren Penjualan Eksisting
               </h3>
-              <p className="text-xs text-slate-500 font-medium">Data performa berdasarkan dataset yang terekam.</p>
             </div>
           </div>
           
@@ -323,13 +457,12 @@ export default function SalesReport() {
           </div>
         </div>
 
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden flex flex-col">
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
           <div className="p-8 border-b border-slate-50">
             <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
               <PieChartIcon className="text-emerald-600" size={20} />
               Kategori Terlaris
             </h3>
-            <p className="text-xs text-slate-500 font-medium">Distribusi pendapatan jenis menu.</p>
           </div>
           
           <div className="p-4 flex-1 flex flex-col items-center justify-center">
@@ -372,55 +505,113 @@ export default function SalesReport() {
         </div>
       </div>
 
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
-        <div className="px-8 py-6 border-b border-slate-50 bg-slate-50/30">
-          <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
-            <Calendar size={16} className="text-indigo-600" />
-            Rekapitulasi Transaksi Terpilih ({period})
-          </h3>
-        </div>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-50">
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Invoice</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pelanggan</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Waktu</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Total Tagihan</th>
-                <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Metode</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {filteredOrders.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-8 py-12 text-center text-sm font-bold text-slate-400 italic">
-                    Tidak ada data untuk periode ini.
-                  </td>
-                </tr>
-              ) : (
-                filteredOrders.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50/50 transition-colors font-bold">
-                    <td className="px-8 py-6 text-sm text-slate-900">{row.invoice_number}</td>
-                    <td className="px-8 py-6 text-sm text-slate-600 uppercase text-[10px] tracking-tight">{row.customer_name}</td>
-                    <td className="px-8 py-6 text-[10px] text-slate-400 uppercase">
-                      {new Date(row.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
-                    </td>
-                    <td className="px-8 py-6 text-sm text-right text-slate-900">
-                      Rp {row.total_price.toLocaleString()}
-                    </td>
-                    <td className="px-8 py-6 text-right">
-                       <span className="text-[9px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md">
-                          {row.payment_method || 'Tunai'}
-                       </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {/* Kwitansi Modal */}
+      <AnimatePresence>
+        {selectedOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden relative"
+            >
+              <div className="absolute top-0 left-0 right-0 h-4 bg-white z-10" style={{ 
+                backgroundImage: 'radial-gradient(circle, #f1f5f9 2px, transparent 2px)',
+                backgroundSize: '8px 8px',
+                backgroundPosition: '0 0'
+              }} />
+              
+              <div className="p-8 pb-4 flex flex-col items-center text-center">
+                <div className={cn(
+                  "w-16 h-16 rounded-full flex items-center justify-center mb-4",
+                  selectedOrder.payment_status === 'lunas' ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
+                )}>
+                  {selectedOrder.payment_status === 'lunas' ? <CheckCircle2 size={32} /> : <XCircle size={32} />}
+                </div>
+                <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Kwitansi Digital</h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Status: {selectedOrder.payment_status === 'lunas' ? 'LUNAS' : 'GAGAL / DITOLAK'}</p>
+              </div>
+
+              <div className="px-8 space-y-4">
+                 <div className="border-t border-dashed border-slate-200 pt-4 flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Pelanggan</span>
+                    <span className="text-sm font-bold text-slate-900">{selectedOrder.customer_name}</span>
+                 </div>
+                 <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Metode</span>
+                    <span className="text-sm font-bold text-indigo-600">{selectedOrder.payment_method}</span>
+                 </div>
+                 <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Sumber</span>
+                    <span className="text-[11px] font-bold text-slate-700 uppercase">{(selectedOrder.source || 'ngolab').replace(/_/g, ' ')}</span>
+                 </div>
+                 <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Waktu</span>
+                    <span className="text-[11px] font-bold text-slate-700">{new Date(selectedOrder.created_at).toLocaleString('id-ID')}</span>
+                 </div>
+                 <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black text-slate-400 uppercase">No. Faktur</span>
+                    <span className="text-[11px] font-mono font-bold text-slate-900">{selectedOrder.invoice_number}</span>
+                 </div>
+                 
+                 <div className="border-t border-dashed border-slate-200 pt-4">
+                    <span className="text-[10px] font-black text-slate-400 uppercase block mb-2">Item Pesanan:</span>
+                    <div className="space-y-2">
+                       {selectedOrder.items?.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-[11px]">
+                             <span className="text-slate-600 font-bold">{item.quantity}x {item.name}</span>
+                             <span className="text-slate-900 font-black">Rp {(item.price * item.quantity).toLocaleString()}</span>
+                          </div>
+                       ))}
+                    </div>
+                 </div>
+
+                 <div className="border-t-2 border-slate-900 pt-4 flex justify-between items-center">
+                    <span className="text-[13px] font-black text-slate-900 uppercase">Total Tagihan</span>
+                    <span className="text-lg font-black text-slate-900">Rp {(selectedOrder.total_price || 0).toLocaleString()}</span>
+                 </div>
+
+                 {selectedOrder.payment_proof && (
+                    <div className="pt-4 animate-in slide-in-from-bottom-2 duration-500">
+                       <span className="text-[10px] font-black text-slate-400 uppercase block mb-2">Lampiran Bukti:</span>
+                       <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-inner group relative">
+                          <img 
+                            src={selectedOrder.payment_proof} 
+                            alt="Bukti Transfer" 
+                            className="w-full h-32 object-cover transition-all group-hover:scale-105"
+                            referrerPolicy="no-referrer"
+                          />
+                          <a 
+                            href={selectedOrder.payment_proof} 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                             <ExternalLink className="text-white" size={24} />
+                          </a>
+                       </div>
+                    </div>
+                 )}
+              </div>
+
+              <div className="p-8 pt-6 flex flex-col gap-2">
+                <button 
+                  onClick={() => setSelectedOrder(null)}
+                  className="w-full text-slate-400 py-2 text-[10px] font-black uppercase tracking-widest hover:text-slate-600 transition-colors"
+                >
+                  Tutup Kwitansi
+                </button>
+              </div>
+
+              <div className="h-4 bg-white" style={{ 
+                backgroundImage: 'linear-gradient(135deg, #f1f5f9 25%, transparent 25%), linear-gradient(225deg, #f1f5f9 25%, transparent 25%)',
+                backgroundSize: '16px 16px',
+                backgroundPosition: '0 0'
+              }} />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

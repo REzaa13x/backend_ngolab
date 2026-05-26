@@ -1,0 +1,370 @@
+{
+  "info": {
+    "name": "Tangolab / Gesture-Eats API",
+    "description": "Koleksi lengkap API untuk admin Gesture-Eats",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000" }
+  ],
+  "item": [
+    {
+      "name": "📺 Papan Digital (MySQL)",
+      "item": [
+        {
+          "name": "GET - Semua Media",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/media" }
+        },
+        {
+          "name": "GET - Detail Media by ID",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/media/1" }
+        },
+        {
+          "name": "POST - Upload Media",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/digital-board/media/upload",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "" },
+                { "key": "title", "value": "Promo Test", "type": "text" },
+                { "key": "duration", "value": "10", "type": "text" },
+                { "key": "uploaded_by", "value": "Admin", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH - Toggle Aktif/Nonaktif Media",
+          "request": { "method": "PATCH", "url": "{{base_url}}/api/digital-board/media/1/toggle" }
+        },
+        {
+          "name": "PUT - Update Media",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/api/digital-board/media/1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Promo Updated\",\n  \"duration\": 15\n}" }
+          }
+        },
+        {
+          "name": "DELETE - Hapus Media",
+          "request": { "method": "DELETE", "url": "{{base_url}}/api/digital-board/media/1" }
+        },
+        {
+          "name": "GET - Semua Playlist",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/playlists" }
+        },
+        {
+          "name": "GET - Detail Playlist + Items",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/playlists/1" }
+        },
+        {
+          "name": "POST - Buat Playlist Baru",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/digital-board/playlists",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Playlist Weekend\",\n  \"description\": \"Promo khusus hari Sabtu-Minggu\",\n  \"is_default\": 0,\n  \"loop_mode\": 1\n}" }
+          }
+        },
+        {
+          "name": "POST - Tambah Item ke Playlist",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/digital-board/playlists/1/items",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"media_id\": 1,\n  \"order_index\": 0,\n  \"transition\": \"fade\"\n}" }
+          }
+        },
+        {
+          "name": "DELETE - Hapus Item dari Playlist",
+          "request": { "method": "DELETE", "url": "{{base_url}}/api/digital-board/playlists/1/items/1" }
+        },
+        {
+          "name": "GET - Semua Jadwal",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/schedules" }
+        },
+        {
+          "name": "POST - Buat Jadwal Baru",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/digital-board/schedules",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Jam Makan Siang\",\n  \"playlist_id\": 1,\n  \"start_time\": \"11:00\",\n  \"end_time\": \"14:00\",\n  \"days_of_week\": \"[\\\"Mon\\\",\\\"Tue\\\",\\\"Wed\\\",\\\"Thu\\\",\\\"Fri\\\"]\",\n  \"priority\": 2\n}" }
+          }
+        },
+        {
+          "name": "GET - Semua Layar",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/screens" }
+        },
+        {
+          "name": "PATCH - Ping Layar (Heartbeat)",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base_url}}/api/digital-board/screens/1/ping",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"online\"\n}" }
+          }
+        },
+        {
+          "name": "GET - Now Playing (Konten Aktif di Layar)",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/now-playing/1" }
+        },
+        {
+          "name": "POST - Catat Log Tampilan",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/digital-board/log",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"screen_id\": 1,\n  \"media_id\": 1,\n  \"playlist_id\": 1,\n  \"duration_shown\": 10\n}" }
+          }
+        },
+        {
+          "name": "GET - Statistik Log",
+          "request": { "method": "GET", "url": "{{base_url}}/api/digital-board/log/stats" }
+        }
+      ]
+    },
+    {
+      "name": "🪙 Promo Koin",
+      "item": [
+        {
+          "name": "GET - Semua Promo Koin",
+          "request": { "method": "GET", "url": "{{base_url}}/api/coin-promos" }
+        },
+        {
+          "name": "POST - Buat Promo Baru",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/coin-promos",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Diskon 25% Weekend\",\n  \"description\": \"Khusus hari Sabtu-Minggu\",\n  \"coin_cost\": \"600\",\n  \"discount_type\": \"percentage\",\n  \"discount_value\": \"25\",\n  \"min_order\": \"15000\",\n  \"max_usage\": \"50\",\n  \"category\": \"Semua\"\n}" }
+          }
+        },
+        {
+          "name": "PUT - Update Promo",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/api/coin-promos/cp-1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Diskon 30% Semua Menu\",\n  \"coin_cost\": 700\n}" }
+          }
+        },
+        {
+          "name": "PATCH - Toggle Aktif/Nonaktif",
+          "request": { "method": "PATCH", "url": "{{base_url}}/api/coin-promos/cp-1/toggle" }
+        },
+        {
+          "name": "POST - Redeem Promo (Tukar Koin)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/coin-promos/cp-2/redeem",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": \"1\"\n}" }
+          }
+        },
+        {
+          "name": "DELETE - Hapus Promo",
+          "request": { "method": "DELETE", "url": "{{base_url}}/api/coin-promos/cp-4" }
+        },
+        {
+          "name": "GET - Rekomendasi Promo untuk User",
+          "request": { "method": "GET", "url": "{{base_url}}/api/users/1/recommendations" }
+        },
+        {
+          "name": "GET - Riwayat Transaksi Koin",
+          "request": { "method": "GET", "url": "{{base_url}}/api/coin-transactions" }
+        },
+        {
+          "name": "GET - Riwayat Koin per User",
+          "request": { "method": "GET", "url": "{{base_url}}/api/coin-transactions?user_id=1" }
+        }
+      ]
+    },
+    {
+      "name": "👤 Users",
+      "item": [
+        {
+          "name": "GET - Semua Users",
+          "request": { "method": "GET", "url": "{{base_url}}/api/users" }
+        }
+      ]
+    },
+    {
+      "name": "🍽️ Menu",
+      "item": [
+        {
+          "name": "GET - Semua Menu",
+          "request": { "method": "GET", "url": "{{base_url}}/api/menu" }
+        },
+        {
+          "name": "GET - Menu by Kategori",
+          "request": { "method": "GET", "url": "{{base_url}}/api/menu?category=Beverage" }
+        },
+        {
+          "name": "POST - Tambah Menu",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/menu",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Nasi Goreng Spesial\",\n  \"category\": \"Main Course\",\n  \"price\": 18000,\n  \"stock\": 30\n}" }
+          }
+        },
+        {
+          "name": "PUT - Update Menu",
+          "request": {
+            "method": "PUT",
+            "url": "{{base_url}}/api/menu/1",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"price\": 20000,\n  \"stock\": 50\n}" }
+          }
+        },
+        {
+          "name": "PATCH - Toggle Stok Menu",
+          "request": { "method": "PATCH", "url": "{{base_url}}/api/menu/1/toggle-stock" }
+        }
+      ]
+    },
+    {
+      "name": "📦 Orders",
+      "item": [
+        {
+          "name": "GET - Semua Orders",
+          "request": { "method": "GET", "url": "{{base_url}}/api/orders" }
+        },
+        {
+          "name": "GET - Orders untuk KDS (Dapur)",
+          "request": { "method": "GET", "url": "{{base_url}}/api/orders/kds" }
+        },
+        {
+          "name": "POST - Simulasi Order Baru",
+          "request": { "method": "POST", "url": "{{base_url}}/api/orders/simulate" }
+        },
+        {
+          "name": "POST - Order Manual",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/orders/manual",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"customer_name\": \"Andi Test\",\n  \"items\": [{\"id\": 1, \"quantity\": 2}],\n  \"payment_method\": \"Tunai\",\n  \"payment_status\": \"lunas\"\n}" }
+          }
+        },
+        {
+          "name": "POST - Verifikasi Pembayaran",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/orders/2/verify",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"payment_method\": \"QRIS\"\n}" }
+          }
+        },
+        {
+          "name": "POST - Tolak Pembayaran",
+          "request": { "method": "POST", "url": "{{base_url}}/api/orders/2/reject" }
+        },
+        {
+          "name": "PATCH - Update Status Order",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base_url}}/api/orders/1/status",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"siap\"\n}" }
+          }
+        },
+        {
+          "name": "DELETE - Hapus Order",
+          "request": { "method": "DELETE", "url": "{{base_url}}/api/orders/3" }
+        }
+      ]
+    },
+    {
+      "name": "📊 Statistik & Laporan",
+      "item": [
+        {
+          "name": "GET - Stats Ringkasan",
+          "request": { "method": "GET", "url": "{{base_url}}/api/stats" }
+        },
+        {
+          "name": "GET - Stats Mingguan",
+          "request": { "method": "GET", "url": "{{base_url}}/api/stats?range=week" }
+        },
+        {
+          "name": "GET - Data Penjualan Grafik",
+          "request": { "method": "GET", "url": "{{base_url}}/api/sales-data" }
+        },
+        {
+          "name": "GET - Laporan Ringkasan",
+          "request": { "method": "GET", "url": "{{base_url}}/api/reports/summary" }
+        },
+        {
+          "name": "GET - Laporan Bulanan",
+          "request": { "method": "GET", "url": "{{base_url}}/api/reports/monthly" }
+        }
+      ]
+    },
+    {
+      "name": "👥 Staff & Shift",
+      "item": [
+        {
+          "name": "GET - Semua Staff",
+          "request": { "method": "GET", "url": "{{base_url}}/api/staff" }
+        },
+        {
+          "name": "POST - Tambah Staff",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/staff",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Rina Wati\",\n  \"role\": \"Kasir\",\n  \"email\": \"rina@example.com\",\n  \"phone\": \"08123456799\"\n}" }
+          }
+        },
+        {
+          "name": "GET - Semua Shift",
+          "request": { "method": "GET", "url": "{{base_url}}/api/shifts" }
+        },
+        {
+          "name": "POST - Tambah Shift",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/shifts",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"staff_id\": \"S002\",\n  \"shift_type\": \"Sore\",\n  \"time\": \"16:00 - 22:00\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🧂 Bahan Baku",
+      "item": [
+        {
+          "name": "GET - Semua Bahan",
+          "request": { "method": "GET", "url": "{{base_url}}/api/ingredients" }
+        },
+        {
+          "name": "GET - Estimasi Porsi",
+          "request": { "method": "GET", "url": "{{base_url}}/api/ingredients/yield" }
+        },
+        {
+          "name": "POST - Restock Bahan",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/ingredients/ing-1/restock",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"amount\": 50\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📝 Audit Log",
+      "item": [
+        {
+          "name": "GET - Semua Log",
+          "request": { "method": "GET", "url": "{{base_url}}/api/audit-logs" }
+        }
+      ]
+    }
+  ]
+}

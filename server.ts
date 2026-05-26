@@ -6,8 +6,14 @@ import sharp from "sharp";
 import fs from "fs";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { testDbConnection } from "./src/db/db.js";
+import { db, testDbConnection } from "./src/db/db.js";
 import digitalBoardRouter from "./src/routes/digitalBoard.js";
+import ordersRouter from "./src/routes/orders.js";
+import usersRouter from "./src/routes/users.js";
+import coinPromosRouter from "./src/routes/coinPromos.js";
+import authRouter from "./src/routes/auth.js";
+import staffRouter from "./src/routes/staff.js";
+import menuRouter from "./src/routes/menu.js";
 
 async function startServer() {
   const app = express();
@@ -39,6 +45,17 @@ async function startServer() {
       console.log("Client disconnected");
     });
   });
+
+  // Share IO instance to routers
+  app.set('io', io);
+
+  // ─── Real Database API Routes ──────────────────────────────────────────────
+  app.use("/api/auth", authRouter);
+  app.use("/api/staff", staffRouter);
+  app.use("/api/orders", ordersRouter);
+  app.use("/api/users", usersRouter);
+  app.use("/api/coin-promos", coinPromosRouter);
+  app.use("/api/menu", menuRouter);
 
   // Ensure upload directory exists
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
@@ -244,118 +261,19 @@ async function startServer() {
     "Batagor Ikan Bandung": { "ing-6": 3, "ing-5": 2 }
   };
 
-  let menuItems = [
-    { id: 1, name: 'Mie Yamin Spesial Ayam', category: 'Main Course', price: 18000, inStock: true, stock: 45, image: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?q=80&w=600&auto=format&fit=crop' },
-    { id: 2, name: 'Bakso Malang Komplit Ibu Sri', category: 'Main Course', price: 22000, inStock: true, stock: 30, image: 'https://images.unsplash.com/photo-1593504049359-74330189a345?q=80&w=600&auto=format&fit=crop' },
-    { id: 3, name: 'Es Teh Manis Melati', category: 'Beverage', price: 5000, inStock: true, stock: 100, image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?q=80&w=600&auto=format&fit=crop' },
-    { id: 4, name: 'Kopi Susu Gula Aren Signature', category: 'Beverage', price: 15000, inStock: true, stock: 80, image: 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?q=80&w=600&auto=format&fit=crop' },
-    { id: 5, name: 'Kentang Goreng Krispi Mayo', category: 'Snack', price: 12000, inStock: true, stock: 50, image: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?q=80&w=600&auto=format&fit=crop' },
-    { id: 6, name: 'Ice Cream Vanilla Oreo', category: 'Snack', price: 10000, inStock: true, stock: 25, image: 'https://images.unsplash.com/photo-1560008447-51147046e10f?q=80&w=600&auto=format&fit=crop' },
-    { id: 7, name: 'Jus Alpukat Mentega Spesial', category: 'Beverage', price: 17000, inStock: true, stock: 15, image: 'https://images.unsplash.com/photo-1582294121287-ba8e99994966?q=80&w=600&auto=format&fit=crop' },
-    { id: 8, name: 'Siomay Bandung Asli', category: 'Snack', price: 15000, inStock: true, stock: 40, image: 'https://images.unsplash.com/photo-1626074353765-4a75a771d48f?q=80&w=600&auto=format&fit=crop' },
-    { id: 9, name: 'Roti Bakar Cokelat Keju', category: 'Snack', price: 12000, inStock: true, stock: 20, image: 'https://images.unsplash.com/photo-1584947848227-024505f99371?q=80&w=600&auto=format&fit=crop' },
-    { id: 10, name: 'Nasi Ayam Geprek Level 3', category: 'Main Course', price: 20000, inStock: true, stock: 35, image: 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?q=80&w=600&auto=format&fit=crop' },
-    { id: 11, name: 'Ice Cream Strawberry Hills', category: 'Snack', price: 10000, inStock: true, stock: 15, image: 'https://images.unsplash.com/photo-1497034825429-c343d7c6a68f?q=80&w=600&auto=format&fit=crop' },
-    { id: 12, name: 'Es Jeruk Peras Segar', category: 'Beverage', price: 8000, inStock: true, stock: 60, image: 'https://images.unsplash.com/photo-1613478223719-2ab802602423?q=80&w=600&auto=format&fit=crop' },
-    { id: 13, name: 'Mie Bakso Urat Super', category: 'Main Course', price: 25000, inStock: true, stock: 20, image: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?q=80&w=600&auto=format&fit=crop' },
-    { id: 14, name: 'Batagor Ikan Bandung', category: 'Snack', price: 15000, inStock: true, stock: 30, image: 'https://images.unsplash.com/photo-1626074353765-4a75a771d48f?q=80&w=600&auto=format&fit=crop' },
-  ];
-
   // API Routes
   app.get("/api/users", (req, res) => {
     res.json(users);
   });
 
-  app.get("/api/orders", (req, res) => {
-    res.json(orders);
+  app.get("/api/shifts", (req, res) => {
+    res.json([
+      { id: 1, staff_id: 'S001', name: 'Admin Bagus', role: 'Admin', shift_type: 'Pagi', time: '08:00 - 16:00', date: new Date().toISOString() }
+    ]);
   });
 
   app.get("/api/sales-data", (req, res) => {
     res.json(salesData);
-  });
-
-  app.get("/api/menu", (req, res) => {
-    const { category } = req.query;
-    if (category && category !== 'Semua') {
-      const filtered = menuItems.filter(item => item.category === category);
-      return res.json(filtered);
-    }
-    res.json(menuItems);
-  });
-
-  app.post("/api/menu", (req, res) => {
-    const { name, category, price, stock, image } = req.body;
-    
-    if (!name || !category || !price) {
-      return res.status(400).json({ message: "Nama, kategori, dan harga wajib diisi" });
-    }
-
-    const newItem = {
-      id: menuItems.length > 0 ? Math.max(...menuItems.map(m => m.id)) + 1 : 1,
-      name,
-      category,
-      price: parseInt(price),
-      inStock: parseInt(stock) > 0,
-      stock: parseInt(stock) || 0,
-      image: image || `https://picsum.photos/seed/${name.replace(/\s+/g, '')}/400/300`
-    };
-
-    menuItems.push(newItem);
-    res.status(201).json(newItem);
-  });
-
-  app.put("/api/menu/:id", (req, res) => {
-    const { id } = req.params;
-    const { name, category, price, stock, image } = req.body;
-    const itemIndex = menuItems.findIndex(item => item.id === parseInt(id));
-
-    if (itemIndex === -1) {
-      return res.status(404).json({ message: "Produk tidak ditemukan" });
-    }
-
-    menuItems[itemIndex] = {
-      ...menuItems[itemIndex],
-      name: name || menuItems[itemIndex].name,
-      category: category || menuItems[itemIndex].category,
-      price: price ? parseInt(price) : menuItems[itemIndex].price,
-      stock: stock !== undefined ? parseInt(stock) : menuItems[itemIndex].stock,
-      image: image || menuItems[itemIndex].image,
-      inStock: stock !== undefined ? parseInt(stock) > 0 : menuItems[itemIndex].inStock
-    };
-
-    res.json(menuItems[itemIndex]);
-  });
-
-  app.patch("/api/menu/:id/toggle-stock", (req, res) => {
-    const { id } = req.params;
-    const itemIndex = menuItems.findIndex(item => item.id === parseInt(id));
-    
-    if (itemIndex !== -1) {
-      const currentItem = menuItems[itemIndex];
-      currentItem.inStock = !currentItem.inStock;
-      
-      // Update stock count based on availability status
-      if (!currentItem.inStock) {
-        currentItem.stock = 0;
-      } else {
-        // Set to a default value if replenished
-        currentItem.stock = 20; 
-      }
-      
-      res.json({ success: true, item: currentItem });
-    } else {
-      res.status(404).json({ success: false, message: "Menu tidak ditemukan" });
-    }
-  });
-
-  app.get("/api/orders", (req, res) => {
-    res.json(orders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
-  });
-
-  app.get("/api/orders/kds", (req, res) => {
-    // Only return paid and not finished orders for kitchen
-    const kdsOrders = orders.filter(o => o.payment_status === 'lunas' && o.status !== 'selesai');
-    res.json(kdsOrders.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()));
   });
 
   app.get("/api/promotions", (req, res) => {
@@ -502,195 +420,108 @@ async function startServer() {
     res.json(coinTransactions);
   });
 
-  app.get("/api/stats", (req, res) => {
+  app.get("/api/stats", async (req, res) => {
     const { range } = req.query; // 'day', 'week', 'month'
-    
-    // In a real database, we would filter by created_at
-    // We'll simulate data variation based on range
-    let multiplier = 1;
-    if (range === 'week') multiplier = 7;
-    if (range === 'month') multiplier = 30;
+    try {
+      const days = range === 'week' ? 7 : range === 'month' ? 30 : 1;
+      
+      const [revenueRows]: any = await db.query(
+        "SELECT SUM(total_price) AS total FROM orders WHERE payment_status = 'lunas' AND created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)",
+        [days]
+      );
+      const totalRevenue = Number(revenueRows[0]?.total || 0);
 
-    const baseRevenue = orders.filter(o => o.payment_status === 'lunas').reduce((acc, o) => acc + o.total_price, 0);
-    const totalRevenue = baseRevenue * multiplier;
-    const pendingOrders = orders.filter(o => o.status === 'menunggu').length;
-    const distributedCoins = users.reduce((acc, u) => acc + u.coin_balance, 0);
-    
-    res.json({ totalRevenue, pendingOrders, distributedCoins });
+      const [pendingRows]: any = await db.query(
+        "SELECT COUNT(*) AS count FROM orders WHERE status = 'menunggu'"
+      );
+      const pendingOrders = Number(pendingRows[0]?.count || 0);
+
+      const [coinRows]: any = await db.query(
+        "SELECT SUM(coin_balance) AS total FROM users"
+      );
+      const distributedCoins = Number(coinRows[0]?.total || 0);
+
+      res.json({ totalRevenue, pendingOrders, distributedCoins });
+    } catch (err: any) {
+      res.status(500).json({ message: "Gagal mengambil statistik", error: err.message });
+    }
   });
 
-  // Logic Verifikasi & Saldo
-  app.post("/api/orders/:id/verify", (req, res) => {
-    const { id } = req.params;
-    const orderIndex = orders.findIndex(o => o.id === id);
+  // Logic Verifikasi & Saldo ditangani oleh ordersRouter
 
-    if (orderIndex === -1) {
-      return res.status(404).json({ message: "Pesanan tidak ditemukan" });
-    }
-
-    const order = orders[orderIndex];
-
-    if (order.payment_status === 'lunas') {
-      return res.status(400).json({ message: "Pesanan sudah lunas" });
-    }
-
-    // Update Order Status
-    order.payment_status = 'lunas';
-    order.status = 'sedang_diproses';
-    order.payment_method = req.body.payment_method || order.payment_method || 'QRIS';
-    order.amount_paid = req.body.amount_paid || order.total_price;
-
-    // Deplete Ingredients based on Recipes
-    order.items.forEach(item => {
-      const recipe = recipes[item.name];
-      if (recipe) {
-        for (const [ingId, amount] of Object.entries(recipe)) {
-          const ing = ingredients.find(i => i.id === ingId);
-          if (ing) {
-            ing.stock = Math.max(0, ing.stock - (amount * item.quantity));
-          }
-        }
-      }
-    });
-
-    // Calculate 5% Koin Cashback
-    const cashback = Math.floor(order.total_price * 0.05);
-    
-    addAuditLog(
-      "Kasir Siti", 
-      "Verifikasi Pembayaran", 
-      `${order.invoice_number} (${order.payment_method} - Rp ${order.total_price.toLocaleString()})`
-    );
-    // Update User Balance
-    const userIndex = users.findIndex(u => u.id === order.user_id);
-    if (userIndex !== -1) {
-      users[userIndex].coin_balance += cashback;
-    }
-
-    // REAL-TIME: Emit event to KDS and any listening clients
-    // We emit "order_updated" instead of "new_order" here to differentiate 
-    // from a fresh order that might still be pending
-    io.emit("order_updated", order);
-    io.emit("stats_updated");
-
-    res.json({ message: "Pesanan telah diverifikasi dan koin telah ditambahkan", order, cashback });
-  });
-
-  app.post("/api/orders/:id/reject", (req, res) => {
-    const { id } = req.params;
-    const orderIndex = orders.findIndex(o => o.id === id);
-
-    if (orderIndex === -1) {
-      return res.status(404).json({ message: "Pesanan tidak ditemukan" });
-    }
-
-    const order = orders[orderIndex];
-    order.payment_status = 'ditolak';
-    order.status = 'dibatalkan';
-
-    io.emit("order_updated", order);
-    io.emit("stats_updated");
-
-    res.json({ message: "Pesanan telah ditolak", order });
-  });
-
-  app.get("/api/reports/summary", (req, res) => {
-    const totalSales = orders.filter(o => o.payment_status === 'lunas').reduce((acc, curr) => acc + curr.total_price, 0);
-    const pendingPayments = orders.filter(o => o.payment_status === 'pending_verifikasi').length;
-    const totalOrders = orders.length;
-    
-    // Group by category from menuItems for some insights
-    const insights = {
-      totalSales,
-      pendingPayments,
-      totalOrders,
-      averageOrderValue: totalOrders > 0 ? totalSales / totalOrders : 0
-    };
-    
-    res.json(insights);
-  });
-
-  app.post("/api/orders/manual", (req, res) => {
-    const { customer_name, items, payment_method, payment_status } = req.body;
-
-    if (!customer_name || !items || items.length === 0) {
-      return res.status(400).json({ message: "Data pesanan tidak lengkap" });
-    }
-
-    let totalPrice = 0;
-    const orderItems = items.map((item: any) => {
-      const menuItem = menuItems.find(m => m.id === item.id);
-      const price = menuItem ? menuItem.price : 0;
-      totalPrice += price * item.quantity;
-      return {
-        name: menuItem ? menuItem.name : item.name,
-        quantity: item.quantity,
-        price: price
+  app.get("/api/reports/summary", async (req, res) => {
+    try {
+      const [allOrders]: any = await db.query("SELECT * FROM orders");
+      const totalSales = allOrders.filter((o: any) => o.payment_status === 'lunas').reduce((acc: number, curr: any) => acc + curr.total_price, 0);
+      const pendingPayments = allOrders.filter((o: any) => o.payment_status === 'pending_verifikasi').length;
+      const totalOrders = allOrders.length;
+      
+      const insights = {
+        totalSales,
+        pendingPayments,
+        totalOrders,
+        averageOrderValue: totalOrders > 0 ? totalSales / totalOrders : 0
       };
-    });
-
-    const newOrder = {
-      id: Date.now().toString(),
-      user_id: "staff-manual", // Staff created order
-      customer_name,
-      invoice_number: `INV-TELP-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-      total_price: totalPrice,
-      status: payment_status === 'lunas' ? 'sedang_diproses' : 'menunggu',
-      payment_status: payment_status || 'belum_bayar',
-      payment_method: payment_method || 'Tunai',
-      amount_paid: payment_status === 'lunas' ? totalPrice : 0,
-      external_id: "MANUAL",
-      payment_proof: null,
-      created_at: new Date().toISOString(),
-      items: orderItems
-    };
-
-    orders.push(newOrder);
-
-    // If paid immediately, deplete ingredients
-    if (payment_status === 'lunas') {
-      newOrder.items.forEach(item => {
-        const recipe = recipes[item.name];
-        if (recipe) {
-          for (const [ingId, amount] of Object.entries(recipe)) {
-            const ing = ingredients.find(i => i.id === ingId);
-            if (ing) {
-              ing.stock = Math.max(0, ing.stock - (amount * item.quantity));
-            }
-          }
-        }
-      });
+      
+      res.json(insights);
+    } catch (err: any) {
+      res.status(500).json({ message: "Gagal mengambil ringkasan laporan", error: err.message });
     }
-
-    addAuditLog(
-      "Admin Bagus", 
-      "Pesanan Manual (Telp/Offline)", 
-      `${newOrder.invoice_number} - ${customer_name} (Rp ${totalPrice.toLocaleString()})`
-    );
-
-    io.emit("new_order", newOrder);
-    if (payment_status === 'lunas') io.emit("order_updated", newOrder);
-    io.emit("stats_updated");
-
-    res.status(201).json(newOrder);
   });
 
-  app.get("/api/reports/monthly", (req, res) => {
-    const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun"];
-    const monthlyData = months.map((month, index) => ({
-      name: month,
-      sales: Math.floor(Math.random() * 500000) + 1000000,
-      orders: Math.floor(Math.random() * 50) + 100,
-      verified: Math.floor(Math.random() * 40) + 80
-    }));
-    
-    const categoryData = [
-      { name: 'Main Course', value: 4500000 },
-      { name: 'Snack', value: 2100000 },
-      { name: 'Beverage', value: 1800000 }
-    ];
+  app.get("/api/reports/monthly", async (req, res) => {
+    try {
+      const [dbMonthly]: any = await db.query(`
+        SELECT 
+          DATE_FORMAT(created_at, '%b') AS month_name,
+          MONTH(created_at) AS month_num,
+          SUM(CASE WHEN payment_status = 'lunas' THEN total_price ELSE 0 END) AS sales,
+          COUNT(id) AS orders,
+          SUM(CASE WHEN payment_status = 'lunas' THEN 1 ELSE 0 END) AS verified
+        FROM orders
+        GROUP BY MONTH(created_at), DATE_FORMAT(created_at, '%b')
+        ORDER BY MONTH(created_at) ASC
+      `);
 
-    res.json({ monthlyData, categoryData });
+      const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun"];
+      const monthlyData = months.map(m => {
+        const found = dbMonthly.find((dbRow: any) => dbRow.month_name === m);
+        return {
+          name: m,
+          sales: found ? Number(found.sales) : 0,
+          orders: found ? Number(found.orders) : 0,
+          verified: found ? Number(found.verified) : 0
+        };
+      });
+
+      const [dbCategories]: any = await db.query(`
+        SELECT 
+          COALESCE(m.category, 'Main Course') AS name,
+          SUM(oi.price * oi.quantity) AS value
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.id
+        LEFT JOIN menus m ON oi.menu_id = m.id
+        WHERE o.payment_status = 'lunas'
+        GROUP BY COALESCE(m.category, 'Main Course')
+      `);
+
+      const categoryData = dbCategories.map((c: any) => ({
+        name: c.name,
+        value: Number(c.value)
+      }));
+
+      if (categoryData.length === 0) {
+        categoryData.push(
+          { name: 'Main Course', value: 0 },
+          { name: 'Snack', value: 0 },
+          { name: 'Beverage', value: 0 }
+        );
+      }
+
+      res.json({ monthlyData, categoryData });
+    } catch (err: any) {
+      res.status(500).json({ message: "Gagal mengambil data bulanan", error: err.message });
+    }
   });
 
   const staff = [
@@ -858,67 +689,102 @@ async function startServer() {
     res.json(auditLogs);
   });
 
-  app.post("/api/orders/simulate", (req, res) => {
-    const randomUser = users[Math.floor(Math.random() * users.length)];
-    const randomItemsCount = Math.floor(Math.random() * 3 + 1);
-    const orderItems = [];
-    let totalPrice = 0;
+  app.post("/api/orders/simulate", async (req, res) => {
+    try {
+      const [dbUsers]: any = await db.query("SELECT * FROM users");
+      const [dbMenus]: any = await db.query("SELECT * FROM menus WHERE outlet = 'ngolab'");
 
-    for (let i = 0; i < randomItemsCount; i++) {
-      const item = menuItems[Math.floor(Math.random() * menuItems.length)];
-      orderItems.push({ name: item.name, quantity: 1, price: item.price });
-      totalPrice += item.price;
+      const usersList = dbUsers.length > 0 ? dbUsers : [
+        { id: "1", nama: "Ahmad Fauzi", NIM: "2024001", coin_balance: 14250 }
+      ];
+      const menusList = dbMenus.length > 0 ? dbMenus : [
+        { id: "1", name: "Mie Yamin Spesial Ayam", price: 18000, category: "Main Course" },
+        { id: "2", name: "Es Teh Manis", price: 5000, category: "Beverage" }
+      ];
+
+      const randomUser = usersList[Math.floor(Math.random() * usersList.length)];
+      const randomItemsCount = Math.floor(Math.random() * 3 + 1);
+      const orderItems = [];
+      let totalPrice = 0;
+
+      for (let i = 0; i < randomItemsCount; i++) {
+        const item = menusList[Math.floor(Math.random() * menusList.length)];
+        orderItems.push({ 
+          id: item.id || "1", 
+          name: item.name, 
+          quantity: 1, 
+          price: item.price 
+        });
+        totalPrice += item.price;
+      }
+
+      const methods = ["Transfer Bank (BCA)", "E-Wallet (OVO)", "E-Wallet (Dana)", "Tunai", "QRIS"];
+      const statusOptions = ["pending_verifikasi", "belum_bayar", "lunas"];
+      const proofs = [
+        "https://images.unsplash.com/photo-1554224155-169641357599?w=400&q=80",
+        "https://images.unsplash.com/photo-1614028674026-a65e31bfd27c?w=400&q=80",
+        "https://images.unsplash.com/photo-1580519542036-c47de6196ba5?w=400&q=80"
+      ];
+
+      const randomMethod = methods[Math.floor(Math.random() * methods.length)];
+      const randomStatus = statusOptions[Math.floor(Math.random() * statusOptions.length)];
+
+      const orderId = Date.now().toString();
+      const invoiceNumber = `INV-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+      const amountPaid = randomStatus === 'lunas' ? totalPrice : 0;
+      const externalId = randomMethod === "Tunai" ? "-" : `EXT-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+      const paymentProof = (randomMethod !== "Tunai" && randomStatus !== "belum_bayar") ? proofs[Math.floor(Math.random() * proofs.length)] : null;
+
+      // Save simulated order to MySQL DB
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+        await connection.query(
+          `INSERT INTO orders (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method, amount_paid, external_id, payment_proof, created_at, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+          [
+            orderId, 
+            randomUser.id || null, 
+            randomUser.nama, 
+            invoiceNumber, 
+            totalPrice, 
+            "menunggu", 
+            randomStatus, 
+            randomMethod, 
+            amountPaid, 
+            externalId, 
+            paymentProof, 
+            "ngolab"
+          ]
+        );
+
+        for (const item of orderItems) {
+          await connection.query(
+            "INSERT INTO order_items (order_id, menu_id, item_name, quantity, price) VALUES (?, ?, ?, ?, ?)",
+            [orderId, item.id, item.name, item.quantity, item.price]
+          );
+        }
+
+        await connection.commit();
+      } catch (dbErr) {
+        await connection.rollback();
+        throw dbErr;
+      } finally {
+        connection.release();
+      }
+
+      // Fetch the created order to send over Socket.io
+      const [insertedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [orderId]);
+      insertedOrder[0].items = orderItems;
+
+      io.emit("new_order", insertedOrder[0]);
+      io.emit("stats_updated");
+
+      res.json(insertedOrder[0]);
+    } catch (err: any) {
+      console.error("Order simulation error:", err);
+      res.status(500).json({ message: "Gagal mensimulasikan pesanan", error: err.message });
     }
-
-    const methods = ["Transfer Bank (BCA)", "E-Wallet (OVO)", "E-Wallet (Dana)", "Tunai", "QRIS"];
-    const statusOptions = ["pending_verifikasi", "belum_bayar", "lunas"];
-    const proofs = [
-      "https://images.unsplash.com/photo-1554224155-169641357599?w=400&q=80",
-      "https://images.unsplash.com/photo-1614028674026-a65e31bfd27c?w=400&q=80",
-      "https://images.unsplash.com/photo-1580519542036-c47de6196ba5?w=400&q=80"
-    ];
-
-    const randomMethod = methods[Math.floor(Math.random() * methods.length)];
-    const randomStatus = statusOptions[Math.floor(Math.random() * statusOptions.length)];
-
-    const newOrder = {
-      id: Date.now().toString(),
-      user_id: randomUser.id,
-      customer_name: randomUser.nama,
-      invoice_number: `INV-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-      total_price: totalPrice,
-      status: "menunggu",
-      payment_status: randomStatus,
-      payment_method: randomMethod,
-      amount_paid: randomStatus === 'lunas' ? totalPrice : 0,
-      external_id: randomMethod === "Tunai" ? "-" : `EXT-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      payment_proof: (randomMethod !== "Tunai" && randomStatus !== "belum_bayar") ? proofs[Math.floor(Math.random() * proofs.length)] : null,
-      created_at: new Date().toISOString(),
-      items: orderItems
-    };
-    orders.push(newOrder);
-    io.emit("new_order", newOrder);
-    res.json(newOrder);
-  });
-
-  app.patch("/api/orders/:id/status", (req, res) => {
-    const { id } = req.params;
-    const { status } = req.body; // 'siap', 'selesai'
-    const order = orders.find(o => o.id === id);
-    if (order) {
-      order.status = status;
-      io.emit("order_status_updated", order);
-      res.json(order);
-    } else {
-      res.status(404).json({ message: "Not found" });
-    }
-  });
-
-  app.delete("/api/orders/:id", (req, res) => {
-    const { id } = req.params;
-    orders = orders.filter(o => o.id !== id);
-    io.emit("stats_updated");
-    res.json({ message: "Dihapus" });
   });
 
   // Vite middleware for development

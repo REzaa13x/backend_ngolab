@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Sidebar from './Sidebar';
 import Dashboard from './Dashboard';
 import OrderManagement from './OrderManagement';
+import ManualOrder from './ManualOrder';
 import UserManagement from './UserManagement';
 import KDS from './KDS';
 import PromotionManagement from './PromotionManagement';
@@ -9,31 +10,53 @@ import StockManagement from './StockManagement';
 import StaffManagement from './StaffManagement';
 import AuditLogs from './AuditLogs';
 import CoinPromoManagement from './CoinPromoManagement';
+import CoworkingMenu from './CoworkingMenu';
 import SalesReport from './SalesReport';
+import MenuManagement from './MenuManagement';
+import SalesHistory from './SalesHistory';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, Search, Settings, User, HelpCircle } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Layout() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const { user } = useAuth();
+  
+  // Define default tab based on role
+  const getDefaultTab = () => {
+    switch(user?.role) {
+      case 'Admin': return 'dashboard';
+      case 'Kasir': return 'orders';
+      case 'Koki': return 'kds';
+      case 'Support': return 'dashboard';
+      default: return 'dashboard';
+    }
+  };
+
+  const [activeTab, setActiveTab] = useState(getDefaultTab());
 
   const tabTitles: Record<string, string> = {
     'dashboard': 'Ringkasan Dasbor',
     'orders': 'Verifikasi & Transaksi',
+    'manual-order': 'Buat Pesanan Manual',
     'reports': 'Laporan Penjualan',
     'users': 'Database Pengguna',
     'kds': 'Sistem Tampilan Dapur',
     'promotions': 'Manajer Papan Digital',
-    'stock': 'Manajemen Stok & Gesture',
+    'stock': 'Katalog Menu Ngolab',
     'staff': 'Tim & Manajemen Shift',
     'logs': 'Pusat Log & Audit Sistem',
-    'coin-promos': 'Manajemen Promo Koin'
+    'coin-promos': 'Manajemen Promo Koin',
+    'coworking-menu': 'Katalog Menu Coworking',
+    'menu-management': 'Manajemen Menu',
+    'sales-history': 'History Penjualan'
   };
 
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
       case 'orders': return <OrderManagement />;
+      case 'manual-order': return <ManualOrder />;
       case 'reports': return <SalesReport />;
       case 'stock': return <StockManagement />;
       case 'staff': return <StaffManagement />;
@@ -42,6 +65,9 @@ export default function Layout() {
       case 'promotions': return <PromotionManagement />;
       case 'logs': return <AuditLogs />;
       case 'coin-promos': return <CoinPromoManagement />;
+      case 'coworking-menu': return <CoworkingMenu />;
+      case 'menu-management': return <MenuManagement onNavigate={setActiveTab} />;
+      case 'sales-history': return <SalesHistory />;
       default: return <Dashboard />;
     }
   };
@@ -83,11 +109,11 @@ export default function Layout() {
             
             <div className="flex items-center gap-3">
               <div className="text-right hidden sm:block">
-                <p className="text-xs font-bold text-slate-900">Admin</p>
-                <p className="text-[10px] text-slate-500 font-medium">ngolab Geasture-East</p>
+                <p className="text-xs font-bold text-slate-900">{user?.name || 'Guest'}</p>
+                <p className="text-[10px] text-slate-500 font-medium">Tangolab Geasture-East</p>
               </div>
               <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
-                A
+                {(user?.name?.charAt(0) || 'U').toUpperCase()}
               </div>
             </div>
           </div>

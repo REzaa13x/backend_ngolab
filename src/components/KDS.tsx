@@ -43,6 +43,12 @@ export default function KDS() {
       const res = await fetch('/api/orders/kds');
       const data = await res.json();
       
+      if (!Array.isArray(data)) {
+        console.error("API did not return an array:", data);
+        setOrders([]);
+        return;
+      }
+      
       // Convert API order structure to KDS structure
       const kdsOrders: KDSOrder[] = data.map((o: any) => ({
         id: o.id,

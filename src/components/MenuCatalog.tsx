@@ -15,15 +15,6 @@ import * as Switch from '@radix-ui/react-switch';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
-const initialMenu = [
-  { id: 1, name: 'Nasi Goreng Spesial', category: 'Main Course', price: 25000, inStock: true, image: 'https://picsum.photos/seed/nasigoreng/400/300' },
-  { id: 2, name: 'Ayam Bakar Madu', category: 'Main Course', price: 32000, inStock: true, image: 'https://picsum.photos/seed/ayambakar/400/300' },
-  { id: 3, name: 'Es Teh Manis', category: 'Beverage', price: 5000, inStock: true, image: 'https://picsum.photos/seed/esteh/400/300' },
-  { id: 4, name: 'Sate Kambing', category: 'Main Course', price: 45000, inStock: false, image: 'https://picsum.photos/seed/sate/400/300' },
-  { id: 5, name: 'Jus Alpukat', category: 'Beverage', price: 15000, inStock: true, image: 'https://picsum.photos/seed/jusalpukat/400/300' },
-  { id: 6, name: 'Pisang Goreng', category: 'Snack', price: 12000, inStock: true, image: 'https://picsum.photos/seed/pisang/400/300' },
-];
-
 export default function MenuCatalog() {
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,6 +131,11 @@ export default function MenuCatalog() {
                     {item.category}
                   </span>
                   <h3 className="font-bold text-base leading-tight line-clamp-2">{item.name}</h3>
+                  {item.description && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                      {item.description}
+                    </p>
+                  )}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="font-mono font-bold text-primary text-sm whitespace-nowrap">Rp {item.price.toLocaleString()}</p>
