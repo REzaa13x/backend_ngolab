@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { db } from "../db/db.js";
+import { db, addAuditLog } from "../db/db.js";
 
 const router = Router();
 
@@ -36,6 +36,8 @@ router.post("/", async (req: Request, res: Response) => {
     );
 
     const [newStaff]: any = await db.query("SELECT id, name, role, email, phone, status FROM staff WHERE id = ?", [newId]);
+    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    await addAuditLog(actor, "Registrasi Pegawai", `${name} (${role})`);
     res.status(201).json(newStaff[0]);
   } catch (err: any) {
     res.status(500).json({ message: "Gagal menambah staf", error: err.message });
@@ -57,6 +59,8 @@ router.patch("/:id", async (req: Request, res: Response) => {
     if (phone !== undefined) { updates.push("phone = ?"); params.push(phone); }
     if (status !== undefined) { updates.push("status = ?"); params.push(status); }
 
+    const [oldStaff]: any = await db.query("SELECT name, role FROM staff WHERE id = ?", [id]);
+
     if (updates.length > 0) {
       params.push(id);
       await db.query(`UPDATE staff SET ${updates.join(', ')} WHERE id = ?`, params);
@@ -65,6 +69,12 @@ router.patch("/:id", async (req: Request, res: Response) => {
     const [updatedStaff]: any = await db.query("SELECT id, name, role, email, phone, status FROM staff WHERE id = ?", [id]);
     if (!updatedStaff.length) return res.status(404).json({ message: "Staf tidak ditemukan" });
     
+    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const oldRole = oldStaff.length ? oldStaff[0].role : "";
+    const newRole = updatedStaff[0].role;
+    const roleChange = (role !== undefined && oldRole !== newRole) ? ` -> ${newRole}` : "";
+    await addAuditLog(actor, "Update Data Pegawai", `${updatedStaff[0].name} (${role !== undefined ? `Role: ${oldRole}${roleChange}` : "Info Kontak"})`);
+
     res.json(updatedStaff[0]);
   } catch (err: any) {
     res.status(500).json({ message: "Gagal update staf", error: err.message });
@@ -75,7 +85,12 @@ router.patch("/:id", async (req: Request, res: Response) => {
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const [staffToDelete]: any = await db.query("SELECT name FROM staff WHERE id = ?", [id]);
+    const deletedName = staffToDelete.length ? staffToDelete[0].name : id;
+
     await db.query("DELETE FROM staff WHERE id = ?", [id]);
+    await addAuditLog(actor, "Hapus Pegawai", deletedName, "warning");
     res.json({ message: "Staf berhasil dihapus" });
   } catch (err: any) {
     res.status(500).json({ message: "Gagal menghapus staf", error: err.message });

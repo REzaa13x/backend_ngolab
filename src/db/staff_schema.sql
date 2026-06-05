@@ -6,13 +6,35 @@
 CREATE TABLE IF NOT EXISTS `staff` (
   `id`             VARCHAR(50)   NOT NULL,
   `name`           VARCHAR(100)  NOT NULL,
-  `role`           ENUM('Admin', 'Kasir', 'Koki', 'Support') NOT NULL DEFAULT 'Kasir',
+  `role`           ENUM('Super Admin', 'Admin', 'Kasir', 'Koki', 'Support') NOT NULL DEFAULT 'Kasir',
   `email`          VARCHAR(150)  NOT NULL UNIQUE,
   `phone`          VARCHAR(50)   DEFAULT NULL,
   `password_hash`  VARCHAR(255)  NOT NULL,
   `status`         ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
   `created_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `shifts` (
+  `id`          INT           NOT NULL AUTO_INCREMENT,
+  `staff_id`    VARCHAR(50)   NOT NULL,
+  `shift_type`  VARCHAR(50)   NOT NULL,
+  `time`        VARCHAR(100)  NOT NULL,
+  `date`        DATE          NOT NULL,
+  `created_at`  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`staff_id`) REFERENCES `staff`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `audit_logs` (
+  `id`          INT           NOT NULL AUTO_INCREMENT,
+  `user`        VARCHAR(100)  NOT NULL,
+  `action`      VARCHAR(100)  NOT NULL,
+  `target`      VARCHAR(255)  NOT NULL,
+  `timestamp`   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `status`      ENUM('success', 'warning', 'info') NOT NULL DEFAULT 'success',
+  `ip`          VARCHAR(50)   DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

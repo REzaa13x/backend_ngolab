@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Search, 
   Filter, 
@@ -49,6 +50,7 @@ interface Order {
 }
 
 export default function OrderManagement() {
+  const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,9 +59,6 @@ export default function OrderManagement() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [period, setPeriod] = useState<'all' | 'day' | 'week' | 'month' | 'year'>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
-  const [isCashModalOpen, setIsCashModalOpen] = useState(false);
-  const [cashAmount, setCashAmount] = useState<string>('');
-  const [cashOrder, setCashOrder] = useState<Order | null>(null);
 
   const fetchOrders = () => {
     setLoading(true);
@@ -117,8 +116,15 @@ export default function OrderManagement() {
       if (!matchesSearch) return false;
 
       const orderSource = order.source || 'ngolab';
-      if (orderSource !== 'ngolab' && orderSource !== 'smart_tag_qr') {
-        return false;
+      const isManual = order.external_id === 'MANUAL';
+      if (sourceFilter === 'ngolab') {
+        if (orderSource !== 'ngolab' || isManual) return false;
+      } else if (sourceFilter === 'coworking') {
+        if (orderSource !== 'coworking' || isManual) return false;
+      } else if (sourceFilter === 'smart_tag_qr') {
+        if (orderSource !== 'smart_tag_qr' && orderSource !== 'smart_tag') return false;
+      } else if (sourceFilter === 'manual') {
+        if (!isManual) return false;
       }
 
       if (period === 'all') return true;
@@ -152,7 +158,10 @@ export default function OrderManagement() {
     try {
       const res = await fetch(`/api/orders/${id}/verify`, { 
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Kasir'
+        },
         body: JSON.stringify({
           payment_method: paymentDetails?.method,
           amount_paid: paymentDetails?.amount
@@ -162,48 +171,83 @@ export default function OrderManagement() {
         fetchOrders();
         fetchSummary();
         setSelectedOrder(null);
-        setIsCashModalOpen(false);
-        setCashOrder(null);
-        setCashAmount('');
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Gagal memverifikasi pembayaran: ${errData.message || res.statusText}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Verification failed:", err);
+      alert(`Terjadi kesalahan jaringan: ${err.message}`);
     }
   };
 
-  const handleCashPayment = (order: Order) => {
-    setCashOrder(order);
-    setIsCashModalOpen(true);
-    setCashAmount('');
-  };
-
-  const changeValue = useMemo(() => {
-    if (!cashOrder || !cashAmount) return 0;
-    const cash = parseFloat(cashAmount) || 0;
-    return Math.max(0, cash - cashOrder.total_price);
-  }, [cashOrder, cashAmount]);
-
-  const rejectOrder = async (id: string) => {
-    if (!window.confirm("Apakah Anda yakin ingin menolak pembayaran ini? Pesanan akan dibatalkan.")) return;
+  const updatePaymentStatus = async (id: string, paymentStatus: 'belum_bayar' | 'lunas') => {
     try {
-      const res = await fetch(`/api/orders/${id}/reject`, { method: 'POST' });
+      const res = await fetch(`/api/orders/${id}/payment-status`, { 
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Kasir'
+        },
+        body: JSON.stringify({ payment_status: paymentStatus })
+      });
       if (res.ok) {
         fetchOrders();
         fetchSummary();
         setSelectedOrder(null);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Gagal mengubah status pembayaran: ${errData.message || res.statusText}`);
       }
-    } catch (err) {
+    } catch (err: any) {
+      console.error("Status update failed:", err);
+      alert(`Terjadi kesalahan jaringan: ${err.message}`);
+    }
+  };
+
+
+
+  const rejectOrder = async (id: string) => {
+    if (!window.confirm("Apakah Anda yakin ingin menolak pembayaran ini? Pesanan akan dibatalkan.")) return;
+    try {
+      const res = await fetch(`/api/orders/${id}/reject`, { 
+        method: 'POST',
+        headers: {
+          'x-user-name': user?.name || 'Kasir'
+        }
+      });
+      if (res.ok) {
+        fetchOrders();
+        fetchSummary();
+        setSelectedOrder(null);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Gagal menolak pesanan: ${errData.message || res.statusText}`);
+      }
+    } catch (err: any) {
       console.error("Rejection failed:", err);
+      alert(`Terjadi kesalahan jaringan: ${err.message}`);
     }
   };
 
   const deleteOrder = async (id: string) => {
     if (!confirm("Hapus pesanan ini?")) return;
     try {
-      const res = await fetch(`/api/orders/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchOrders();
-    } catch (err) {
+      const res = await fetch(`/api/orders/${id}`, { 
+        method: 'DELETE',
+        headers: {
+          'x-user-name': user?.name || 'Super Admin'
+        }
+      });
+      if (res.ok) {
+        fetchOrders();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Gagal menghapus pesanan: ${errData.message || res.statusText}`);
+      }
+    } catch (err: any) {
       console.error("Delete failed:", err);
+      alert(`Terjadi kesalahan jaringan: ${err.message}`);
     }
   };
 
@@ -211,12 +255,21 @@ export default function OrderManagement() {
     try {
       const res = await fetch(`/api/orders/${id}/status`, { 
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Kasir'
+        },
         body: JSON.stringify({ status })
       });
-      if (res.ok) fetchOrders();
-    } catch (err) {
+      if (res.ok) {
+        fetchOrders();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Gagal mengubah status pesanan: ${errData.message || res.statusText}`);
+      }
+    } catch (err: any) {
       console.error("Status update failed:", err);
+      alert(`Terjadi kesalahan jaringan: ${err.message}`);
     }
   };
 
@@ -268,8 +321,15 @@ export default function OrderManagement() {
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black tracking-tight text-slate-900">Verifikasi Transaksi (Ngolab)</h2>
-          <p className="text-sm text-slate-500 font-medium tracking-tight">Validasi pembayaran dan monitoring arus pesanan real-time.</p>
+          <h2 className="text-2xl font-black tracking-tight text-slate-900">
+            Verifikasi Transaksi {
+              sourceFilter === 'all' ? '(Semua)' : 
+              sourceFilter === 'ngolab' ? '(Gesture Eats)' : 
+              sourceFilter === 'coworking' ? '(Coworking)' : 
+              sourceFilter === 'smart_tag_qr' ? '(Smart Tag)' : 
+              '(Manual)'
+            }
+          </h2>
         </div>
         <div className="flex items-center gap-3">
           <button 
@@ -308,7 +368,38 @@ export default function OrderManagement() {
               className="w-full bg-white border border-slate-100 rounded-2xl pl-12 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
             />
           </div>
-           <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+           <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+              {/* Filter Outlet */}
+              <div className="flex items-center gap-1 bg-white border border-slate-100 rounded-2xl p-1 shadow-sm">
+                 {[
+                   { id: 'all', label: 'Semua' },
+                   { id: 'ngolab', label: 'Gesture Eats' },
+                   { id: 'coworking', label: 'Coworking' },
+                   { id: 'smart_tag_qr', label: 'Smart Tag' },
+                   { id: 'manual', label: 'Manual' }
+                 ].map(s => (
+                   <button
+                     key={s.id}
+                     onClick={() => setSourceFilter(s.id)}
+                     className={cn(
+                       "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                       sourceFilter === s.id 
+                         ? s.id === 'ngolab' 
+                           ? "bg-orange-600 text-white shadow-md shadow-orange-200"
+                           : s.id === 'coworking'
+                             ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                             : s.id === 'smart_tag_qr'
+                               ? "bg-purple-600 text-white shadow-md shadow-purple-200"
+                               : "bg-slate-900 text-white shadow-md"
+                         : "text-slate-500 hover:bg-slate-50"
+                     )}
+                   >
+                     {s.label}
+                   </button>
+                 ))}
+              </div>
+
+              {/* Filter Waktu */}
               <div className="flex items-center gap-1 bg-white border border-slate-100 rounded-2xl p-1 shadow-sm">
                  {[
                    { id: 'all', label: 'Semua Waktu' },
@@ -375,14 +466,23 @@ export default function OrderManagement() {
                         <span className="text-[9px] bg-slate-100 text-slate-400 px-1 py-0.5 rounded leading-none">
                           ID:{order.user_id || 'Tamu'}
                         </span>
-                        <span className={cn(
-                          "text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-widest leading-none",
-                          ((order.source || 'ngolab') === 'ngolab' || order.source === 'smart_tag_qr') ? "bg-orange-50 text-orange-600" :
-                          (order.source || 'ngolab') === 'coworking' ? "bg-blue-50 text-blue-600" :
-                          "bg-purple-50 text-purple-600"
-                        )}>
-                          {order.source === 'smart_tag_qr' ? 'ngolab' : (order.source || 'ngolab').replace(/_/g, ' ')}
-                        </span>
+                        {order.external_id === 'MANUAL' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-widest leading-none bg-slate-100 text-slate-600 border border-slate-200">
+                            Manual ({order.source})
+                          </span>
+                        ) : order.source === 'ngolab' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-widest leading-none bg-orange-50 text-orange-600">
+                            Gesture Eats
+                          </span>
+                        ) : order.source === 'coworking' ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-widest leading-none bg-blue-50 text-blue-700 border border-blue-100">
+                            Coworking
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-widest leading-none bg-purple-50 text-purple-600">
+                            Smart Tag
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -417,34 +517,23 @@ export default function OrderManagement() {
 
                   {/* KOLOM VALIDASI */}
                   <td className="px-6 py-5">
-                    {order.payment_status !== 'lunas' ? (
-                      <div className="flex items-center gap-1.5 justify-center">
+                    <div className="flex items-center justify-center">
+                      {order.payment_status === 'lunas' ? (
                         <button
-                          onClick={() => verifyPayment(order.id, { method: 'QRIS', amount: order.total_price })}
-                          className="px-2.5 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all shadow-sm"
+                          onClick={() => updatePaymentStatus(order.id, 'belum_bayar')}
+                          className="px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all shadow-sm flex items-center gap-1.5"
                         >
-                          QRIS
+                          <Minus size={12} /> Set Belum Bayar
                         </button>
+                      ) : (
                         <button
-                          onClick={() => handleCashPayment(order)}
-                          className="px-2.5 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all shadow-sm"
+                          onClick={() => updatePaymentStatus(order.id, 'lunas')}
+                          className="px-3 py-2 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all shadow-sm flex items-center gap-1.5"
                         >
-                          Tunai
+                          <Check size={12} /> Set Lunas
                         </button>
-                        <button
-                          onClick={() => rejectOrder(order.id)}
-                          className="px-2.5 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all shadow-sm"
-                        >
-                          Tolak
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 justify-center">
-                        <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest italic bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-                          Sudah Diverifikasi
-                        </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </td>
                   
                   <td className="px-6 py-5 text-right">
@@ -470,81 +559,7 @@ export default function OrderManagement() {
         </div>
       </div>
 
-      <AnimatePresence>
-        {isCashModalOpen && cashOrder && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative"
-            >
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <ArrowUpDown size={32} />
-                </div>
-                <h3 className="text-xl font-black text-slate-900">Pembayaran Tunai</h3>
-                <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Invoice: {cashOrder.invoice_number}</p>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                   <div className="flex justify-between items-center mb-2">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Tagihan</label>
-                   </div>
-                   <div className="bg-slate-50 rounded-2xl p-4 text-center">
-                     <span className="text-2xl font-black text-slate-900">Rp {cashOrder.total_price.toLocaleString()}</span>
-                   </div>
-                </div>
-
-                <div>
-                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Jumlah Uang Diterima</label>
-                   <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-indigo-600">Rp</span>
-                      <input 
-                        type="number" 
-                        autoFocus
-                        value={cashAmount}
-                        onChange={(e) => setCashAmount(e.target.value)}
-                        placeholder="0"
-                        className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl pl-12 pr-4 py-4 text-xl font-black text-slate-900 focus:outline-none focus:border-indigo-600 transition-all"
-                      />
-                   </div>
-                </div>
-
-                {parseFloat(cashAmount) >= cashOrder.total_price && (
-                   <motion.div 
-                     initial={{ opacity: 0, y: 10 }}
-                     animate={{ opacity: 1, y: 0 }}
-                     className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100"
-                   >
-                      <div className="flex justify-between items-center">
-                        <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Uang Kembalian</span>
-                        <span className="text-xl font-black text-emerald-700">Rp {changeValue.toLocaleString()}</span>
-                      </div>
-                   </motion.div>
-                )}
-
-                <div className="pt-4 flex gap-3">
-                   <button 
-                     onClick={() => setIsCashModalOpen(false)}
-                     className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all font-mono"
-                   >
-                      Batal
-                   </button>
-                   <button 
-                     disabled={!cashAmount || parseFloat(cashAmount) < cashOrder.total_price}
-                     onClick={() => verifyPayment(cashOrder.id, { method: 'Tunai', amount: parseFloat(cashAmount) })}
-                     className="flex-[2] py-4 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-slate-200 disabled:opacity-50"
-                   >
-                      Konfirmasi Bayar
-                   </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Cash Modal Removed */}
 
       {/* Modal Bukti Transaksi Ala Struk */}
       <AnimatePresence>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Package, 
   Search, 
@@ -12,7 +13,8 @@ import {
   Upload,
   Image as ImageIcon,
   RefreshCcw,
-  Trash2
+  Trash2,
+  Tag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -47,6 +49,7 @@ interface PortionYield {
 }
 
 export default function StockManagement() {
+  const { user } = useAuth();
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [portionYields, setPortionYields] = useState<PortionYield[]>([]);
@@ -61,6 +64,7 @@ export default function StockManagement() {
   const [editingProduct, setEditingProduct] = useState<MenuItem | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<MenuItem | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [activePromos, setActivePromos] = useState<any[]>([]);
 
   const fetchIngredients = async () => {
     try {
@@ -80,7 +84,10 @@ export default function StockManagement() {
     try {
       const res = await fetch(`/api/ingredients/${selectedIngredient.id}/restock`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Koki'
+        },
         body: JSON.stringify({ amount: restockAmount })
       });
       if (res.ok) {
@@ -151,15 +158,30 @@ export default function StockManagement() {
       const url = selectedCategory === 'Semua' 
         ? '/api/menu?outlet=ngolab' 
         : `/api/menu?outlet=ngolab&category=${encodeURIComponent(selectedCategory)}`;
-      const res = await fetch(url);
+      
+      const [res, promosRes] = await Promise.all([
+        fetch(url),
+        fetch('/api/coin-promos').then(r => r.json()).catch(() => [])
+      ]);
       const data = await res.json();
       setMenuItems(data);
+      setActivePromos(promosRes);
       fetchIngredients();
       setLoading(false);
     } catch (err) {
       console.error("Failed to fetch menu:", err);
     }
   }, [selectedCategory]);
+
+  const getPromoForItem = (itemId: string | number) => {
+    const now = new Date();
+    return activePromos.find(p => 
+      p.product_id?.toString() === itemId.toString() && 
+      p.is_active && 
+      p.used_count < p.max_usage && 
+      new Date(p.valid_until) > now
+    );
+  };
 
   useEffect(() => {
     fetchMenu();
@@ -399,15 +421,26 @@ export default function StockManagement() {
                   </div>
 
 
-                </div>
-
-                <div className="p-5 flex-1 flex flex-col justify-between">
+                </div>                 <div className="p-5 flex-1 flex flex-col justify-between">
                   <div>
                     <div className="flex items-start justify-between gap-4 mb-3">
                       <div className="flex-1 min-w-0">
-                        <span className="inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[9px] font-black uppercase tracking-widest mb-1.5">
-                          {item.category}
-                        </span>
+                        <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
+                          <span className="inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[9px] font-black uppercase tracking-widest">
+                            {item.category}
+                          </span>
+                          {(() => {
+                            const promo = getPromoForItem(item.id);
+                            if (promo) {
+                              return (
+                                <span className="inline-block px-2 py-0.5 rounded bg-rose-50 text-rose-600 text-[9px] font-black uppercase tracking-widest animate-pulse flex items-center gap-1">
+                                  <Tag size={8} /> Promo Koin
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
                         <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-tight">
                           {item.name}
                         </h3>
@@ -427,12 +460,44 @@ export default function StockManagement() {
                            Estimasi Portions: {portionYields.find(y => y.name === item.name)?.yield} Porsi
                          </span>
                       </div>
-                    )}
-
-                    <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                      <p className="text-[13px] font-black text-indigo-600 whitespace-nowrap">
-                        Rp {item.price.toLocaleString()}
-                      </p>
+                    )}                     <div className="flex items-center justify-between pt-3 border-t border-slate-50">
+                      {(() => {
+                        const promo = getPromoForItem(item.id);
+                        let hasDiscountedPrice = false;
+                        let promoPrice = item.price;
+                        let isFree = false;
+                        if (promo) {
+                          if (promo.discount_type === 'percentage') {
+                            promoPrice = item.price - (item.price * promo.discount_value / 100);
+                            hasDiscountedPrice = true;
+                          } else if (promo.discount_type === 'fixed') {
+                            promoPrice = Math.max(0, item.price - promo.discount_value);
+                            hasDiscountedPrice = true;
+                          } else if (promo.discount_type === 'free_item') {
+                            promoPrice = 0;
+                            hasDiscountedPrice = true;
+                            isFree = true;
+                          }
+                        }
+                        if (hasDiscountedPrice) {
+                          return (
+                            <div className="flex flex-col">
+                              <p className="text-[13px] font-black text-rose-600 whitespace-nowrap">
+                                {isFree ? 'Gratis' : `Rp ${promoPrice.toLocaleString()}`}
+                              </p>
+                              <p className="text-[10px] text-slate-400 line-through font-semibold whitespace-nowrap">
+                                Rp {item.price.toLocaleString()}
+                              </p>
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <p className="text-[13px] font-black text-indigo-600 whitespace-nowrap">
+                              Rp {item.price.toLocaleString()}
+                            </p>
+                          );
+                        }
+                      })()}
                       <div className={cn(
                         "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-colors",
                         item.inStock ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"

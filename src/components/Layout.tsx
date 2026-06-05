@@ -9,23 +9,26 @@ import PromotionManagement from './PromotionManagement';
 import StockManagement from './StockManagement';
 import StaffManagement from './StaffManagement';
 import AuditLogs from './AuditLogs';
-import CoinPromoManagement from './CoinPromoManagement';
+import ProductPromoManagement from './ProductPromoManagement';
+import VoucherManagement from './VoucherManagement';
 import CoworkingMenu from './CoworkingMenu';
 import SalesReport from './SalesReport';
 import MenuManagement from './MenuManagement';
 import SalesHistory from './SalesHistory';
+import IoTConfig from './IoTConfig';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, Search, Settings, User, HelpCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Layout() {
-  const { user } = useAuth();
+  const { user, activeRole } = useAuth();
   
   // Define default tab based on role
   const getDefaultTab = () => {
-    switch(user?.role) {
-      case 'Admin': return 'dashboard';
+    const currentRole = activeRole || user?.role;
+    switch(currentRole) {
+      case 'Super Admin': return 'dashboard';
       case 'Kasir': return 'orders';
       case 'Koki': return 'kds';
       case 'Support': return 'dashboard';
@@ -39,17 +42,19 @@ export default function Layout() {
     'dashboard': 'Ringkasan Dasbor',
     'orders': 'Verifikasi & Transaksi',
     'manual-order': 'Buat Pesanan Manual',
-    'reports': 'Laporan Penjualan',
+    'reports': 'Analisis & Laporan',
     'users': 'Database Pengguna',
     'kds': 'Sistem Tampilan Dapur',
     'promotions': 'Manajer Papan Digital',
     'stock': 'Katalog Menu Ngolab',
     'staff': 'Tim & Manajemen Shift',
     'logs': 'Pusat Log & Audit Sistem',
-    'coin-promos': 'Manajemen Promo Koin',
+    'product-promos': 'Manajemen Promo Produk',
+    'vouchers': 'Manajemen Voucher Koin',
     'coworking-menu': 'Katalog Menu Coworking',
     'menu-management': 'Manajemen Menu',
-    'sales-history': 'History Penjualan'
+    'sales-history': 'Riwayat Transaksi',
+    'settings': 'Hardware & IoT Configuration'
   };
 
   const renderContent = () => {
@@ -64,10 +69,12 @@ export default function Layout() {
       case 'kds': return <KDS />;
       case 'promotions': return <PromotionManagement />;
       case 'logs': return <AuditLogs />;
-      case 'coin-promos': return <CoinPromoManagement />;
+      case 'product-promos': return <ProductPromoManagement />;
+      case 'vouchers': return <VoucherManagement />;
       case 'coworking-menu': return <CoworkingMenu />;
       case 'menu-management': return <MenuManagement onNavigate={setActiveTab} />;
       case 'sales-history': return <SalesHistory />;
+      case 'settings': return <IoTConfig />;
       default: return <Dashboard />;
     }
   };

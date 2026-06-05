@@ -27,14 +27,17 @@ async function run() {
 
     console.log('Inserting default staff...');
     const defaultStaff = [
-      { id: 'S001', name: 'Admin Bagus', role: 'Admin', email: 'admin@tangolab.id', phone: '08111111', password: 'admin' },
-      { id: 'S002', name: 'Kasir Siti', role: 'Kasir', email: 'kasir@tangolab.id', phone: '08222222', password: 'kasir' },
-      { id: 'S003', name: 'Koki Budi', role: 'Koki', email: 'koki@tangolab.id', phone: '08333333', password: 'koki' },
+      { id: 'S001', name: 'Admin Tangolab', role: 'Super Admin', email: 'admin@gmail.com', phone: '08111111', password: '12345678' },
+      { id: 'S002', name: 'Kasir Tangolab', role: 'Kasir', email: 'kasir@gmail.com', phone: '08222222', password: '12345678' },
+      { id: 'S003', name: 'Koki Tangolab', role: 'Koki', email: 'koki@gmail.com', phone: '08333333', password: '12345678' },
     ];
+
+    // Clear old default staff to avoid duplicate key errors and update passwords
+    await db.query("DELETE FROM staff WHERE id IN ('S001', 'S002', 'S003') OR email IN ('admin@gmail.com', 'kasir@gmail.com', 'koki@gmail.com', 'admin@tangolab.id', 'kasir@tangolab.id', 'koki@tangolab.id')");
 
     for (const s of defaultStaff) {
       await db.query(
-        "INSERT IGNORE INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
+        "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
         [s.id, s.name, s.role, s.email, s.phone, hashPassword(s.password)]
       );
     }

@@ -6,7 +6,30 @@ const router = Router();
 // GET /api/users
 router.get("/", async (_req: Request, res: Response) => {
   try {
-    const [users]: any = await db.query("SELECT * FROM users ORDER BY created_at DESC");
+    const query = `
+      SELECT 
+        u.id, 
+        u.nama, 
+        u.nim, 
+        u.coin_balance, 
+        u.avatar_url, 
+        u.rfid_tag_id, 
+        u.email, 
+        u.phone, 
+        u.role, 
+        u.created_at, 
+        u.updated_at,
+        COALESCE(v.active_vouchers_count, 0) AS active_vouchers_count
+      FROM users u
+      LEFT JOIN (
+        SELECT user_id, COUNT(*) AS active_vouchers_count
+        FROM user_vouchers
+        WHERE status = 'unused'
+        GROUP BY user_id
+      ) v ON u.id = v.user_id
+      ORDER BY u.created_at DESC
+    `;
+    const [users]: any = await db.query(query);
     res.json(users);
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil data pelanggan", error: err.message });
@@ -30,13 +53,38 @@ router.get("/:id/recommendations", async (req: Request, res: Response) => {
       [now]
     );
 
+    // 2.5 Get menus stock status
+    const [menus]: any = await db.query("SELECT id, in_stock, stock FROM menus");
+    const menuStockMap = new Map();
+    menus.forEach((m: any) => {
+      menuStockMap.set(m.id.toString(), { in_stock: Boolean(m.in_stock), stock: m.stock });
+    });
+
     // 3. Map recommendations
-    const recommendations = promos.map((p: any) => ({
-      ...p,
-      can_redeem: user.coin_balance >= p.coin_cost,
-      coins_needed: Math.max(0, p.coin_cost - user.coin_balance),
-      progress: Math.min(100, Math.round((user.coin_balance / p.coin_cost) * 100)),
-    })).sort((a: any, b: any) => (a.can_redeem === b.can_redeem ? a.coin_cost - b.coin_cost : a.can_redeem ? -1 : 1));
+    const recommendations = promos.map((p: any) => {
+      let isProductInStock = true;
+      if (p.product_id) {
+        const stockInfo = menuStockMap.get(p.product_id.toString());
+        if (stockInfo) {
+          isProductInStock = stockInfo.in_stock && stockInfo.stock > 0;
+        }
+      }
+
+      const hasCoins = user.coin_balance >= p.coin_cost;
+
+      return {
+        ...p,
+        can_redeem: hasCoins && isProductInStock,
+        coins_needed: Math.max(0, p.coin_cost - user.coin_balance),
+        progress: Math.min(100, Math.round((user.coin_balance / p.coin_cost) * 100)),
+        is_out_of_stock: !isProductInStock,
+      };
+    }).sort((a: any, b: any) => {
+      if (a.is_out_of_stock !== b.is_out_of_stock) {
+        return a.is_out_of_stock ? 1 : -1;
+      }
+      return a.can_redeem === b.can_redeem ? a.coin_cost - b.coin_cost : a.can_redeem ? -1 : 1;
+    });
 
     res.json({
       user: { id: user.id, nama: user.nama, coin_balance: user.coin_balance },
@@ -63,6 +111,141 @@ router.get("/transactions", async (req: Request, res: Response) => {
     res.json(transactions);
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil transaksi koin", error: err.message });
+  }
+});
+// POST /api/users/register — Registrasi User / Pelanggan Baru
+router.post("/register", async (req: Request, res: Response) => {
+  try {
+    const { id, nama, nim, avatar_url, email, phone, role } = req.body;
+
+    if (!id || !nama) {
+      return res.status(400).json({ message: "ID dan Nama wajib diisi" });
+    }
+
+    // Cek apakah user sudah terdaftar
+    const [existing]: any = await db.query("SELECT id FROM users WHERE id = ?", [id]);
+    if (existing.length > 0) {
+      return res.status(400).json({ message: "User ID / NIM sudah terdaftar" });
+    }
+
+    const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
+    const avatar = avatar_url || `https://picsum.photos/seed/${id}/100/100`;
+    const userRole = role || 'Pelanggan';
+
+    await db.query(
+      "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, email, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, nama, nim || id, initialCoin, avatar, email || null, phone || null, userRole]
+    );
+
+    // Catat riwayat bonus pendaftaran
+    const txId = `ct-${Date.now()}`;
+    await db.query(
+      "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, 'Bonus Pendaftaran')",
+      [txId, id, nama, initialCoin]
+    );
+
+    res.status(201).json({
+      message: "User berhasil terdaftar",
+      user: {
+        id,
+        nama,
+        nim: nim || id,
+        coin_balance: initialCoin,
+        avatar_url: avatar,
+        email: email || null,
+        phone: phone || null,
+        role: userRole,
+        active_vouchers_count: 0
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: "Gagal mendaftarkan user", error: err.message });
+  }
+});
+
+// POST /api/users/login — Login / Verifikasi User
+router.post("/login", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ message: "User ID / NIM wajib diisi" });
+    }
+
+    const [users]: any = await db.query("SELECT * FROM users WHERE id = ? OR nim = ?", [id, id]);
+    if (users.length === 0) {
+      return res.status(404).json({ message: "User tidak ditemukan" });
+    }
+
+    const user = users[0];
+    res.json({
+      message: "Login berhasil",
+      user: {
+        id: user.id,
+        nama: user.nama,
+        nim: user.nim,
+        coin_balance: user.coin_balance,
+        avatar_url: user.avatar_url
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: "Terjadi kesalahan server saat login", error: err.message });
+  }
+});
+
+// POST /api/users/:id/earn-coins — Tambah Koin (dari game atau aktivitas Kiosk)
+router.post("/:id/earn-coins", async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+    const { amount, description } = req.body;
+
+    const parsedAmount = parseInt(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: "Jumlah koin tidak valid" });
+    }
+
+    // Cek apakah user ada
+    const [users]: any = await connection.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [id]);
+    if (users.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: "User tidak ditemukan" });
+    }
+
+    const user = users[0];
+
+    // Tambah saldo koin
+    await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [parsedAmount, id]);
+
+    // Catat transaksi koin masuk
+    const txId = `ct-${Date.now()}`;
+    const desc = description || "Hadiah koin dari aktivitas game/kiosk";
+    await connection.query(
+      "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
+      [txId, id, user.nama, parsedAmount, desc]
+    );
+
+    await connection.commit();
+
+    const [updatedUser]: any = await db.query("SELECT coin_balance FROM users WHERE id = ?", [id]);
+
+    res.json({
+      message: "Koin berhasil ditambahkan",
+      new_balance: updatedUser[0].coin_balance,
+      transaction: {
+        id: txId,
+        amount: parsedAmount,
+        type: "earn",
+        description: desc
+      }
+    });
+  } catch (err: any) {
+    await connection.rollback();
+    res.status(500).json({ message: "Gagal menambahkan koin", error: err.message });
+  } finally {
+    connection.release();
   }
 });
 

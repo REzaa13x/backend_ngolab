@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import Login from './components/Login';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { SettingsProvider } from './contexts/SettingsContext';
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -28,10 +29,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
-    </AuthProvider>
+    <SettingsProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppContent />
+        </BrowserRouter>
+      </AuthProvider>
+    </SettingsProvider>
   );
 }

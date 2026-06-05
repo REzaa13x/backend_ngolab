@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { db } from "../db/db.js";
+import { db, addAuditLog } from "../db/db.js";
 import { authApiKey } from "../middleware/authApiKey.js";
 
 const router = Router();
@@ -77,7 +77,8 @@ router.post("/manual", async (req: Request, res: Response) => {
 
     const orderId = Date.now().toString();
     const invoiceNumber = `INV-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-    const status = payment_status === 'lunas' ? 'sedang_diproses' : 'menunggu';
+    // Status 'menunggu' agar masuk ke KDS kolom "Pesanan Masuk" — koki yang akan memulai
+    const status = 'menunggu';
     const finalPaymentStatus = payment_status || 'belum_bayar';
     const amountPaid = finalPaymentStatus === 'lunas' ? totalPrice : 0;
 
@@ -109,6 +110,10 @@ router.post("/manual", async (req: Request, res: Response) => {
       id: i.menu_id, name: i.item_name, quantity: i.quantity, price: i.price
     }));
 
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    await addAuditLog(actor, "Buat Pesanan Manual", `${invoiceNumber} (${customer_name})`);
+
     const io = req.app.get('io');
     if (io) {
       io.emit("new_order", insertedOrder[0]);
@@ -138,7 +143,7 @@ router.post("/external", authApiKey, async (req: Request, res: Response) => {
 
     const orderId = Date.now().toString();
     const invoiceNumber = external_id || `EXT-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-    const finalPaymentStatus = payment_status || 'lunas'; // Eksternal biasanya lunas
+    const finalPaymentStatus = payment_status || 'belum_bayar'; // Default ke belum_bayar agar diverifikasi Kasir terlebih dahulu
     const status = finalPaymentStatus === 'lunas' ? 'sedang_diproses' : 'menunggu';
     const amountPaid = finalPaymentStatus === 'lunas' ? total_price : 0;
     const finalSource = source || 'ngolab';
@@ -249,8 +254,10 @@ router.post("/:id/verify", async (req: Request, res: Response) => {
     const amountPaid = req.body.amount_paid || order.total_price;
     const paymentMethod = req.body.payment_method || order.payment_method || 'QRIS';
 
+    // Status kembali ke 'menunggu' agar koki bisa melihat di kolom "Pesanan Masuk" KDS
+    // Koki yang akan menggeser ke 'sedang_diproses' ketika mulai memasak
     await connection.query(
-      "UPDATE orders SET payment_status = 'lunas', status = 'sedang_diproses', amount_paid = ?, payment_method = ? WHERE id = ?",
+      "UPDATE orders SET payment_status = 'lunas', status = 'menunggu', amount_paid = ?, payment_method = ? WHERE id = ?",
       [amountPaid, paymentMethod, id]
     );
 
@@ -261,16 +268,22 @@ router.post("/:id/verify", async (req: Request, res: Response) => {
       await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [cashback, order.user_id]);
       
       const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
+      const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
       
       await connection.query(
         "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
-        [`ct-${Date.now()}`, order.user_id, users[0].nama, cashback, `Cashback 5% dari ${order.invoice_number}`]
+        [`ct-${Date.now()}`, order.user_id, userName, cashback, `Cashback 5% dari ${order.invoice_number}`]
       );
     }
 
     await connection.commit();
 
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [id]);
+    
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    await addAuditLog(actor, "Verifikasi Pembayaran", `${order.invoice_number} (Lunas)`);
+
     const io = req.app.get('io');
     if (io) {
       io.emit("order_updated", updatedOrder[0]);
@@ -291,6 +304,11 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
   try {
     await db.query("UPDATE orders SET payment_status = 'ditolak', status = 'dibatalkan' WHERE id = ?", [req.params.id]);
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
+    
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    await addAuditLog(actor, "Tolak Pesanan", `${updatedOrder[0].invoice_number} (Dibatalkan)`, "warning");
+
     const io = req.app.get('io');
     if (io) {
       io.emit("order_updated", updatedOrder[0]);
@@ -302,6 +320,69 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/orders/:id/payment-status — Ubah Status Pembayaran (belum_bayar, lunas)
+router.patch("/:id/payment-status", async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { id } = req.params;
+    const { payment_status } = req.body;
+
+    if (payment_status !== 'belum_bayar' && payment_status !== 'lunas') {
+      return res.status(400).json({ message: "Status pembayaran tidak valid" });
+    }
+
+    const [orders]: any = await connection.query("SELECT * FROM orders WHERE id = ?", [id]);
+    if (!orders.length) return res.status(404).json({ message: "Pesanan tidak ditemukan" });
+    const order = orders[0];
+
+    // Saat lunas: status 'menunggu' agar masuk ke kolom "Pesanan Masuk" di KDS
+    // Koki yang akan menggeser ke 'sedang_diproses' lewat tombol "Mulai Masak"
+    const status = payment_status === 'lunas' ? 'menunggu' : 'menunggu';
+    const amountPaid = payment_status === 'lunas' ? order.total_price : 0;
+
+    await connection.query(
+      "UPDATE orders SET payment_status = ?, status = ?, amount_paid = ? WHERE id = ?",
+      [payment_status, status, amountPaid, id]
+    );
+
+    let cashback = 0;
+    if (payment_status === 'lunas' && order.user_id) {
+      cashback = Math.floor(order.total_price * 0.05);
+      await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [cashback, order.user_id]);
+      
+      const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
+      const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
+      
+      await connection.query(
+        "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
+        [`ct-${Date.now()}`, order.user_id, userName, cashback, `Cashback 5% dari ${order.invoice_number}`]
+      );
+    }
+
+    await connection.commit();
+
+    const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [id]);
+    
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    await addAuditLog(actor, "Ubah Status Bayar", `${order.invoice_number} (${payment_status})`);
+
+    const io = req.app.get('io');
+    if (io && updatedOrder.length > 0) {
+      io.emit("order_updated", updatedOrder[0]);
+      io.emit("stats_updated");
+    }
+
+    res.json(updatedOrder[0]);
+  } catch (err: any) {
+    await connection.rollback();
+    res.status(500).json({ message: "Gagal merubah status pembayaran", error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
 // PATCH /api/orders/:id/status — Ubah Status Pesanan (menunggu, sedang_diproses, ready, selesai, dibatalkan)
 router.patch("/:id/status", async (req: Request, res: Response) => {
   try {
@@ -309,6 +390,12 @@ router.patch("/:id/status", async (req: Request, res: Response) => {
     await db.query("UPDATE orders SET status = ? WHERE id = ?", [status, req.params.id]);
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
     
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Kasir/Koki";
+    if (updatedOrder.length > 0) {
+      await addAuditLog(actor, "Update Status Pesanan", `${updatedOrder[0].invoice_number} (${status})`);
+    }
+
     const io = req.app.get('io');
     if (io && updatedOrder.length > 0) {
       io.emit("order_updated", updatedOrder[0]);
@@ -320,13 +407,23 @@ router.patch("/:id/status", async (req: Request, res: Response) => {
   }
 });
 
+
+
+
 // DELETE /api/orders/:id — Hapus Pesanan
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
-    // Delete items first (or rely on CASCADE if set, but let's be explicit just in case)
-    await db.query("DELETE FROM order_items WHERE order_id = ?", [req.params.id]);
-    await db.query("DELETE FROM orders WHERE id = ?", [req.params.id]);
+    const { id } = req.params;
+    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const [orderData]: any = await db.query("SELECT invoice_number FROM orders WHERE id = ?", [id]);
+    const inv = orderData.length ? orderData[0].invoice_number : id;
+
+    // Delete items first
+    await db.query("DELETE FROM order_items WHERE order_id = ?", [id]);
+    await db.query("DELETE FROM orders WHERE id = ?", [id]);
     
+    await addAuditLog(actor, "Hapus Pesanan", `${inv}`, "warning");
+
     const io = req.app.get('io');
     if (io) {
       io.emit("stats_updated");

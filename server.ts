@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import multer from "multer";
@@ -6,7 +7,7 @@ import sharp from "sharp";
 import fs from "fs";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { db, testDbConnection } from "./src/db/db.js";
+import { db, testDbConnection, addAuditLog } from "./src/db/db.js";
 import digitalBoardRouter from "./src/routes/digitalBoard.js";
 import ordersRouter from "./src/routes/orders.js";
 import usersRouter from "./src/routes/users.js";
@@ -14,6 +15,9 @@ import coinPromosRouter from "./src/routes/coinPromos.js";
 import authRouter from "./src/routes/auth.js";
 import staffRouter from "./src/routes/staff.js";
 import menuRouter from "./src/routes/menu.js";
+import shiftsRouter from "./src/routes/shifts.js";
+import auditLogsRouter from "./src/routes/auditLogs.js";
+import settingsRouter from "./src/routes/settings.js";
 
 async function startServer() {
   const app = express();
@@ -52,15 +56,23 @@ async function startServer() {
   // ─── Real Database API Routes ──────────────────────────────────────────────
   app.use("/api/auth", authRouter);
   app.use("/api/staff", staffRouter);
+  app.use("/api/shifts", shiftsRouter);
+  app.use("/api/audit-logs", auditLogsRouter);
   app.use("/api/orders", ordersRouter);
   app.use("/api/users", usersRouter);
   app.use("/api/coin-promos", coinPromosRouter);
   app.use("/api/menu", menuRouter);
+  app.use("/api/settings", settingsRouter);
 
   // Ensure upload directory exists
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const brandUploadDir = path.join(process.cwd(), 'public', 'uploads', 'brand');
+  if (!fs.existsSync(brandUploadDir)) {
+    fs.mkdirSync(brandUploadDir, { recursive: true });
   }
 
   // Multer config for file upload
@@ -167,7 +179,9 @@ async function startServer() {
       is_active: true,
       image_url: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=600&q=80",
       category: "Makanan",
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5).toISOString()
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5).toISOString(),
+      promo_code: null as string | null,
+      limit_per_user: 1
     },
     {
       id: "cp-2",
@@ -183,7 +197,9 @@ async function startServer() {
       is_active: true,
       image_url: "https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=600&q=80",
       category: "Minuman",
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString()
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(),
+      promo_code: null as string | null,
+      limit_per_user: 1
     },
     {
       id: "cp-3",
@@ -199,7 +215,9 @@ async function startServer() {
       is_active: true,
       image_url: "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=600&q=80",
       category: "Semua",
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 1).toISOString()
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 1).toISOString(),
+      promo_code: "CASHBACK10",
+      limit_per_user: 1
     },
     {
       id: "cp-4",
@@ -215,7 +233,9 @@ async function startServer() {
       is_active: false,
       image_url: "https://images.unsplash.com/photo-1573080496219-bb080dd4f877?w=600&q=80",
       category: "Snack",
-      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 15).toISOString()
+      created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 15).toISOString(),
+      promo_code: null as string | null,
+      limit_per_user: 1
     },
   ];
 
@@ -266,11 +286,123 @@ async function startServer() {
     res.json(users);
   });
 
-  app.get("/api/shifts", (req, res) => {
-    res.json([
-      { id: 1, staff_id: 'S001', name: 'Admin Bagus', role: 'Admin', shift_type: 'Pagi', time: '08:00 - 16:00', date: new Date().toISOString() }
-    ]);
+  app.get("/api/admin/catalog/products", async (req, res) => {
+    try {
+      const [localMenus]: any = await db.query("SELECT id, name FROM menus");
+      
+      const SMART_TAG_API = "http://192.168.1.11:5000";
+      let externalProducts: any[] = [];
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout
+        const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          const data: any = await response.json();
+          if (Array.isArray(data)) {
+            externalProducts = data.map((item: any) => ({
+              id: item.id.toString(),
+              name: item.name
+            }));
+          }
+        }
+      } catch (err: any) {
+        console.warn("⚠️ API Smart Tag tidak terjangkau untuk sinkronisasi produk catalog:", err.message);
+      }
+
+      const productsMap = new Map<string, string>();
+      
+      // Masukkan produk lokal
+      localMenus.forEach((m: any) => {
+        productsMap.set(m.id.toString(), m.name);
+      });
+
+      // Masukkan produk eksternal (timpa/tambahkan)
+      externalProducts.forEach((m: any) => {
+        productsMap.set(m.id.toString(), m.name);
+      });
+
+      const mergedProducts = Array.from(productsMap.entries()).map(([id, name]) => ({
+        id,
+        name
+      })).sort((a, b) => a.name.localeCompare(b.name));
+
+      res.json(mergedProducts);
+    } catch (err: any) {
+      res.json([]);
+    }
   });
+
+  app.get("/api/admin/catalog/categories", async (req, res) => {
+    try {
+      const standardCategories = [
+        'Main Course',
+        'Beverage',
+        'Snack',
+        'Ready Meal',
+        'Makanan Ringan',
+        'Es Krim',
+        'Minuman Siap Saji'
+      ];
+
+      const [dbCategories]: any = await db.query("SELECT DISTINCT category AS name FROM menus WHERE category IS NOT NULL AND category != ''");
+      
+      const SMART_TAG_API = "http://192.168.1.11:5000";
+      let externalCategories: string[] = [];
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500); // 1.5s timeout
+        const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          const data: any = await response.json();
+          if (Array.isArray(data)) {
+            externalCategories = data
+              .map((item: any) => item.category)
+              .filter((cat: any) => cat && typeof cat === 'string');
+          }
+        }
+      } catch (err: any) {
+        console.warn("⚠️ API Smart Tag tidak terjangkau untuk sinkronisasi kategori catalog:", err.message);
+      }
+
+      const allCategories = new Set<string>();
+
+      // 1. Tambah kategori standar bawaan
+      standardCategories.forEach(cat => allCategories.add(cat.trim()));
+
+      // 2. Tambah kategori dinamis dari DB lokal
+      dbCategories.forEach((c: any) => {
+        if (c.name) allCategories.add(c.name.trim());
+      });
+
+      // 3. Tambah kategori dinamis dari API Smart Tag eksternal
+      externalCategories.forEach(cat => allCategories.add(cat.trim()));
+
+      // Konversi ke list terurut dan hilangkan duplikasi kosong
+      const uniqueList = Array.from(allCategories)
+        .filter(name => name.length > 0)
+        .sort((a, b) => a.localeCompare(b));
+
+      const formatted = uniqueList.map((name, index) => ({
+        id: `cat-${index + 1}`,
+        name: name
+      }));
+
+      res.json(formatted);
+    } catch (err: any) {
+      res.json([
+        { id: "cat-1", name: "Main Course" },
+        { id: "cat-2", name: "Beverage" },
+        { id: "cat-3", name: "Snack" },
+        { id: "cat-4", name: "Ready Meal" },
+        { id: "cat-5", name: "Makanan Ringan" },
+        { id: "cat-6", name: "Es Krim" },
+        { id: "cat-7", name: "Minuman Siap Saji" }
+      ]);
+    }
+  });
+
 
   app.get("/api/sales-data", (req, res) => {
     res.json(salesData);
@@ -331,7 +463,7 @@ async function startServer() {
   });
 
   app.post("/api/coin-promos", (req, res) => {
-    const { title, description, coin_cost, discount_type, discount_value, min_order, max_usage, valid_until, image_url, category } = req.body;
+    const { title, description, coin_cost, discount_type, discount_value, min_order, max_usage, valid_until, image_url, category, promo_code, limit_per_user } = req.body;
     if (!title || !coin_cost || !discount_value) {
       return res.status(400).json({ message: "Judul, biaya koin, dan nilai diskon wajib diisi" });
     }
@@ -344,6 +476,8 @@ async function startServer() {
       valid_until: valid_until || new Date(Date.now() + 30*24*60*60*1000).toISOString(),
       is_active: true, image_url: image_url || "",
       category: category || "Semua",
+      promo_code: promo_code || null,
+      limit_per_user: parseInt(limit_per_user) || 1,
       created_at: new Date().toISOString()
     };
     coinPromos.push(newPromo);
@@ -418,6 +552,170 @@ async function startServer() {
     const { user_id } = req.query;
     if (user_id) return res.json(coinTransactions.filter(t => t.user_id === user_id));
     res.json(coinTransactions);
+  });
+
+  // ─── v1 NFC/RFID RFID lookup & Gesture Kiosk Redeem ─────────────────────────
+  app.get("/api/v1/users/scan-tag/:tag_id", async (req, res) => {
+    try {
+      const { tag_id } = req.params;
+      const [dbUsers]: any = await db.query(
+        "SELECT id, nama, nim, coin_balance, avatar_url FROM users WHERE rfid_tag_id = ?",
+        [tag_id]
+      );
+
+      if (dbUsers.length === 0) {
+        return res.status(404).json({
+          status: "error",
+          message: "Pengguna dengan Smart Tag tersebut tidak ditemukan"
+        });
+      }
+
+      res.json({
+        status: "success",
+        user: dbUsers[0]
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        status: "error",
+        message: "Gagal memindai tag",
+        error: err.message
+      });
+    }
+  });
+
+  app.post("/api/v1/vouchers/redeem-gesture", async (req, res) => {
+    const { user_id, promo_id } = req.body;
+
+    if (!user_id || !promo_id) {
+      return res.status(400).json({
+        status: "error",
+        message: "user_id dan promo_id wajib diisi"
+      });
+    }
+
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // Lock user and promo row to prevent race conditions (negative coins, double-spend)
+      const [promos]: any = await connection.query(
+        "SELECT * FROM coin_promos WHERE id = ? FOR UPDATE",
+        [promo_id]
+      );
+      if (promos.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ status: "error", message: "Promo tidak ditemukan" });
+      }
+      const promo = promos[0];
+
+      const [dbUsers]: any = await connection.query(
+        "SELECT * FROM users WHERE id = ? FOR UPDATE",
+        [user_id]
+      );
+      if (dbUsers.length === 0) {
+        await connection.rollback();
+        return res.status(404).json({ status: "error", message: "User tidak ditemukan" });
+      }
+      const user = dbUsers[0];
+
+      // Verify target product stock if promo.product_id is set
+      if (promo.product_id) {
+        const [menus]: any = await connection.query(
+          "SELECT in_stock, stock, name FROM menus WHERE id = ? FOR UPDATE",
+          [promo.product_id]
+        );
+        if (menus.length > 0) {
+          const menu = menus[0];
+          if (!menu.in_stock || menu.stock <= 0) {
+            await connection.rollback();
+            return res.status(422).json({
+              status: "error",
+              message: `Produk '${menu.name}' untuk promo ini sedang habis`
+            });
+          }
+        }
+      }
+
+      // a. Pastikan promo masih aktif dan belum melewati tanggal 'valid_until' (expired_at)
+      if (!promo.is_active) {
+        await connection.rollback();
+        return res.status(422).json({ status: "error", message: "Promo sedang tidak aktif" });
+      }
+
+      if (new Date() > new Date(promo.valid_until)) {
+        await connection.rollback();
+        return res.status(422).json({ status: "error", message: "Promo sudah kedaluwarsa" });
+      }
+
+      // b. Pastikan kuota ('used_count' belum mencapai 'max_usage')
+      if (promo.used_count >= promo.max_usage) {
+        await connection.rollback();
+        return res.status(422).json({ status: "error", message: "Kuota penukaran promo ini sudah habis" });
+      }
+
+      // c. Pastikan sisa koin user cukup untuk membayar 'coin_cost'
+      if (user.coin_balance < promo.coin_cost) {
+        await connection.rollback();
+        return res.status(422).json({ status: "error", message: "Koin Anda tidak mencukupi" });
+      }
+
+      // Jalankan Transaksi Database:
+      // a. Kurangi koin user di tabel 'users'
+      await connection.query(
+        "UPDATE users SET coin_balance = coin_balance - ? WHERE id = ?",
+        [promo.coin_cost, user_id]
+      );
+
+      // b. Catat histori pengurangan di tabel 'coin_transactions'
+      const txId = `ct-${Date.now()}`;
+      await connection.query(
+        "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description, promo_id) VALUES (?, ?, ?, 'redeem', ?, ?, ?)",
+        [txId, user_id, user.nama, promo.coin_cost, `Penukaran koin untuk promo: ${promo.title}`, promo_id]
+      );
+
+      // c. Increment 'used_count' pada tabel 'coin_promos'
+      await connection.query(
+        "UPDATE coin_promos SET used_count = used_count + 1 WHERE id = ?",
+        [promo_id]
+      );
+
+      // d. Buat data baru di tabel 'user_vouchers' dengan status 'unused'
+      // dan generate 'voucher_code' unik (format: NGLB-HEXRANDOM)
+      const voucherId = `uv-${Date.now()}`;
+      const randomHex = crypto.randomBytes(4).toString('hex').toUpperCase();
+      const voucherCode = `NGLB-${randomHex}`;
+
+      await connection.query(
+        "INSERT INTO user_vouchers (id, user_id, promo_id, voucher_code, status) VALUES (?, ?, ?, ?, 'unused')",
+        [voucherId, user_id, promo_id, voucherCode]
+      );
+
+      await connection.commit();
+
+      // Log audit
+      addAuditLog("Kiosk Gesture", "Penukaran Koin", `${user.nama} → ${promo.title} (${promo.coin_cost} koin)`);
+      io.emit("stats_updated");
+
+      // Return response sukses status 200
+      res.json({
+        status: "success",
+        message: "Penukaran koin berhasil!",
+        data: {
+          voucher_code: voucherCode,
+          product_id: promo.product_id || null,
+          new_balance: user.coin_balance - promo.coin_cost
+        }
+      });
+    } catch (err: any) {
+      await connection.rollback();
+      res.status(500).json({
+        status: "error",
+        message: "Terjadi kesalahan server saat memproses penukaran koin",
+        error: err.message
+      });
+    } finally {
+      connection.release();
+    }
   });
 
   app.get("/api/stats", async (req, res) => {
@@ -524,104 +822,6 @@ async function startServer() {
     }
   });
 
-  const staff = [
-    { id: "S001", name: "Bagus Azhar", role: "Admin", email: "bagus@example.com", phone: "08123456789", status: "active" },
-    { id: "S002", name: "Siti Rahma", role: "Kasir", email: "siti@example.com", phone: "08123456790", status: "active" },
-    { id: "S003", name: "Alif Hidayat", role: "Koki", email: "alif@example.com", phone: "08123456791", status: "active" },
-    { id: "S004", name: "Budi Santoso", role: "Koki", email: "budi@example.com", phone: "08123456792", status: "active" },
-    { id: "S005", name: "Dedi Irawan", role: "Support", email: "dedi@example.com", phone: "08123456793", status: "active" }
-  ];
-
-  const shifts = [
-    { id: 1, staff_id: "S002", name: "Siti Rahma", role: "Kasir", shift_type: "Pagi", time: "08:00 - 16:00", date: new Date().toISOString().split("T")[0] },
-    { id: 2, staff_id: "S003", name: "Alif Hidayat", role: "Koki", shift_type: "Pagi", time: "08:00 - 16:00", date: new Date().toISOString().split("T")[0] },
-    { id: 3, staff_id: "S001", name: "Bagus Azhar", role: "Admin", shift_type: "Full Day", time: "08:00 - 22:00", date: new Date().toISOString().split("T")[0] }
-  ];
-
-  let auditLogs = [
-    { id: 1, user: "Admin Bagus", action: "Update Stok Produk", target: "Mie Yamin Spesial", timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(), status: "success", ip: "192.168.1.10" },
-    { id: 2, user: "Kasir Siti", action: "Verifikasi Pembayaran", target: "INV-001", timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString(), status: "success", ip: "192.168.1.12" },
-    { id: 3, user: "Sistem", action: "Sinkronisasi Saldo Koin", target: "User ID: 8821", timestamp: new Date(Date.now() - 1000 * 60 * 120).toISOString(), status: "info", ip: "local" },
-    { id: 4, user: "Staf Alif", action: "Update Status KDS", target: "INV-002 (Selesai)", timestamp: new Date(Date.now() - 1000 * 60 * 180).toISOString(), status: "success", ip: "192.168.1.15" },
-    { id: 5, user: "Admin Bagus", action: "Eksport Laporan Bulanan", target: "PDF Generation", timestamp: new Date(Date.now() - 1000 * 60 * 300).toISOString(), status: "success", ip: "192.168.1.10" },
-    { id: 6, user: "Gagal Login", action: "Autentikasi", target: "admin_test", timestamp: new Date(Date.now() - 1000 * 60 * 400).toISOString(), status: "warning", ip: "103.11.22.1" }
-  ];
-
-  const addAuditLog = (user: string, action: string, target: string, status: string = 'success') => {
-    auditLogs.unshift({
-      id: auditLogs.length + 1,
-      user,
-      action,
-      target,
-      timestamp: new Date().toISOString(),
-      status,
-      ip: "192.168.1.10" // Simulating admin IP
-    });
-    // Keep only last 50 logs
-    if (auditLogs.length > 50) auditLogs = auditLogs.slice(0, 50);
-  };
-
-  app.get("/api/staff", (req, res) => {
-    res.json(staff);
-  });
-  
-  app.post("/api/staff", (req, res) => {
-    const { name, role, email, phone } = req.body;
-    const newStaff = {
-      id: `S${(staff.length + 1).toString().padStart(3, '0')}`,
-      name,
-      role,
-      email,
-      phone,
-      status: "active"
-    };
-    staff.push(newStaff);
-    addAuditLog("Admin Bagus", "Registrasi Pegawai", `${name} (${role})`);
-    res.status(201).json(newStaff);
-  });
-
-  app.patch("/api/staff/:id", (req, res) => {
-    const { id } = req.params;
-    const { role, name, email, phone } = req.body;
-    const staffIndex = staff.findIndex(s => s.id === id);
-    if (staffIndex !== -1) {
-      const oldRole = staff[staffIndex].role;
-      staff[staffIndex] = { 
-        ...staff[staffIndex], 
-        ...(role && { role }),
-        ...(name && { name }),
-        ...(email && { email }),
-        ...(phone && { phone })
-      };
-      
-      const changes = [];
-      if (role && role !== oldRole) changes.push(`Role: ${oldRole} -> ${role}`);
-      if (name) changes.push(`Nama: ${name}`);
-      
-      addAuditLog("Admin Bagus", "Update Data Pegawai", `${staff[staffIndex].name} (${changes.join(", ") || "Info Kontak"})`);
-      res.json(staff[staffIndex]);
-    } else {
-      res.status(404).json({ message: "Staff not found" });
-    }
-  });
-
-  app.delete("/api/staff/:id", (req, res) => {
-    const { id } = req.params;
-    const staffIndex = staff.findIndex(s => s.id === id);
-    if (staffIndex !== -1) {
-      const deletedName = staff[staffIndex].name;
-      staff.splice(staffIndex, 1);
-      addAuditLog("Admin Bagus", "Hapus Pegawai", deletedName, "warning");
-      res.json({ message: "Staff deleted" });
-    } else {
-      res.status(404).json({ message: "Staff not found" });
-    }
-  });
-
-  app.get("/api/shifts", (req, res) => {
-    res.json(shifts);
-  });
-
   app.get("/api/ingredients", (req, res) => {
     res.json(ingredients);
   });
@@ -649,44 +849,18 @@ async function startServer() {
     res.json(yieldCalculations);
   });
 
-  app.post("/api/ingredients/:id/restock", (req, res) => {
+  app.post("/api/ingredients/:id/restock", async (req, res) => {
     const { id } = req.params;
     const { amount } = req.body;
+    const actor = (req.headers["x-user-name"] as string) || "Koki";
     const ing = ingredients.find(i => i.id === id);
     if (ing) {
       ing.stock += parseFloat(amount);
-      addAuditLog("Koki Alif", "Restock Bahan Baku", `${ing.name} (+${amount} ${ing.unit})`);
+      await addAuditLog(actor, "Restock Bahan Baku", `${ing.name} (+${amount} ${ing.unit})`);
       res.json(ing);
     } else {
       res.status(404).json({ message: "Ingredient not found" });
     }
-  });
-
-  app.post("/api/shifts", (req, res) => {
-    const { staff_id, shift_type, time } = req.body;
-    const selectedStaff = staff.find(s => s.id === staff_id);
-    
-    if (!selectedStaff) {
-      return res.status(404).json({ error: "Staff not found" });
-    }
-
-    const newShift = {
-      id: shifts.length + 1,
-      staff_id,
-      name: selectedStaff.name,
-      role: selectedStaff.role,
-      shift_type,
-      time,
-      date: new Date().toISOString().split('T')[0]
-    };
-
-    shifts.push(newShift);
-    addAuditLog("Admin Bagus", "Penetapan Shift", `${selectedStaff.name} (${shift_type})`);
-    res.json(newShift);
-  });
-
-  app.get("/api/audit-logs", (req, res) => {
-    res.json(auditLogs);
   });
 
   app.post("/api/orders/simulate", async (req, res) => {
@@ -719,7 +893,7 @@ async function startServer() {
       }
 
       const methods = ["Transfer Bank (BCA)", "E-Wallet (OVO)", "E-Wallet (Dana)", "Tunai", "QRIS"];
-      const statusOptions = ["pending_verifikasi", "belum_bayar", "lunas"];
+      const statusOptions = ["pending_verifikasi", "belum_bayar"];
       const proofs = [
         "https://images.unsplash.com/photo-1554224155-169641357599?w=400&q=80",
         "https://images.unsplash.com/photo-1614028674026-a65e31bfd27c?w=400&q=80",

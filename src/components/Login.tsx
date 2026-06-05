@@ -141,7 +141,7 @@ export default function Login() {
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-900"
-                        placeholder="admin@tangolab.id"
+                        placeholder="admin@gmail.com"
                       />
                     </div>
                   </div>
@@ -222,7 +222,7 @@ export default function Login() {
                       <select value={regRole} onChange={(e) => setRegRole(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900">
                         <option value="Kasir">Kasir</option>
                         <option value="Koki">Koki</option>
-                        <option value="Admin">Admin</option>
+                        <option value="Super Admin">Super Admin</option>
                         <option value="Support">Support</option>
                       </select>
                     </div>

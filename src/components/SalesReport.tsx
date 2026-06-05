@@ -61,7 +61,7 @@ export default function SalesReport() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [reportData, setReportData] = useState<any>(null);
   const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'year' | 'all'>('month');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'ngolab' | 'coworking' | 'smart_tag_qr'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'ngolab' | 'coworking' | 'smart_tag_qr' | 'manual'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
@@ -104,7 +104,16 @@ export default function SalesReport() {
       // Filter Sumber
       if (sourceFilter !== 'all') {
          const orderSource = order.source || 'ngolab';
-         if (orderSource !== sourceFilter) return false;
+         const isManual = order.external_id === 'MANUAL';
+         if (sourceFilter === 'manual') {
+            if (!isManual) return false;
+         } else if (sourceFilter === 'ngolab') {
+            if (orderSource !== 'ngolab' || isManual) return false;
+         } else if (sourceFilter === 'coworking') {
+            if (orderSource !== 'coworking' || isManual) return false;
+         } else if (sourceFilter === 'smart_tag_qr') {
+            if (orderSource !== 'smart_tag_qr' && orderSource !== 'smart_tag') return false;
+         }
       }
 
       // Filter Waktu
@@ -159,9 +168,15 @@ export default function SalesReport() {
     doc.setTextColor(15, 23, 42); 
     doc.text('LAPORAN PENJUALAN', 14, 25);
     
+    const displaySourceFilter = 
+      sourceFilter === 'all' ? 'SEMUA SUMBER' :
+      sourceFilter === 'ngolab' ? 'GESTURE EATS' :
+      sourceFilter === 'coworking' ? 'COWORKING' :
+      sourceFilter === 'smart_tag_qr' ? 'SMART TAG' : 'MANUAL';
+
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Periode: ${period.toUpperCase()} | Sumber: ${sourceFilter.toUpperCase()}`, 14, 32);
+    doc.text(`Periode: ${period.toUpperCase()} | Sumber: ${displaySourceFilter}`, 14, 32);
     doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 14, 37);
 
     // Metrics Summary Box
@@ -187,7 +202,13 @@ export default function SalesReport() {
       body: filteredOrders.map(o => [
         o.invoice_number,
         o.customer_name,
-        (o.source || 'ngolab').toUpperCase(),
+        o.external_id === 'MANUAL' 
+          ? `MANUAL (${o.source.toUpperCase()})` 
+          : o.source === 'ngolab' 
+            ? 'GESTURE EATS' 
+            : o.source === 'coworking' 
+              ? 'COWORKING' 
+              : 'SMART TAG',
         o.payment_status === 'lunas' ? 'LUNAS' : 'GAGAL',
         o.payment_method || 'Tunai',
         `Rp ${o.total_price.toLocaleString()}`
@@ -298,15 +319,16 @@ export default function SalesReport() {
                  <FileText className="text-indigo-600" size={20} />
                  Master Riwayat Transaksi
                </h3>
-               <p className="text-xs text-slate-500 font-medium">Rekam jejak seluruh pesanan berdasarkan filter sumber.</p>
+                <p className="text-xs text-slate-500 font-medium">Rekam jejak seluruh pesanan berdasarkan filter sumber.</p>
             </div>
             
             <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-xl shadow-inner overflow-x-auto custom-scrollbar">
                {[
                  { id: 'all', label: 'Semua Sumber' },
-                 { id: 'ngolab', label: 'Ngolab' },
+                 { id: 'ngolab', label: 'Gesture Eats' },
                  { id: 'coworking', label: 'Coworking' },
-                 { id: 'smart_tag_qr', label: 'Smart Tag' }
+                 { id: 'smart_tag_qr', label: 'Smart Tag' },
+                 { id: 'manual', label: 'Manual' }
                ].map((s) => (
                  <button
                    key={s.id}
@@ -365,14 +387,23 @@ export default function SalesReport() {
                          </div>
                       </td>
                       <td className="px-8 py-5 text-center">
-                         <span className={cn(
-                           "px-2.5 py-1 rounded font-black uppercase tracking-widest text-[9px]",
-                           (row.source || 'ngolab') === 'ngolab' ? "bg-orange-50 text-orange-600" :
-                           (row.source || 'ngolab') === 'coworking' ? "bg-blue-50 text-blue-600" :
-                           "bg-purple-50 text-purple-600"
-                         )}>
-                           {(row.source || 'ngolab').replace(/_/g, ' ')}
-                         </span>
+                         {row.external_id === 'MANUAL' ? (
+                            <span className="px-2.5 py-1 rounded font-black uppercase tracking-widest text-[9px] bg-slate-100 text-slate-600 border border-slate-200">
+                               Manual ({row.source})
+                            </span>
+                         ) : row.source === 'ngolab' ? (
+                            <span className="px-2.5 py-1 rounded font-black uppercase tracking-widest text-[9px] bg-orange-50 text-orange-600">
+                               Gesture Eats
+                            </span>
+                         ) : row.source === 'coworking' ? (
+                            <span className="px-2.5 py-1 rounded font-black uppercase tracking-widest text-[9px] bg-blue-50 text-blue-600">
+                               Coworking
+                            </span>
+                         ) : (
+                            <span className="px-2.5 py-1 rounded font-black uppercase tracking-widest text-[9px] bg-purple-50 text-purple-600">
+                               Smart Tag
+                            </span>
+                         )}
                       </td>
                       <td className="px-8 py-5 text-right">
                         <span className="text-sm font-black text-slate-900">Rp {row.total_price.toLocaleString()}</span>
@@ -543,7 +574,15 @@ export default function SalesReport() {
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Sumber</span>
-                    <span className="text-[11px] font-bold text-slate-700 uppercase">{(selectedOrder.source || 'ngolab').replace(/_/g, ' ')}</span>
+                    <span className="text-[11px] font-bold text-slate-700 uppercase">
+                       {selectedOrder.external_id === 'MANUAL' 
+                         ? `MANUAL (${selectedOrder.source})` 
+                         : selectedOrder.source === 'ngolab' 
+                           ? 'GESTURE EATS' 
+                           : selectedOrder.source === 'coworking' 
+                             ? 'COWORKING' 
+                             : 'SMART TAG'}
+                    </span>
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Waktu</span>

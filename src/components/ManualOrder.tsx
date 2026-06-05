@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Search, 
   ShoppingBag,
@@ -14,8 +15,9 @@ import { motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 
 export default function ManualOrder() {
+  const { user } = useAuth();
   const [manualCustomerName, setManualCustomerName] = useState('');
-  const [selectedItems, setSelectedItems] = useState<{ id: number, quantity: number }[]>([]);
+  const [selectedItems, setSelectedItems] = useState<{ id: string | number, quantity: number }[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [searchMenu, setSearchMenu] = useState('');
   const [manualSubmitting, setManualSubmitting] = useState(false);
@@ -26,17 +28,20 @@ export default function ManualOrder() {
   const [paymentStatus, setPaymentStatus] = useState<'belum_bayar' | 'lunas'>('belum_bayar');
 
   useEffect(() => {
-    fetchMenu();
-  }, [selectedOutlet]);
-
-  const fetchMenu = () => {
+    let active = true;
     fetch(`/api/menu?outlet=${selectedOutlet}`)
       .then(res => res.json())
       .then(data => {
-        if (Array.isArray(data)) setMenuItems(data);
+        if (active && Array.isArray(data)) {
+          setMenuItems(data);
+        }
       })
       .catch(err => console.error("Menu fetch failed:", err));
-  };
+
+    return () => {
+      active = false;
+    };
+  }, [selectedOutlet]);
 
   const filteredMenu = useMemo(() => {
     if (!Array.isArray(menuItems)) return [];
@@ -46,29 +51,29 @@ export default function ManualOrder() {
     );
   }, [menuItems, searchMenu]);
 
-  const addToManualOrder = (id: number) => {
+  const addToManualOrder = (id: string | number) => {
     setSelectedItems(prev => {
-      const existing = prev.find(i => i.id === id);
+      const existing = prev.find(i => i.id.toString() === id.toString());
       if (existing) {
-        return prev.map(i => i.id === id ? { ...i, quantity: i.quantity + 1 } : i);
+        return prev.map(i => i.id.toString() === id.toString() ? { ...i, quantity: i.quantity + 1 } : i);
       }
       return [...prev, { id, quantity: 1 }];
     });
   };
 
-  const removeFromManualOrder = (id: number) => {
+  const removeFromManualOrder = (id: string | number) => {
     setSelectedItems(prev => {
-      const existing = prev.find(i => i.id === id);
+      const existing = prev.find(i => i.id.toString() === id.toString());
       if (existing && existing.quantity > 1) {
-        return prev.map(i => i.id === id ? { ...i, quantity: i.quantity - 1 } : i);
+        return prev.map(i => i.id.toString() === id.toString() ? { ...i, quantity: i.quantity - 1 } : i);
       }
-      return prev.filter(i => i.id !== id);
+      return prev.filter(i => i.id.toString() !== id.toString());
     });
   };
 
   const manualOrderTotal = useMemo(() => {
     return selectedItems.reduce((acc, curr) => {
-      const item = menuItems.find(m => m.id === curr.id);
+      const item = menuItems.find(m => m.id.toString() === curr.id.toString());
       return acc + (item ? item.price * curr.quantity : 0);
     }, 0);
   }, [selectedItems, menuItems]);
@@ -80,7 +85,7 @@ export default function ManualOrder() {
     try {
       // Build full item payload with name and price resolved from menuItems
       const itemsPayload = selectedItems.map(cartItem => {
-        const menu = menuItems.find(m => m.id === cartItem.id);
+        const menu = menuItems.find(m => m.id.toString() === cartItem.id.toString());
         return {
           id: cartItem.id,
           name: menu?.name || 'Unknown',
@@ -91,7 +96,10 @@ export default function ManualOrder() {
 
       const res = await fetch('/api/orders/manual', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Kasir'
+        },
         body: JSON.stringify({
           customer_name: manualCustomerName,
           items: itemsPayload,
@@ -285,7 +293,7 @@ export default function ManualOrder() {
             ) : (
               <div className="space-y-3">
                 {selectedItems.map((cartItem) => {
-                  const menu = menuItems.find(m => m.id === cartItem.id);
+                  const menu = menuItems.find(m => m.id.toString() === cartItem.id.toString());
                   if (!menu) return null;
                   return (
                     <motion.div 

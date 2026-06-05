@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { db } from "../db/db.js";
+import { db, addAuditLog } from "../db/db.js";
 import fs from "fs";
 import path from "path";
 
@@ -152,6 +152,10 @@ router.post("/", async (req: Request, res: Response) => {
       [newId, name, category, parseInt(price), isStock, stockVal, outletVal, imageVal, description || ""]
     );
 
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Koki";
+    await addAuditLog(actor, "Tambah Menu Baru", `${name} (${outletVal})`);
+
     res.status(201).json({
       id: newId,
       name,
@@ -193,6 +197,10 @@ router.put("/:id", async (req: Request, res: Response) => {
       [newName, newCategory, newPrice, newInStock, newStock, newImage, newDescription, id]
     );
 
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Koki";
+    await addAuditLog(actor, "Update Menu", `${newName}`);
+
     res.json({
       id,
       name: newName,
@@ -213,10 +221,16 @@ router.put("/:id", async (req: Request, res: Response) => {
 router.delete("/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    const actor = (req.headers["x-user-name"] as string) || "Koki";
+    const [menuData]: any = await db.query("SELECT name FROM menus WHERE id = ?", [id]);
+    const nameVal = menuData.length ? menuData[0].name : id;
+
     const [result]: any = await db.query("DELETE FROM menus WHERE id = ?", [id]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Menu tidak ditemukan" });
     }
+    
+    await addAuditLog(actor, "Hapus Menu", `${nameVal}`, "warning");
     res.json({ message: "Menu berhasil dihapus" });
   } catch (error: any) {
     res.status(500).json({ message: "Gagal menghapus menu", error: error.message });
@@ -297,6 +311,10 @@ router.patch("/:id/toggle-stock", async (req: Request, res: Response) => {
       "UPDATE menus SET in_stock=?, stock=? WHERE id=?",
       [newInStock, newStock, id]
     );
+
+    // Log to security audit
+    const actor = (req.headers["x-user-name"] as string) || "Koki";
+    await addAuditLog(actor, "Toggle Stok Menu", `${current.name} (${newInStock ? 'Tersedia' : 'Habis'})`);
 
     res.json({
       item: {

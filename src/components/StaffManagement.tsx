@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, 
   UserPlus, 
@@ -39,6 +40,7 @@ interface Shift {
 }
 
 export default function StaffManagement() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'roster' | 'shifts'>('roster');
   const [staff, setStaff] = useState<Staff[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -76,7 +78,10 @@ export default function StaffManagement() {
     try {
       const res = await fetch('/api/staff', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Super Admin'
+        },
         body: JSON.stringify(newStaff)
       });
       if (res.ok) {
@@ -95,7 +100,10 @@ export default function StaffManagement() {
     try {
       const res = await fetch(`/api/staff/${selectedStaffMember.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Super Admin'
+        },
         body: JSON.stringify(selectedStaffMember)
       });
       if (res.ok) {
@@ -113,7 +121,10 @@ export default function StaffManagement() {
     try {
       const res = await fetch('/api/shifts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-name': user?.name || 'Super Admin'
+        },
         body: JSON.stringify(newShift)
       });
       if (res.ok) {
@@ -171,7 +182,7 @@ export default function StaffManagement() {
                   <option value="Kasir">Kasir</option>
                   <option value="Koki">Koki</option>
                   <option value="Support">Support</option>
-                  <option value="Admin">Admin</option>
+                  <option value="Super Admin">Super Admin</option>
                 </select>
               </div>
 
@@ -255,7 +266,7 @@ export default function StaffManagement() {
                   <option value="Kasir">Kasir</option>
                   <option value="Koki">Koki</option>
                   <option value="Support">Support</option>
-                  <option value="Admin">Admin</option>
+                  <option value="Super Admin">Super Admin</option>
                 </select>
               </div>
 
@@ -448,18 +459,18 @@ export default function StaffManagement() {
                    
                    <div className="flex items-start justify-between relative z-10">
                       <div className="flex items-center gap-4">
-                         <div className={cn(
-                           "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
-                           person.role === 'Admin' ? "bg-indigo-50 text-indigo-600" :
-                           person.role === 'Kasir' ? "text-emerald-600 bg-emerald-50" :
-                           person.role === 'Koki' ? "text-amber-600 bg-amber-50" :
-                           "text-blue-600 bg-blue-50"
-                         )}>
-                            {person.role === 'Admin' ? <Shield size={24} /> :
-                             person.role === 'Kasir' ? <Store size={24} /> :
-                             person.role === 'Koki' ? <ChefHat size={24} /> :
-                             <Wrench size={24} />}
-                         </div>
+                          <div className={cn(
+                            "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
+                            (person.role === 'Super Admin' || person.role === 'Admin') ? "bg-indigo-50 text-indigo-600" :
+                            person.role === 'Kasir' ? "text-emerald-600 bg-emerald-50" :
+                            person.role === 'Koki' ? "text-amber-600 bg-amber-50" :
+                            "text-blue-600 bg-blue-50"
+                          )}>
+                             {(person.role === 'Super Admin' || person.role === 'Admin') ? <Shield size={24} /> :
+                              person.role === 'Kasir' ? <Store size={24} /> :
+                              person.role === 'Koki' ? <ChefHat size={24} /> :
+                              <Wrench size={24} />}
+                          </div>
                          <div>
                             <h3 className="font-black text-slate-900 group-hover:text-indigo-600 transition-colors">{person.name}</h3>
                             <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{person.role}</span>
@@ -539,15 +550,15 @@ export default function StaffManagement() {
                          <span className="text-[10px] text-slate-400 block font-bold">ID: {shift.staff_id}</span>
                       </td>
                       <td className="px-8 py-5">
-                         <span className={cn(
-                           "px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter",
-                           shift.role === 'Admin' ? "bg-indigo-50 text-indigo-600" :
-                           shift.role === 'Kasir' ? "text-emerald-600 bg-emerald-50" :
-                           shift.role === 'Koki' ? "text-amber-600 bg-amber-50" :
-                           "text-blue-600 bg-blue-50"
-                         )}>
-                            {shift.role}
-                         </span>
+                          <span className={cn(
+                            "px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter",
+                            (shift.role === 'Super Admin' || shift.role === 'Admin') ? "bg-indigo-50 text-indigo-600" :
+                            shift.role === 'Kasir' ? "text-emerald-600 bg-emerald-50" :
+                            shift.role === 'Koki' ? "text-amber-600 bg-amber-50" :
+                            "text-blue-600 bg-blue-50"
+                          )}>
+                             {shift.role}
+                          </span>
                       </td>
                       <td className="px-8 py-5">
                          <div className="flex items-center gap-2">

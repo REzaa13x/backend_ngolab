@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `nim`            VARCHAR(50)   DEFAULT NULL,
   `coin_balance`   INT           NOT NULL DEFAULT 0,
   `avatar_url`     VARCHAR(500)  DEFAULT NULL,
+  `rfid_tag_id`    VARCHAR(100)  UNIQUE DEFAULT NULL,
   `created_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
@@ -77,6 +78,8 @@ CREATE TABLE IF NOT EXISTS `coin_promos` (
   `is_active`       TINYINT(1)    NOT NULL DEFAULT 1,
   `image_url`       VARCHAR(500)  DEFAULT NULL,
   `category`        VARCHAR(100)  DEFAULT 'Semua',
+  `product_id`      VARCHAR(50)   DEFAULT NULL,
+  `category_id`     VARCHAR(50)   DEFAULT NULL,
   `created_at`      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
@@ -98,6 +101,23 @@ CREATE TABLE IF NOT EXISTS `coin_transactions` (
   PRIMARY KEY (`id`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`promo_id`) REFERENCES `coin_promos`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ----------------------------------------
+-- 6. user_vouchers
+--    Tabel untuk menyimpan voucher penukaran koin
+-- ----------------------------------------
+CREATE TABLE IF NOT EXISTS `user_vouchers` (
+  `id`             VARCHAR(50)   NOT NULL,
+  `user_id`        VARCHAR(50)   NOT NULL,
+  `promo_id`       VARCHAR(50)   NOT NULL,
+  `voucher_code`   VARCHAR(100)  NOT NULL UNIQUE,
+  `status`         ENUM('unused', 'used') NOT NULL DEFAULT 'unused',
+  `created_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`promo_id`) REFERENCES `coin_promos`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================

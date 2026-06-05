@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   History, RefreshCcw, Search, TrendingUp, ShoppingBag,
   CheckCircle2, XCircle, Clock, AlertCircle, ChevronDown, ChevronUp,
-  Wifi, WifiOff, Package, Coffee, ExternalLink, Download
+  Wifi, WifiOff, Package, Coffee, ExternalLink, Download, FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -27,7 +27,7 @@ interface Order {
   items?: OrderItem[];
 }
 
-type FilterSource = 'semua' | 'ngolab' | 'smart_tag';
+type FilterSource = 'semua' | 'ngolab' | 'coworking' | 'manual' | 'smart_tag';
 type FilterStatus = 'semua' | 'lunas' | 'pending_verifikasi' | 'belum_bayar' | 'ditolak';
 
 const SMART_TAG_BASE = 'http://192.168.1.11:5000';
@@ -141,10 +141,13 @@ export default function SalesHistory() {
   );
 
   const filtered = allOrders.filter(o => {
+    const isManualOrder = o.external_id === 'MANUAL';
     const matchSrc =
       filterSource === 'semua' ? true :
-      filterSource === 'smart_tag' ? o.source === 'smart_tag' :
-      o.source !== 'smart_tag';
+      filterSource === 'smart_tag' ? ((o.source === 'smart_tag' || o.source === 'smart_tag_qr') && !isManualOrder) :
+      filterSource === 'coworking' ? (o.source === 'coworking' && !isManualOrder) :
+      filterSource === 'manual' ? isManualOrder :
+      (o.source === 'ngolab' && !isManualOrder);
     const matchStatus =
       filterStatus === 'semua' ? true : o.payment_status === filterStatus;
     const matchSearch =
@@ -157,11 +160,11 @@ export default function SalesHistory() {
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = {
     totalRevenue:  allOrders.filter(o => o.payment_status === 'lunas').reduce((s, o) => s + o.total_price, 0),
-    ourRevenue:    ourOrders.filter(o => o.payment_status === 'lunas').reduce((s, o) => s + o.total_price, 0),
-    friendRevenue: friendOrders.filter(o => o.payment_status === 'lunas').reduce((s, o) => s + o.total_price, 0),
+    ourRevenue:    allOrders.filter(o => o.source === 'ngolab' && o.payment_status === 'lunas' && o.external_id !== 'MANUAL').reduce((s, o) => s + o.total_price, 0),
+    friendRevenue: allOrders.filter(o => (o.source === 'smart_tag' || o.source === 'smart_tag_qr') && o.payment_status === 'lunas').reduce((s, o) => s + o.total_price, 0),
     totalOrders:   allOrders.length,
-    ourOrders:     ourOrders.length,
-    friendOrders:  friendOrders.length,
+    ourOrders:     allOrders.filter(o => o.source === 'ngolab' && o.external_id !== 'MANUAL').length,
+    friendOrders:  allOrders.filter(o => o.source === 'smart_tag' || o.source === 'smart_tag_qr').length,
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -218,14 +221,14 @@ export default function SalesHistory() {
           </div>
         </div>
 
-        {/* Ngolab Revenue */}
+        {/* Gesture Eats Revenue */}
         <div className="bg-white rounded-[2rem] border border-slate-100 p-6 shadow-sm hover:shadow-md transition-all">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2.5 bg-indigo-50 rounded-xl">
               <Package size={16} className="text-indigo-600" />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Ngolab</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gesture Eats</p>
               <p className="text-xs font-bold text-slate-500">{stats.ourOrders} transaksi</p>
             </div>
           </div>
@@ -271,7 +274,7 @@ export default function SalesHistory() {
 
         {/* Source filter */}
         <div className="flex gap-1 p-1 bg-slate-100 rounded-2xl border border-slate-200">
-          {(['semua', 'ngolab', 'smart_tag'] as FilterSource[]).map(s => (
+          {(['semua', 'ngolab', 'coworking', 'manual', 'smart_tag'] as FilterSource[]).map(s => (
             <button
               key={s}
               onClick={() => setFilterSource(s)}
@@ -280,7 +283,11 @@ export default function SalesHistory() {
                 filterSource === s ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400 hover:text-slate-700'
               )}
             >
-              {s === 'semua' ? 'Semua Sumber' : s === 'ngolab' ? '📦 Ngolab' : '☕ Smart Tag'}
+              {s === 'semua' ? 'Semua Sumber' : 
+               s === 'ngolab' ? '🍔 Gesture Eats' : 
+               s === 'coworking' ? '☕ Coworking' : 
+               s === 'manual' ? '📝 Manual' :
+               '☕ Smart Tag'}
             </button>
           ))}
         </div>
@@ -339,7 +346,9 @@ export default function SalesHistory() {
                   const payInfo = statusLabel[order.payment_status] || statusLabel['belum_bayar'];
                   const ordInfo = orderStatusLabel[order.status] || orderStatusLabel['selesai'];
                   const OrdIcon = ordInfo.icon;
-                  const isFriend = order.source === 'smart_tag';
+                  const isFriend = (order.source === 'smart_tag' || order.source === 'smart_tag_qr') && order.external_id !== 'MANUAL';
+                  const isCoworking = order.source === 'coworking' && order.external_id !== 'MANUAL';
+                  const isManual = order.external_id === 'MANUAL';
 
                   return (
                     <React.Fragment key={order.id}>
@@ -363,12 +372,22 @@ export default function SalesHistory() {
                         <td className="px-6 py-4">
                           <div className={cn(
                             'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border',
-                            isFriend
+                            isManual
+                              ? 'bg-slate-100 text-slate-700 border-slate-200'
+                              : isFriend
                               ? 'bg-amber-50 text-amber-700 border-amber-100'
-                              : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                              : isCoworking
+                              ? 'bg-blue-50 text-blue-700 border-blue-100'
+                              : 'bg-orange-50 text-orange-700 border-orange-100'
                           )}>
-                            {isFriend ? <Coffee size={10} /> : <Package size={10} />}
-                            {isFriend ? 'Smart Tag' : 'Ngolab'}
+                            {isManual ? <FileText size={10} /> :
+                             isFriend ? <Coffee size={10} /> : 
+                             isCoworking ? <Coffee size={10} /> : 
+                             <Package size={10} />}
+                            {isManual ? `Manual (${order.source})` :
+                             isFriend ? 'Smart Tag' : 
+                             isCoworking ? 'Coworking' : 
+                             'Gesture Eats'}
                           </div>
                         </td>
 

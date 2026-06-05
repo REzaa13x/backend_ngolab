@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Package, Search, CheckCircle2, XCircle, Plus, Pencil, Trash2,
-  Coffee, Upload, Image as ImageIcon, X
+  Coffee, Upload, Image as ImageIcon, X, Tag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -32,19 +32,34 @@ export default function CoworkingMenu() {
     name: '', category: 'Ready Meal', price: '', stock: '', image: '', description: ''
   });
   const [dragActive, setDragActive] = useState(false);
+  const [activePromos, setActivePromos] = useState<any[]>([]);
 
   const fetchMenu = useCallback(async () => {
     try {
       let url = '/api/menu?outlet=coworking';
       if (selectedCategory !== 'Semua') url += `&category=${encodeURIComponent(selectedCategory)}`;
-      const res = await fetch(url);
+      const [res, promosRes] = await Promise.all([
+        fetch(url),
+        fetch('/api/coin-promos').then(r => r.json()).catch(() => [])
+      ]);
       const data = await res.json();
       setMenuItems(data);
+      setActivePromos(promosRes);
       setLoading(false);
     } catch (err) {
       console.error("Failed to fetch coworking menu:", err);
     }
   }, [selectedCategory]);
+
+  const getPromoForItem = (itemId: string | number) => {
+    const now = new Date();
+    return activePromos.find(p => 
+      p.product_id?.toString() === itemId.toString() && 
+      p.is_active && 
+      p.used_count < p.max_usage && 
+      new Date(p.valid_until) > now
+    );
+  };
 
   useEffect(() => { fetchMenu(); }, [fetchMenu]);
 
@@ -148,7 +163,6 @@ export default function CoworkingMenu() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 leading-tight flex items-center gap-3">
@@ -158,12 +172,13 @@ export default function CoworkingMenu() {
             Katalog Menu Coworking
           </h2>
           <p className="text-sm text-slate-500 font-medium tracking-tight mt-1">
-            Tampilan katalog produk Coworking. Untuk menambah, mengubah, atau menghapus menu — gunakan halaman <span className="font-bold text-amber-600">Manajemen Menu</span>.
+            Kelola data produk dan menu untuk area Coworking secara dinamis.
           </p>
         </div>
+        <button onClick={() => setIsAddModalOpen(true)} className="flex items-center gap-2 px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-widest bg-amber-600 text-white shadow-lg shadow-amber-200 hover:bg-amber-700 hover:shadow-amber-300 transition-all self-start md:self-auto">
+          <Plus size={16} /> Tambah Menu
+        </button>
       </div>
-
-      {/* Stats Cards */}
       <div className="grid grid-cols-3 gap-4">
         {[
           { label: 'Total Menu', value: stats.total, color: 'indigo', icon: Package },
@@ -235,13 +250,26 @@ export default function CoworkingMenu() {
                 )}
               </div>
 
-              <div className="p-4 flex-1 flex flex-col justify-between">
+               <div className="p-4 flex-1 flex flex-col justify-between">
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex-1 min-w-0">
-                      <span className="inline-block px-2 py-0.5 rounded bg-amber-50 text-amber-700 text-[9px] font-black uppercase tracking-widest mb-1.5">
-                        {item.category}
-                      </span>
+                      <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
+                        <span className="inline-block px-2 py-0.5 rounded bg-amber-50 text-amber-700 text-[9px] font-black uppercase tracking-widest">
+                          {item.category}
+                        </span>
+                        {(() => {
+                          const promo = getPromoForItem(item.id);
+                          if (promo) {
+                            return (
+                              <span className="inline-block px-2 py-0.5 rounded bg-rose-50 text-rose-600 text-[9px] font-black uppercase tracking-widest animate-pulse flex items-center gap-1">
+                                <Tag size={8} /> Promo Koin
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
                       <h3 className="text-sm font-bold text-slate-900 group-hover:text-amber-700 transition-colors line-clamp-2 leading-tight">
                         {item.name}
                       </h3>
@@ -252,10 +280,44 @@ export default function CoworkingMenu() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                    <p className="text-[13px] font-black text-amber-700 whitespace-nowrap">
-                      Rp {item.price.toLocaleString()}
-                    </p>
+                   <div className="flex items-center justify-between pt-3 border-t border-slate-50">
+                    {(() => {
+                      const promo = getPromoForItem(item.id);
+                      let hasDiscountedPrice = false;
+                      let promoPrice = item.price;
+                      let isFree = false;
+                      if (promo) {
+                        if (promo.discount_type === 'percentage') {
+                          promoPrice = item.price - (item.price * promo.discount_value / 100);
+                          hasDiscountedPrice = true;
+                        } else if (promo.discount_type === 'fixed') {
+                          promoPrice = Math.max(0, item.price - promo.discount_value);
+                          hasDiscountedPrice = true;
+                        } else if (promo.discount_type === 'free_item') {
+                          promoPrice = 0;
+                          hasDiscountedPrice = true;
+                          isFree = true;
+                        }
+                      }
+                      if (hasDiscountedPrice) {
+                        return (
+                          <div className="flex flex-col">
+                            <p className="text-[13px] font-black text-rose-600 whitespace-nowrap">
+                              {isFree ? 'Gratis' : `Rp ${promoPrice.toLocaleString()}`}
+                            </p>
+                            <p className="text-[10px] text-slate-400 line-through font-semibold whitespace-nowrap">
+                              Rp {item.price.toLocaleString()}
+                            </p>
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <p className="text-[13px] font-black text-amber-700 whitespace-nowrap">
+                            Rp {item.price.toLocaleString()}
+                          </p>
+                        );
+                      }
+                    })()}
                     <div className={cn(
                       "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest",
                       item.inStock ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
@@ -270,12 +332,24 @@ export default function CoworkingMenu() {
                 <div className="flex gap-2 mt-4">
                   <button onClick={() => toggleStock(item.id)}
                     className={cn(
-                      "w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-sm",
+                      "flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-sm",
                       item.inStock
                         ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100"
                         : "bg-amber-600 text-white hover:bg-amber-700"
                     )}
                   >{item.inStock ? 'Nonaktif' : 'Aktifkan'}</button>
+                  <button onClick={() => setEditingProduct(item)}
+                    className="p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-slate-500 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-100 transition-all active:scale-95 shadow-sm"
+                    title="Edit Menu"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button onClick={() => setDeleteConfirm(item)}
+                    className="p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-100 transition-all active:scale-95 shadow-sm"
+                    title="Hapus Menu"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
             </motion.div>

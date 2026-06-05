@@ -10,7 +10,7 @@ async function run() {
   });
 
   try {
-    const [rows] = await db.query("SELECT id, customer_name, invoice_number, total_price, payment_status, payment_method, external_id, source, created_at FROM orders ORDER BY created_at DESC LIMIT 15");
+    const [rows] = await db.query("SELECT * FROM app_settings");
     console.table(rows);
   } catch (error) {
     console.error(error);
