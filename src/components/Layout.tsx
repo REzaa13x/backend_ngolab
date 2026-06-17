@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import Dashboard from './Dashboard';
 import OrderManagement from './OrderManagement';
@@ -18,8 +18,10 @@ import SalesHistory from './SalesHistory';
 import IoTConfig from './IoTConfig';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bell, Search, Settings, User, HelpCircle } from 'lucide-react';
+import { Bell, Search, Settings, User, HelpCircle, Volume2, VolumeX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import socket from '../lib/socket';
+import { playBellWithResume, unlockAudioContext } from '../lib/audioHelper';
 
 export default function Layout() {
   const { user, activeRole } = useAuth();
@@ -37,6 +39,113 @@ export default function Layout() {
   };
 
   const [activeTab, setActiveTab] = useState(getDefaultTab());
+
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('tangolab_sound_enabled');
+    return saved !== 'false';
+  });
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+
+  // Sync sound settings across tabs and components
+  useEffect(() => {
+    const syncSound = () => {
+      const val = localStorage.getItem('tangolab_sound_enabled') !== 'false';
+      setSoundEnabled(val);
+    };
+    window.addEventListener('sound_enabled_change', syncSound);
+    window.addEventListener('storage', syncSound);
+    return () => {
+      window.removeEventListener('sound_enabled_change', syncSound);
+      window.removeEventListener('storage', syncSound);
+    };
+  }, []);
+
+  // Sync sound state changes to localStorage and notify other components
+  useEffect(() => {
+    localStorage.setItem('tangolab_sound_enabled', String(soundEnabled));
+    window.dispatchEvent(new Event('sound_enabled_change'));
+  }, [soundEnabled]);
+
+  // Auto-unlock AudioContext on first user interaction anywhere on the document
+  useEffect(() => {
+    const handleFirstInteraction = async () => {
+      const success = await unlockAudioContext();
+      if (success) {
+        setAudioUnlocked(true);
+        // Remove listener once unlocked
+        document.removeEventListener('click', handleFirstInteraction);
+        document.removeEventListener('touchstart', handleFirstInteraction);
+        console.log("🔊 [Global Layout] AudioContext successfully unlocked via user interaction.");
+      }
+    };
+
+    document.addEventListener('click', handleFirstInteraction);
+    document.addEventListener('touchstart', handleFirstInteraction);
+
+    return () => {
+      document.removeEventListener('click', handleFirstInteraction);
+      document.removeEventListener('touchstart', handleFirstInteraction);
+    };
+  }, []);
+
+const rungNewOrders = new Set<string>();
+const rungReadyOrders = new Set<string>();
+
+  // Global socket listener for new order bell sounds
+  useEffect(() => {
+    const handleNewOrder = (newOrder: any) => {
+      console.log("🔔 [Global Layout] Socket new_order received:", newOrder);
+      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
+      if (isSoundOn && newOrder.payment_status === 'lunas') {
+        if (!rungNewOrders.has(newOrder.id)) {
+          rungNewOrders.add(newOrder.id);
+          console.log("🔔 [Global Layout] Playing sound: new_order");
+          playBellWithResume('new_order');
+        }
+      }
+    };
+
+    const handleOrderUpdated = (updatedOrder: any) => {
+      console.log("🔄 [Global Layout] Socket order_updated received:", updatedOrder);
+      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
+      if (isSoundOn) {
+        if (updatedOrder.payment_status === 'lunas' && updatedOrder.status === 'menunggu') {
+          if (!rungNewOrders.has(updatedOrder.id)) {
+            rungNewOrders.add(updatedOrder.id);
+            console.log("🔔 [Global Layout] Playing sound: new_order (payment lunas)");
+            playBellWithResume('new_order');
+          }
+        } else if (updatedOrder.status === 'siap') {
+          if (!rungReadyOrders.has(updatedOrder.id)) {
+            rungReadyOrders.add(updatedOrder.id);
+            console.log("🔔 [Global Layout] Playing sound: ready");
+            playBellWithResume('ready');
+          }
+        }
+      }
+    };
+
+    socket.on("new_order", handleNewOrder);
+    socket.on("order_updated", handleOrderUpdated);
+
+    return () => {
+      socket.off("new_order", handleNewOrder);
+      socket.off("order_updated", handleOrderUpdated);
+    };
+  }, []);
+
+  const toggleSound = async () => {
+    const newSoundEnabled = !soundEnabled;
+    setSoundEnabled(newSoundEnabled);
+    if (newSoundEnabled) {
+      const success = await unlockAudioContext();
+      if (success) {
+        setAudioUnlocked(true);
+        // Play a quick chime to verify audio works
+        playBellWithResume('ready');
+      }
+    }
+  };
 
   const tabTitles: Record<string, string> = {
     'dashboard': 'Ringkasan Dasbor',
@@ -106,6 +215,24 @@ export default function Layout() {
               <button className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
                 <HelpCircle className="w-5 h-5" />
               </button>
+              
+              {/* Global Kitchen Bell Toggle Button */}
+              <button
+                onClick={toggleSound}
+                title={soundEnabled ? 'Matikan suara bel' : 'Aktifkan suara bel'}
+                className={cn(
+                  "p-2 rounded-lg transition-colors flex items-center justify-center relative",
+                  soundEnabled
+                    ? "text-slate-400 hover:text-indigo-600 hover:bg-slate-50"
+                    : "text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-100/80"
+                )}
+              >
+                {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                {soundEnabled && !audioUnlocked && (
+                  <span className="absolute top-1 right-1 w-2 h-2 bg-amber-500 rounded-full border border-white animate-pulse" title="Perlu interaksi untuk mengaktifkan audio" />
+                )}
+              </button>
+
               <button className="relative p-2 text-slate-400 hover:text-indigo-600 transition-colors">
                 <Bell className="w-5 h-5" />
                 <span className="absolute top-2 right-2 w-2 h-2 bg-indigo-600 rounded-full border-2 border-white" />

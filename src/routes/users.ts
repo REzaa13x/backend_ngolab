@@ -249,4 +249,132 @@ router.post("/:id/earn-coins", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/users/:user_id/study-sessions — Ambil riwayat belajar mahasiswa
+router.get("/:user_id/study-sessions", async (req: Request, res: Response) => {
+  try {
+    const { user_id } = req.params;
+    const [rows]: any = await db.query(
+      "SELECT * FROM study_sessions WHERE user_id = ? ORDER BY created_at DESC",
+      [user_id]
+    );
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ message: "Gagal mengambil riwayat sesi belajar", error: err.message });
+  }
+});
+
+// POST /api/users/:user_id/study-sessions — Simpan sesi belajar baru & tambah koin
+router.post("/:user_id/study-sessions", async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { user_id } = req.params;
+    const { subject, duration_minutes, points_earned } = req.body;
+
+    if (!subject || duration_minutes === undefined || points_earned === undefined) {
+      await connection.rollback();
+      return res.status(400).json({ message: "Subject, duration_minutes, dan points_earned wajib diisi" });
+    }
+
+    // Cek apakah user ada
+    const [users]: any = await connection.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [user_id]);
+    if (users.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ message: "User tidak ditemukan" });
+    }
+    const user = users[0];
+
+    // Simpan sesi belajar
+    await connection.query(
+      "INSERT INTO study_sessions (user_id, subject, duration_minutes, points_earned) VALUES (?, ?, ?, ?)",
+      [user_id, subject, parseInt(duration_minutes), parseInt(points_earned)]
+    );
+
+    // Tambah saldo koin user
+    await connection.query(
+      "UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?",
+      [parseInt(points_earned), user_id]
+    );
+
+    // Catat transaksi koin masuk
+    const txId = `ct-${Date.now()}`;
+    await connection.query(
+      "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
+      [txId, user_id, user.nama, parseInt(points_earned), `Belajar: ${subject} (${duration_minutes} Menit)`]
+    );
+
+    await connection.commit();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.emit("stats_updated");
+    }
+
+    res.status(201).json({
+      message: "Sesi belajar berhasil disimpan dan koin ditambahkan",
+      points_earned: parseInt(points_earned),
+      new_balance: user.coin_balance + parseInt(points_earned)
+    });
+  } catch (err: any) {
+    await connection.rollback();
+    res.status(500).json({ message: "Gagal menyimpan sesi belajar", error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// PUT /api/users/:id — Update Profile User (Nama & Avatar secara permanen)
+router.put("/:id", async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { nama, avatar_url, nim, email, phone } = req.body;
+
+    // Pastikan user ada
+    const [existing]: any = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+    if (existing.length === 0) {
+      return res.status(404).json({ message: "User tidak ditemukan" });
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [];
+
+    if (nama !== undefined) {
+      updates.push("nama = ?");
+      params.push(nama);
+    }
+    if (avatar_url !== undefined) {
+      updates.push("avatar_url = ?");
+      params.push(avatar_url);
+    }
+    if (nim !== undefined) {
+      updates.push("nim = ?");
+      params.push(nim);
+    }
+    if (email !== undefined) {
+      updates.push("email = ?");
+      params.push(email);
+    }
+    if (phone !== undefined) {
+      updates.push("phone = ?");
+      params.push(phone);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: "Tidak ada data yang diupdate" });
+    }
+
+    params.push(id);
+    await db.query(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, params);
+
+    const [updatedUser]: any = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+
+    res.json({
+      message: "Profil berhasil diperbarui secara permanen di database",
+      user: updatedUser[0]
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: "Gagal memperbarui profil", error: err.message });
+  }
+});
+
 export default router;

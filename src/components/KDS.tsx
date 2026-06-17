@@ -36,150 +36,37 @@ interface KDSOrder {
   status: 'queue' | 'cooking' | 'ready';
 }
 
-// ============================================================
-// Web Audio API Bell Synthesizer — dengan AudioContext persisten
-// ============================================================
-
-// AudioContext persisten — dibuat sekali, di-resume setiap mau bunyi
-// Solusi untuk browser yang men-suspend AudioContext saat stand-by
-let persistentAudioCtx: AudioContext | null = null;
-
-function getOrCreateAudioCtx(): AudioContext | null {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return null;
-    if (!persistentAudioCtx || persistentAudioCtx.state === 'closed') {
-      persistentAudioCtx = new AudioCtx();
-    }
-    return persistentAudioCtx;
-  } catch {
-    return null;
-  }
-}
-
-async function playBellWithResume(type: 'new_order' | 'ready') {
-  try {
-    const ctx = getOrCreateAudioCtx();
-    if (!ctx) return;
-
-    // Resume jika browser men-suspend (terjadi saat stand-by / tab tidak aktif)
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
-    }
-
-    const now = ctx.currentTime;
-
-    if (type === 'new_order') {
-      // 🔔🔔🔔 Triple DING kencang metalik — Pesanan Masuk!
-      const schedule = [
-        { time: 0,    freq: 1318.5,  vol: 1.0 },  // E6
-        { time: 0.22, freq: 1318.5,  vol: 0.9 },  // E6
-        { time: 0.44, freq: 1567.98, vol: 1.0 },  // G6
-      ];
-      schedule.forEach(({ time, freq, vol }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const distort = ctx.createWaveShaper();
-        const curve = new Float32Array(256);
-        for (let i = 0; i < 256; i++) {
-          const x = (i * 2) / 256 - 1;
-          curve[i] = (Math.PI + 200) * x / (Math.PI + 200 * Math.abs(x));
-        }
-        distort.curve = curve;
-        osc.connect(distort); distort.connect(gain); gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + time);
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.5, now + time + 0.6);
-        gain.gain.setValueAtTime(0, now + time);
-        gain.gain.linearRampToValueAtTime(vol, now + time + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + time + 0.7);
-        osc.start(now + time);
-        osc.stop(now + time + 0.75);
-      });
-      // Harmonic overtone metalik
-      const oscH = ctx.createOscillator();
-      const gainH = ctx.createGain();
-      oscH.connect(gainH); gainH.connect(ctx.destination);
-      oscH.type = 'sine';
-      oscH.frequency.setValueAtTime(2637, now);
-      gainH.gain.setValueAtTime(0, now);
-      gainH.gain.linearRampToValueAtTime(0.35, now + 0.01);
-      gainH.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-      oscH.start(now); oscH.stop(now + 0.45);
-
-    } else {
-      // 🎵 Chime melodik Do-Mi-Sol — Pesanan Siap Diambil
-      const notes = [
-        { time: 0,    freq: 523.25, vol: 0.7 },  // C5
-        { time: 0.28, freq: 659.25, vol: 0.65 }, // E5
-        { time: 0.56, freq: 783.99, vol: 0.8 },  // G5
-      ];
-      notes.forEach(({ time, freq, vol }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + time);
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.98, now + time + 1.2);
-        gain.gain.setValueAtTime(0, now + time);
-        gain.gain.linearRampToValueAtTime(vol, now + time + 0.02);
-        gain.gain.setValueAtTime(vol, now + time + 0.3);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + time + 1.4);
-        osc.start(now + time); osc.stop(now + time + 1.5);
-        // Overtone
-        const oscOv = ctx.createOscillator();
-        const gainOv = ctx.createGain();
-        oscOv.connect(gainOv); gainOv.connect(ctx.destination);
-        oscOv.type = 'sine';
-        oscOv.frequency.setValueAtTime(freq * 2, now + time);
-        gainOv.gain.setValueAtTime(0, now + time);
-        gainOv.gain.linearRampToValueAtTime(vol * 0.15, now + time + 0.02);
-        gainOv.gain.exponentialRampToValueAtTime(0.001, now + time + 0.8);
-        oscOv.start(now + time); oscOv.stop(now + time + 0.85);
-      });
-    }
-  } catch (e) {
-    console.warn('Bell playback failed:', e);
-  }
-}
-
 export default function KDS() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<KDSOrder[]>([]);
   const [lastOrderVoice, setLastOrderVoice] = useState(false);
   const [bellType, setBellType] = useState<'new_order' | 'ready' | null>(null);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const soundEnabledRef = useRef(true);
-  const audioUnlockedRef = useRef(false);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('tangolab_sound_enabled');
+    return saved !== 'false';
+  });
 
-  // Sync refs agar bisa diakses di dalam socket callback
-  useEffect(() => { soundEnabledRef.current = soundEnabled; }, [soundEnabled]);
-  useEffect(() => { audioUnlockedRef.current = audioUnlocked; }, [audioUnlocked]);
-
-  // Unlock AudioContext dengan satu klik — WAJIB dilakukan sekali
-  // agar bell bisa berbunyi saat stand-by
-  const unlockAudio = useCallback(async () => {
-    try {
-      const ctx = getOrCreateAudioCtx();
-      if (!ctx) return;
-      if (ctx.state === 'suspended') await ctx.resume();
-      // Sentuhan "silent" untuk wake up AudioContext
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0.001, ctx.currentTime);
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.start(); osc.stop(ctx.currentTime + 0.001);
-      setAudioUnlocked(true);
-    } catch (e) {
-      console.warn('Audio unlock failed:', e);
-      setAudioUnlocked(true); // anggap berhasil agar banner hilang
-    }
+  // Sync sound settings across tabs and components
+  useEffect(() => {
+    const syncSound = () => {
+      const val = localStorage.getItem('tangolab_sound_enabled') !== 'false';
+      setSoundEnabled(val);
+    };
+    window.addEventListener('sound_enabled_change', syncSound);
+    window.addEventListener('storage', syncSound);
+    return () => {
+      window.removeEventListener('sound_enabled_change', syncSound);
+      window.removeEventListener('storage', syncSound);
+    };
   }, []);
 
+  // Sync sound state changes to localStorage and notify other components
+  useEffect(() => {
+    localStorage.setItem('tangolab_sound_enabled', String(soundEnabled));
+    window.dispatchEvent(new Event('sound_enabled_change'));
+  }, [soundEnabled]);
+
   const triggerBell = useCallback((type: 'new_order' | 'ready') => {
-    if (!soundEnabledRef.current) return;
-    createBell(type);
     setBellType(type);
     setLastOrderVoice(true);
     setTimeout(() => {
@@ -222,6 +109,9 @@ export default function KDS() {
     }
   };
 
+  const rungKdsNewOrders = useRef(new Set<string>());
+  const rungKdsReadyOrders = useRef(new Set<string>());
+
   useEffect(() => {
     fetchOrders();
 
@@ -229,19 +119,28 @@ export default function KDS() {
       // Pesanan baru langsung lunas → tampilkan di KDS + bell kencang
       if (newOrder.payment_status === 'lunas') {
         fetchOrders();
-        triggerBell('new_order');
+        if (!rungKdsNewOrders.current.has(newOrder.id)) {
+          rungKdsNewOrders.current.add(newOrder.id);
+          triggerBell('new_order');
+        }
       }
     });
 
     socket.on("order_updated", (updatedOrder: any) => {
-      if (updatedOrder.payment_status === 'lunas') {
+      if (updatedOrder.payment_status === 'lunas' && updatedOrder.status === 'menunggu') {
         // Kasir baru saja memverifikasi → pesanan masuk ke KDS → bell kencang
         fetchOrders();
-        triggerBell('new_order');
+        if (!rungKdsNewOrders.current.has(updatedOrder.id)) {
+          rungKdsNewOrders.current.add(updatedOrder.id);
+          triggerBell('new_order');
+        }
       } else if (updatedOrder.status === 'siap') {
         // Koki selesai masak → pesanan siap diambil → chime melodik
         fetchOrders();
-        triggerBell('ready');
+        if (!rungKdsReadyOrders.current.has(updatedOrder.id)) {
+          rungKdsReadyOrders.current.add(updatedOrder.id);
+          triggerBell('ready');
+        }
       } else {
         // Update lainnya (dibatalkan, dll) → refresh saja
         fetchOrders();
@@ -496,33 +395,75 @@ export default function KDS() {
           {lastOrderVoice && bellType === 'new_order' && (
             <motion.div 
               key="bell-new"
-              initial={{ opacity: 0, y: -40, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9, y: -20 }}
-              className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-white/20 backdrop-blur-md"
+              initial={{ opacity: 0, y: -60, scale: 0.8, rotateX: 20 }}
+              animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: -40, rotateX: -20 }}
+              transition={{ type: "spring", damping: 15, stiffness: 300 }}
+              className="fixed top-12 left-1/2 -translate-x-1/2 z-[100] min-w-[400px]"
             >
-              <div className="relative">
-                <BellRing size={28} className="animate-bounce" />
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-400 rounded-full animate-ping" />
-              </div>
-              <div className="text-left">
-                <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">🔔 Pesanan Baru</p>
-                <p className="text-base font-black tracking-tight">PESANAN MASUK KE DAPUR!</p>
+              <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 p-1 shadow-[0_20px_50px_rgba(79,70,229,0.5)] border border-indigo-400/30">
+                {/* Glow effect */}
+                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white/20 via-transparent to-transparent opacity-60"></div>
+                
+                <div className="relative bg-indigo-900/40 backdrop-blur-xl rounded-[22px] px-6 py-5 flex items-center gap-5">
+                  <div className="relative shrink-0 w-14 h-14 rounded-2xl bg-indigo-500/30 border border-indigo-400/50 flex items-center justify-center shadow-inner">
+                    <BellRing size={32} className="text-white animate-bounce drop-shadow-md" />
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-500 border-2 border-indigo-800 rounded-full animate-ping" />
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-500 border-2 border-indigo-800 rounded-full" />
+                  </div>
+                  
+                  <div className="flex-1 text-left">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="px-2 py-0.5 rounded-md bg-white/20 text-white text-[10px] font-bold uppercase tracking-widest backdrop-blur-md">
+                        Pesanan Baru
+                      </span>
+                      <span className="text-indigo-200 text-xs font-medium flex items-center gap-1">
+                        <Clock size={12} /> {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <p className="text-xl font-black text-white tracking-tight drop-shadow-sm">
+                      PESANAN MASUK!
+                    </p>
+                    <p className="text-indigo-200 text-sm font-medium mt-0.5">
+                      Segera siapkan pesanan di antrean dapur.
+                    </p>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
           {lastOrderVoice && bellType === 'ready' && (
             <motion.div 
               key="bell-ready"
-              initial={{ opacity: 0, y: -40, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9, y: -20 }}
-              className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-emerald-600 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-white/20 backdrop-blur-md"
+              initial={{ opacity: 0, y: -60, scale: 0.8, rotateX: 20 }}
+              animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: -40, rotateX: -20 }}
+              transition={{ type: "spring", damping: 15, stiffness: 300 }}
+              className="fixed top-12 left-1/2 -translate-x-1/2 z-[100] min-w-[400px]"
             >
-              <CheckCircle2 size={28} className="animate-bounce" />
-              <div className="text-left">
-                <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">🎵 Pesanan Siap</p>
-                <p className="text-base font-black tracking-tight">SIAP UNTUK DIAMBIL!</p>
+              <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 p-1 shadow-[0_20px_50px_rgba(16,185,129,0.5)] border border-emerald-400/30">
+                {/* Glow effect */}
+                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white/20 via-transparent to-transparent opacity-60"></div>
+                
+                <div className="relative bg-emerald-900/40 backdrop-blur-xl rounded-[22px] px-6 py-5 flex items-center gap-5">
+                  <div className="relative shrink-0 w-14 h-14 rounded-2xl bg-emerald-500/30 border border-emerald-400/50 flex items-center justify-center shadow-inner">
+                    <CheckCircle2 size={32} className="text-white animate-bounce drop-shadow-md" />
+                  </div>
+                  
+                  <div className="flex-1 text-left">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="px-2 py-0.5 rounded-md bg-white/20 text-white text-[10px] font-bold uppercase tracking-widest backdrop-blur-md">
+                        Siap Diambil
+                      </span>
+                    </div>
+                    <p className="text-xl font-black text-white tracking-tight drop-shadow-sm">
+                      PESANAN SELESAI!
+                    </p>
+                    <p className="text-emerald-100 text-sm font-medium mt-0.5">
+                      Pesanan siap diberikan ke pelanggan.
+                    </p>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}

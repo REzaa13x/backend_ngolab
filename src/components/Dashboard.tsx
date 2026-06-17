@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import socket from '../lib/socket';
 import { 
   TrendingUp, 
   Users, 
@@ -122,15 +123,29 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    fetch('/api/stats')
-      .then(res => res.json())
-      .then(data => setStats(data))
-      .catch(err => console.error("Failed to fetch stats:", err));
+    const fetchData = () => {
+      fetch('/api/stats')
+        .then(res => res.json())
+        .then(data => setStats(data))
+        .catch(err => console.error("Failed to fetch stats:", err));
 
-    fetch('/api/sales-data')
-      .then(res => res.json())
-      .then(data => setSalesData(data))
-      .catch(err => console.error("Failed to fetch sales data:", err));
+      fetch('/api/sales-data')
+        .then(res => res.json())
+        .then(data => setSalesData(data))
+        .catch(err => console.error("Failed to fetch sales data:", err));
+    };
+
+    fetchData();
+
+    socket.on("stats_updated", fetchData);
+    socket.on("order_updated", fetchData);
+    socket.on("new_order", fetchData);
+
+    return () => {
+      socket.off("stats_updated", fetchData);
+      socket.off("order_updated", fetchData);
+      socket.off("new_order", fetchData);
+    };
   }, []);
 
   const summaryCards = [

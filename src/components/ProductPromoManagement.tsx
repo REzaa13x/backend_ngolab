@@ -124,8 +124,9 @@ export default function ProductPromoManagement() {
       const sfx = suffix || '[Produk]';
       newTitle = `Potongan ${val} ${sfx}`;
     } else if (discount_type === 'free_item') {
-      const sfx = suffix || '[Nama_Produk]';
-      newTitle = `Gratis ${sfx}`;
+      const reqSfx = currentForm.required_item_name || suffix || '[Nama_Produk]';
+      const freeSfx = currentForm.free_item_name || '[Item_Gratis]';
+      newTitle = `Beli ${reqSfx} Gratis ${freeSfx}`;
     }
 
     return {
@@ -170,7 +171,7 @@ export default function ProductPromoManagement() {
     const updatedForm = {
       ...form,
       product_id: prodId || null,
-      free_item_name: selectedProd ? selectedProd.name : '',
+      required_item_name: selectedProd ? selectedProd.name : '',
     };
     const nextForm = generateAutoTitle(updatedForm, productsCatalog);
     setForm(nextForm);
@@ -230,7 +231,8 @@ export default function ProductPromoManagement() {
       image_url: finalImageUrl,
       product_id: form.product_id,
       category_id: null,
-      free_item_name: form.discount_type === 'free_item' ? form.free_item_name : (form.free_item_name || null),
+      free_item_name: form.discount_type === 'free_item' ? form.free_item_name : null,
+      required_item_name: form.required_item_name || productsCatalog.find(p => p.id === form.product_id)?.name || null,
       discount_value: form.discount_type === 'free_item' ? 0 : (parseInt(form.discount_value) || 0)
     };
 
@@ -440,34 +442,43 @@ export default function ProductPromoManagement() {
                   </div>
                 </div>
 
-                {/* Nilai Diskon */}
+                {/* Nilai Diskon / Item Gratis */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Nilai Diskon {form.discount_type !== 'free_item' && '*'}
+                    {form.discount_type === 'free_item' ? 'Item Gratis *' : 'Nilai Diskon *'}
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">
-                      {form.discount_type === 'percentage' ? '%' : 'Rp'}
-                    </span>
-                    <input
-                      required={form.discount_type !== 'free_item'}
-                      disabled={form.discount_type === 'free_item'}
-                      type="number"
-                      min={1}
-                      value={form.discount_type === 'free_item' ? '' : form.discount_value}
-                      onChange={e => handleDiscountValueChange(e.target.value)}
-                      placeholder={
-                        form.discount_type === 'percentage'
-                          ? "20"
-                          : form.discount_type === 'fixed'
-                          ? "10000"
-                          : "Nonaktif (Gratis Item)"
-                      }
-                      className={cn(
-                        "w-full bg-slate-50 border border-slate-100 rounded-xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20",
-                        form.discount_type === 'free_item' && "opacity-60 cursor-not-allowed bg-slate-100 text-slate-400 border-dashed"
-                      )}
-                    />
+                    {form.discount_type !== 'free_item' && (
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">
+                        {form.discount_type === 'percentage' ? '%' : 'Rp'}
+                      </span>
+                    )}
+                    {form.discount_type === 'free_item' ? (
+                      <select
+                        required
+                        value={form.free_item_name || ''}
+                        onChange={e => {
+                          const updated = { ...form, free_item_name: e.target.value };
+                          setForm(generateAutoTitle(updated, productsCatalog));
+                        }}
+                        className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer"
+                      >
+                        <option value="">— Pilih Item Gratis —</option>
+                        {productsCatalog.map((p: any) => (
+                          <option key={p.id} value={p.name}>{p.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        required
+                        type="number"
+                        min={1}
+                        value={form.discount_value}
+                        onChange={e => handleDiscountValueChange(e.target.value)}
+                        placeholder={form.discount_type === 'percentage' ? "20" : "10000"}
+                        className="w-full bg-slate-50 border border-slate-100 rounded-xl pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      />
+                    )}
                   </div>
                 </div>
 

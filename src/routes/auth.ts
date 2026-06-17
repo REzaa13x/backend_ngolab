@@ -11,7 +11,33 @@ function hashPassword(password: string) {
 // POST /api/auth/login
 router.post("/login", async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, phone_number } = req.body;
+
+    // Hybrid Check: Jika menggunakan phone_number, asumsikan ini Customer (Pelanggan)
+    if (phone_number) {
+      const [customers]: any = await db.query(
+        "SELECT id, nama, nim, coin_balance, avatar_url, phone, role FROM users WHERE phone = ?",
+        [phone_number]
+      );
+
+      if (customers.length === 0) {
+        return res.status(404).json({ message: "Nomor telepon belum terdaftar sebagai pelanggan" });
+      }
+
+      const customer = customers[0];
+      return res.json({
+        message: "Login berhasil",
+        user: {
+          id: customer.id,
+          nama: customer.nama,
+          nim: customer.nim,
+          coin_balance: customer.coin_balance,
+          avatar_url: customer.avatar_url,
+          phone: customer.phone,
+          role: customer.role
+        }
+      });
+    }
 
     if (!email || !password) {
       return res.status(400).json({ message: "Email dan password wajib diisi" });
@@ -53,7 +79,45 @@ router.post("/login", async (req: Request, res: Response) => {
 // POST /api/auth/register
 router.post("/register", async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role, phone } = req.body;
+    const { name, email, password, role, phone, phone_number } = req.body;
+
+    // Hybrid Check: Jika menggunakan phone_number dan name, asumsikan ini Customer (Pelanggan)
+    if (phone_number && name) {
+      // Cek apakah nomor telepon sudah terdaftar
+      const [existing]: any = await db.query("SELECT id FROM users WHERE phone = ?", [phone_number]);
+      if (existing.length > 0) {
+        return res.status(400).json({ message: "Nomor telepon sudah terdaftar" });
+      }
+
+      const newId = `u-${Date.now()}`;
+      const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
+      const avatar = `https://picsum.photos/seed/${newId}/100/100`;
+
+      await db.query(
+        "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, phone, role) VALUES (?, ?, ?, ?, ?, ?, 'Pelanggan')",
+        [newId, name, phone_number, initialCoin, avatar, phone_number]
+      );
+
+      // Catat riwayat bonus pendaftaran
+      const txId = `ct-${Date.now()}`;
+      await db.query(
+        "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, 'Bonus Pendaftaran')",
+        [txId, newId, name, initialCoin]
+      );
+
+      return res.status(201).json({
+        message: "Registrasi berhasil",
+        user: {
+          id: newId,
+          nama: name,
+          nim: phone_number,
+          coin_balance: initialCoin,
+          avatar_url: avatar,
+          phone: phone_number,
+          role: "Pelanggan"
+        }
+      });
+    }
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Nama, email, dan password wajib diisi" });

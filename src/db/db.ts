@@ -143,6 +143,71 @@ export async function testDbConnection() {
       console.warn("⚠️ App Settings Table migration warning:", settingErr.message);
     }
 
+    // Migration: Create study_sessions table
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`study_sessions\` (
+          \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+          \`user_id\` VARCHAR(50) NOT NULL,
+          \`subject\` VARCHAR(255) NOT NULL,
+          \`duration_minutes\` INT NOT NULL,
+          \`points_earned\` INT NOT NULL,
+          \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (\`user_id\`) REFERENCES \`users\`(\`id\`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+      console.log("✅ Table 'study_sessions' verified/created");
+    } catch (err: any) {
+      console.warn("⚠️ Study Sessions Table migration warning:", err.message);
+    }
+
+    // Migration: Create patungan_rooms table
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`patungan_rooms\` (
+          \`id\` VARCHAR(50) NOT NULL,
+          \`title\` VARCHAR(255) NOT NULL,
+          \`target_amount\` INT NOT NULL,
+          \`current_amount\` INT NOT NULL DEFAULT 0,
+          \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+      console.log("✅ Table 'patungan_rooms' verified/created");
+
+      // Seed default rooms if empty
+      const [rooms]: any = await connection.query("SELECT COUNT(*) as count FROM patungan_rooms");
+      if (rooms[0].count === 0) {
+        await connection.query(`
+          INSERT INTO patungan_rooms (id, title, target_amount, current_amount) VALUES 
+          ('room-1', 'Patungan Buku Perpustakaan Baru', 50000, 0),
+          ('room-2', 'Sumbangan Wi-Fi Coworking Space', 100000, 0),
+          ('room-3', 'Donasi Event Himpunan Mahasiswa', 150000, 0)
+        `);
+        console.log("✅ Seeded default crowdfunding rooms");
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Patungan Rooms Table migration warning:", err.message);
+    }
+
+    // Migration: Create patungan_contributions table
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`patungan_contributions\` (
+          \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+          \`room_id\` VARCHAR(50) NOT NULL,
+          \`user_id\` VARCHAR(50) NOT NULL,
+          \`amount\` INT NOT NULL,
+          \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (\`room_id\`) REFERENCES \`patungan_rooms\`(\`id\`) ON DELETE CASCADE,
+          FOREIGN KEY (\`user_id\`) REFERENCES \`users\`(\`id\`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+      `);
+      console.log("✅ Table 'patungan_contributions' verified/created");
+    } catch (err: any) {
+      console.warn("⚠️ Patungan Contributions Table migration warning:", err.message);
+    }
+
     connection.release();
   } catch (error: any) {
     console.error("❌ Gagal koneksi MySQL:", error.message);

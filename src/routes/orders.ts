@@ -53,6 +53,27 @@ router.get("/kds", async (_req: Request, res: Response) => {
   }
 });
 
+// GET /api/orders/queue-status — Estimasi waktu tunggu dapur
+router.get("/queue-status", async (_req: Request, res: Response) => {
+  try {
+    const [rows]: any = await db.query(
+      "SELECT COUNT(*) as active_orders FROM orders WHERE status IN ('menunggu', 'sedang_diproses')"
+    );
+    const activeOrders = rows[0].active_orders;
+    
+    // Asumsi: 1 order butuh waktu 3 menit. Base time: 5 menit.
+    const estimatedMinutes = 5 + (activeOrders * 3);
+
+    res.json({
+      active_orders: activeOrders,
+      estimated_wait_time_minutes: estimatedMinutes,
+      message: activeOrders > 5 ? "Dapur Sedang Sibuk" : "Normal"
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: "Gagal mengambil status antrean", error: err.message });
+  }
+});
+
 // POST /api/orders/manual — Buat pesanan baru (dari admin/telp/kiosk)
 router.post("/manual", async (req: Request, res: Response) => {
   const connection = await db.getConnection();
@@ -100,6 +121,17 @@ router.post("/manual", async (req: Request, res: Response) => {
         "INSERT INTO order_items (order_id, menu_id, item_name, quantity, price) VALUES (?, ?, ?, ?, ?)",
         [orderId, item.menu_id, item.item_name, item.quantity, item.price]
       );
+
+      if (item.menu_id) {
+        await connection.query(
+          "UPDATE menus SET stock = GREATEST(stock - ?, 0) WHERE id = ?",
+          [item.quantity, item.menu_id]
+        );
+        await connection.query(
+          "UPDATE menus SET in_stock = 0 WHERE id = ? AND stock <= 0",
+          [item.menu_id]
+        );
+      }
     }
 
     await connection.commit();
@@ -135,7 +167,7 @@ router.post("/external", authApiKey, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const { customer_name, items, payment_method, payment_status, total_price, external_id, source } = req.body;
+    const { user_id, customer_name, items, payment_method, payment_status, total_price, external_id, source } = req.body;
 
     if (!customer_name || !items || items.length === 0) {
       return res.status(400).json({ message: "Data pesanan tidak lengkap" });
@@ -153,17 +185,29 @@ router.post("/external", authApiKey, async (req: Request, res: Response) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderId, 
-        null, 
+        user_id || null, 
         customer_name, invoiceNumber, total_price, status, finalPaymentStatus, 
         payment_method || 'QRIS', amountPaid, external_id || "EXTERNAL", finalSource
       ]
     );
 
     for (const item of items) {
+      const menuId = item.id || item.menu_id || null;
       await connection.query(
         "INSERT INTO order_items (order_id, menu_id, item_name, quantity, price) VALUES (?, ?, ?, ?, ?)",
-        [orderId, item.id || item.menu_id || null, item.name || item.item_name, item.quantity, item.price]
+        [orderId, menuId, item.name || item.item_name, item.quantity, item.price]
       );
+
+      if (menuId) {
+        await connection.query(
+          "UPDATE menus SET stock = GREATEST(stock - ?, 0) WHERE id = ?",
+          [item.quantity, menuId]
+        );
+        await connection.query(
+          "UPDATE menus SET in_stock = 0 WHERE id = ? AND stock <= 0",
+          [menuId]
+        );
+      }
     }
 
     await connection.commit();

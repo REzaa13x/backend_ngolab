@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -18,6 +19,8 @@ import menuRouter from "./src/routes/menu.js";
 import shiftsRouter from "./src/routes/shifts.js";
 import auditLogsRouter from "./src/routes/auditLogs.js";
 import settingsRouter from "./src/routes/settings.js";
+import leaderboardRouter from "./src/routes/leaderboard.js";
+import crowdfundingRouter from "./src/routes/crowdfunding.js";
 
 async function startServer() {
   const app = express();
@@ -31,6 +34,7 @@ async function startServer() {
 
   const PORT = 3000;
 
+  app.use(cors());
   app.use(express.json());
 
   // Static file serving untuk file upload Papan Digital
@@ -63,6 +67,8 @@ async function startServer() {
   app.use("/api/coin-promos", coinPromosRouter);
   app.use("/api/menu", menuRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/leaderboard", leaderboardRouter);
+  app.use("/api/patungan-rooms", crowdfundingRouter);
 
   // Ensure upload directory exists
   const uploadDir = path.join(process.cwd(), 'public', 'uploads');
