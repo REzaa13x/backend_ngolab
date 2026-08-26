@@ -1,5 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/db.js";
+import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
+import { normalizeEmail } from "../lib/auth.js";
 
 const router = Router();
 
@@ -116,7 +118,8 @@ router.get("/transactions", async (req: Request, res: Response) => {
 // POST /api/users/register — Registrasi User / Pelanggan Baru
 router.post("/register", async (req: Request, res: Response) => {
   try {
-    const { id, nama, nim, avatar_url, email, phone, role } = req.body;
+    const { id, nama, nim, avatar_url, email, phone, role, password } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
     if (!id || !nama) {
       return res.status(400).json({ message: "ID dan Nama wajib diisi" });
@@ -127,14 +130,23 @@ router.post("/register", async (req: Request, res: Response) => {
     if (existing.length > 0) {
       return res.status(400).json({ message: "User ID / NIM sudah terdaftar" });
     }
+    if (normalizedEmail) {
+      const [emailOwner]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+      if (emailOwner.length > 0) return res.status(400).json({ message: "Email sudah terdaftar" });
+    }
+    if (phone) {
+      const [phoneOwner]: any = await db.query("SELECT id FROM users WHERE phone = ?", [phone]);
+      if (phoneOwner.length > 0) return res.status(400).json({ message: "Nomor telepon sudah terdaftar" });
+    }
 
     const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
     const avatar = avatar_url || `https://picsum.photos/seed/${id}/100/100`;
     const userRole = role || 'Pelanggan';
+    const hashedPassword = password ? await hashPassword(password) : null;
 
     await db.query(
-      "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, email, phone, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, nama, nim || id, initialCoin, avatar, email || null, phone || null, userRole]
+      "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, email, phone, role, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, nama, nim || id, initialCoin, avatar, normalizedEmail, phone || null, userRole, hashedPassword]
     );
 
     // Catat riwayat bonus pendaftaran
@@ -152,7 +164,7 @@ router.post("/register", async (req: Request, res: Response) => {
         nim: nim || id,
         coin_balance: initialCoin,
         avatar_url: avatar,
-        email: email || null,
+        email: normalizedEmail,
         phone: phone || null,
         role: userRole,
         active_vouchers_count: 0
@@ -166,7 +178,7 @@ router.post("/register", async (req: Request, res: Response) => {
 // POST /api/users/login — Login / Verifikasi User
 router.post("/login", async (req: Request, res: Response) => {
   try {
-    const { id } = req.body;
+    const { id, password } = req.body;
 
     if (!id) {
       return res.status(400).json({ message: "User ID / NIM wajib diisi" });
@@ -178,6 +190,14 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     const user = users[0];
+    if (user.password_hash) {
+      if (!password || !(await verifyPassword(password, user.password_hash))) {
+        return res.status(401).json({ message: "User ID / NIM atau password salah" });
+      }
+      if (needsPasswordUpgrade(user.password_hash)) {
+        await db.query("UPDATE users SET password_hash = ? WHERE id = ?", [await hashPassword(password), user.id]);
+      }
+    }
     res.json({
       message: "Login berhasil",
       user: {
@@ -328,6 +348,7 @@ router.put("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { nama, avatar_url, nim, email, phone } = req.body;
+    const normalizedUpdateEmail = email === undefined ? undefined : normalizeEmail(email);
 
     // Pastikan user ada
     const [existing]: any = await db.query("SELECT * FROM users WHERE id = ?", [id]);
@@ -351,8 +372,12 @@ router.put("/:id", async (req: Request, res: Response) => {
       params.push(nim);
     }
     if (email !== undefined) {
+      if (normalizedUpdateEmail) {
+        const [emailOwner]: any = await db.query("SELECT id FROM users WHERE email = ? AND id != ?", [normalizedUpdateEmail, id]);
+        if (emailOwner.length > 0) return res.status(400).json({ message: "Email sudah digunakan pengguna lain" });
+      }
       updates.push("email = ?");
-      params.push(email);
+      params.push(normalizedUpdateEmail);
     }
     if (phone !== undefined) {
       updates.push("phone = ?");
@@ -366,7 +391,10 @@ router.put("/:id", async (req: Request, res: Response) => {
     params.push(id);
     await db.query(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, params);
 
-    const [updatedUser]: any = await db.query("SELECT * FROM users WHERE id = ?", [id]);
+    const [updatedUser]: any = await db.query(
+      "SELECT id, nama, nim, coin_balance, avatar_url, rfid_tag_id, email, phone, role, created_at, updated_at FROM users WHERE id = ?",
+      [id]
+    );
 
     res.json({
       message: "Profil berhasil diperbarui secara permanen di database",

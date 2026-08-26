@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS `users` (
   `coin_balance`   INT           NOT NULL DEFAULT 0,
   `avatar_url`     VARCHAR(500)  DEFAULT NULL,
   `rfid_tag_id`    VARCHAR(100)  UNIQUE DEFAULT NULL,
+  `email`          VARCHAR(150)  UNIQUE DEFAULT NULL,
+  `phone`          VARCHAR(50)   DEFAULT NULL,
+  `role`           VARCHAR(50)   DEFAULT 'Pelanggan',
+  `password_hash`  VARCHAR(255)  DEFAULT NULL,
   `created_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)

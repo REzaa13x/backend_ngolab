@@ -43,6 +43,7 @@ export async function testDbConnection() {
       const hasEmail = columns.some((c: any) => c.Field === "email");
       const hasPhone = columns.some((c: any) => c.Field === "phone");
       const hasRole = columns.some((c: any) => c.Field === "role");
+      const hasPasswordHash = columns.some((c: any) => c.Field === "password_hash");
 
       if (!hasEmail) {
         await connection.query("ALTER TABLE users ADD COLUMN email VARCHAR(150) DEFAULT NULL");
@@ -56,8 +57,80 @@ export async function testDbConnection() {
         await connection.query("ALTER TABLE users ADD COLUMN role VARCHAR(50) DEFAULT 'Pelanggan'");
         console.log("✅ Added column 'role' to 'users'");
       }
+      if (!hasPasswordHash) {
+        await connection.query("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) DEFAULT NULL");
+        console.log("✅ Added column 'password_hash' to 'users'");
+      }
+      const [emailIndexes]: any = await connection.query("SHOW INDEX FROM users WHERE Column_name = 'email' AND Non_unique = 0");
+      if (emailIndexes.length === 0) {
+        await connection.query("ALTER TABLE users ADD UNIQUE INDEX uniq_users_email (email)");
+        console.log("✅ Added unique index 'uniq_users_email' to 'users'");
+      }
     } catch (migErr: any) {
       console.warn("⚠️ Users Migration warning:", migErr.message);
+    }
+
+    // Migration: Persistent ingredient inventory and recipe requirements
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS ingredients (
+          id VARCHAR(50) NOT NULL,
+          name VARCHAR(150) NOT NULL,
+          unit VARCHAR(50) NOT NULL,
+          stock DECIMAL(12,2) NOT NULL DEFAULT 0,
+          min_stock DECIMAL(12,2) NOT NULL DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS recipe_ingredients (
+          menu_name VARCHAR(200) NOT NULL,
+          ingredient_id VARCHAR(50) NOT NULL,
+          amount DECIMAL(12,2) NOT NULL,
+          PRIMARY KEY (menu_name, ingredient_id),
+          FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+
+      const ingredientSeeds = [
+        ['ing-1', 'Mie Basah', 'Porsi', 100, 20],
+        ['ing-2', 'Ayam Cincang', 'Porsi', 80, 15],
+        ['ing-3', 'Bakso Halus', 'Biji', 250, 50],
+        ['ing-4', 'Bakso Urat', 'Biji', 100, 20],
+        ['ing-5', 'Pangsit Goreng', 'Biji', 150, 30],
+        ['ing-6', 'Siomay', 'Biji', 120, 20],
+        ['ing-7', 'Sawi Hijau', 'Porsi', 100, 15],
+        ['ing-8', 'Bumbu Rahasia', 'Gram', 5000, 500],
+      ];
+      for (const seed of ingredientSeeds) {
+        await connection.query(
+          "INSERT IGNORE INTO ingredients (id, name, unit, stock, min_stock) VALUES (?, ?, ?, ?, ?)",
+          seed
+        );
+      }
+
+      const recipeSeeds = [
+        ['Mie Yamin Spesial Ayam', 'ing-1', 1], ['Mie Yamin Spesial Ayam', 'ing-2', 1],
+        ['Mie Yamin Spesial Ayam', 'ing-7', 1], ['Mie Yamin Spesial Ayam', 'ing-8', 50],
+        ['Mie Bakso Urat Super', 'ing-1', 1], ['Mie Bakso Urat Super', 'ing-3', 2],
+        ['Mie Bakso Urat Super', 'ing-4', 1], ['Mie Bakso Urat Super', 'ing-7', 1],
+        ['Mie Bakso Urat Super', 'ing-8', 40], ['Bakso Malang Komplit Ibu Sri', 'ing-3', 3],
+        ['Bakso Malang Komplit Ibu Sri', 'ing-5', 2], ['Bakso Malang Komplit Ibu Sri', 'ing-6', 1],
+        ['Bakso Malang Komplit Ibu Sri', 'ing-1', 0.5], ['Bakso Malang Komplit Ibu Sri', 'ing-8', 30],
+        ['Nasi Ayam Geprek Level 3', 'ing-8', 20], ['Siomay Bandung Asli', 'ing-6', 5],
+        ['Batagor Ikan Bandung', 'ing-6', 3], ['Batagor Ikan Bandung', 'ing-5', 2],
+      ];
+      for (const seed of recipeSeeds) {
+        await connection.query(
+          "INSERT IGNORE INTO recipe_ingredients (menu_name, ingredient_id, amount) VALUES (?, ?, ?)",
+          seed
+        );
+      }
+      console.log("✅ Ingredient inventory verified/seeded");
+    } catch (ingredientErr: any) {
+      console.warn("⚠️ Ingredient migration warning:", ingredientErr.message);
     }
 
     // Migration: Create shifts table

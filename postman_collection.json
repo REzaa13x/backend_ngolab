@@ -5,9 +5,70 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "base_url", "value": "http://localhost:3000" }
+    { "key": "base_url", "value": "https://geasture.kolab.top" }
   ],
   "item": [
+    {
+      "name": "🔐 Auth & Registrasi",
+      "item": [
+        {
+          "name": "POST - Login Pelanggan (Nomor Telepon)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/auth/login",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"08123456789\",\n  \"password\": \"password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST - Login Pelanggan/Staff (Email)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/auth/login",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"pelanggan@example.com\",\n  \"password\": \"password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST - Registrasi Pelanggan (Nomor Telepon)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/auth/register",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Budi Santoso\",\n  \"phone_number\": \"08123456789\",\n  \"email\": \"budi@example.com\",\n  \"password\": \"password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST - Registrasi Staff (Email)",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/auth/register",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Andi Staff\",\n  \"email\": \"staff@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"Kasir\",\n  \"phone\": \"08123456789\"\n}"
+            }
+          }
+        }
+      ]
+    },
     {
       "name": "📺 Papan Digital (MySQL)",
       "item": [
@@ -180,6 +241,37 @@
         {
           "name": "GET - Riwayat Koin per User",
           "request": { "method": "GET", "url": "{{base_url}}/api/coin-transactions?user_id=1" }
+        },
+        {
+          "name": "GET - Voucher Aktif Milik User",
+          "request": { "method": "GET", "url": "{{base_url}}/api/coin-promos/user-vouchers/1" }
+        },
+        {
+          "name": "POST - Klaim Kode Promo",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/coin-promos/claim-code",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": \"1\",\n  \"promo_code\": \"CASHBACK10\"\n}" }
+          }
+        },
+        {
+          "name": "POST - Validasi Voucher",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/coin-promos/validate-voucher",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": \"1\",\n  \"voucher_code\": \"CODE-XXXX\",\n  \"items\": [{\"id\": 1, \"name\": \"Mie Yamin\", \"price\": 18000, \"quantity\": 1, \"category\": \"Makanan\"}],\n  \"total_price\": 18000\n}" }
+          }
+        },
+        {
+          "name": "POST - Gunakan Voucher",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/coin-promos/use-voucher",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"user_id\": \"1\",\n  \"voucher_code\": \"CODE-XXXX\"\n}" }
+          }
         }
       ]
     },
@@ -189,6 +281,22 @@
         {
           "name": "GET - Semua Users",
           "request": { "method": "GET", "url": "{{base_url}}/api/users" }
+        },
+        {
+          "name": "POST - Tambah Koin User",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/users/1/earn-coins",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"amount\": 100,\n  \"description\": \"Bonus bermain game\"\n}" }
+          }
+        },
+        {
+          "name": "GET - Scan Smart Tag (RFID)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/users/scan-tag/TAG123"
+          }
         }
       ]
     },

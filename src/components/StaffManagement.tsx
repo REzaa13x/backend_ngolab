@@ -78,7 +78,7 @@ export default function StaffManagement() {
     try {
       const res = await fetch('/api/staff', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-user-name': user?.name || 'Super Admin'
         },
@@ -100,7 +100,7 @@ export default function StaffManagement() {
     try {
       const res = await fetch(`/api/staff/${selectedStaffMember.id}`, {
         method: 'PATCH',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-user-name': user?.name || 'Super Admin'
         },
@@ -116,12 +116,31 @@ export default function StaffManagement() {
     }
   };
 
+  const handleDeleteStaff = async () => {
+    if (!selectedStaffMember) return;
+    try {
+      const res = await fetch(`/api/staff/${selectedStaffMember.id}`, {
+        method: 'DELETE',
+        headers: {
+          'x-user-name': user?.name || 'Super Admin'
+        }
+      });
+      if (res.ok) {
+        setStaff(staff.filter(s => s.id !== selectedStaffMember.id));
+        setIsEditingStaff(false);
+      }
+    } catch (err) {
+      console.error("Failed to delete staff", err);
+    }
+  };
+
+
   const handleAssignShift = async () => {
     if (!newShift.staff_id) return;
     try {
       const res = await fetch('/api/shifts', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'x-user-name': user?.name || 'Super Admin'
         },
@@ -210,13 +229,13 @@ export default function StaffManagement() {
               </div>
 
               <div className="pt-4 flex gap-3">
-                <button 
+                <button
                   onClick={() => setIsRegistering(false)}
                   className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
                 >
                   Batal
                 </button>
-                <button 
+                <button
                   onClick={handleRegisterStaff}
                   disabled={!newStaff.name || !newStaff.email}
                   className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
@@ -292,17 +311,23 @@ export default function StaffManagement() {
               </div>
 
               <div className="pt-4 flex gap-3">
-                <button 
+                <button
                   onClick={() => setIsEditingStaff(false)}
                   className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
                 >
                   Batal
                 </button>
-                <button 
+                <button
+                  onClick={handleDeleteStaff}
+                  className="flex-1 py-4 bg-rose-50 text-rose-600 border border-rose-100 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-rose-100 transition-all"
+                >
+                  Hapus
+                </button>
+                <button
                   onClick={handleUpdateStaff}
                   className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
                 >
-                  Simpan Perubahan
+                  Simpan
                 </button>
               </div>
             </div>
@@ -365,13 +390,13 @@ export default function StaffManagement() {
               </div>
 
               <div className="pt-4 flex gap-3">
-                <button 
+                <button
                   onClick={() => setIsAssigning(false)}
                   className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all font-bold"
                 >
                   Batal
                 </button>
-                <button 
+                <button
                   onClick={handleAssignShift}
                   disabled={!newShift.staff_id}
                   className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
@@ -476,7 +501,7 @@ export default function StaffManagement() {
                             <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{person.role}</span>
                          </div>
                       </div>
-                      <button 
+                      <button
                         onClick={() => {
                           setSelectedStaffMember(person);
                           setIsEditingStaff(true);

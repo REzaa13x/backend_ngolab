@@ -50,7 +50,7 @@ export default function UserManagement() {
   
   // Add User Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [formData, setFormData] = useState({ id: '', nama: '', nim: '', avatar_url: '', email: '', phone: '', role: 'Pelanggan' });
+  const [formData, setFormData] = useState({ id: '', nama: '', nim: '', avatar_url: '', email: '', phone: '', role: 'Pelanggan', password: '' });
   const [isSaving, setIsSaving] = useState(false);
 
   // Add Coins Modal State
@@ -91,7 +91,7 @@ export default function UserManagement() {
       const data = await res.json();
       if (res.ok) {
         setIsAddModalOpen(false);
-        setFormData({ id: '', nama: '', nim: '', avatar_url: '', email: '', phone: '', role: 'Pelanggan' });
+        setFormData({ id: '', nama: '', nim: '', avatar_url: '', email: '', phone: '', role: 'Pelanggan', password: '' });
         fetchUsers();
         showToast('Pengguna berhasil didaftarkan!');
       } else {
@@ -326,7 +326,7 @@ export default function UserManagement() {
               <form onSubmit={handleAddUser} className="space-y-4">
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">User ID / NIM *</label>
-                  <input 
+                  <input
                     required 
                     type="text" 
                     value={formData.id}
@@ -338,7 +338,7 @@ export default function UserManagement() {
 
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Nama Lengkap *</label>
-                  <input 
+                  <input
                     required 
                     type="text" 
                     value={formData.nama}
@@ -350,7 +350,7 @@ export default function UserManagement() {
 
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Email (Opsional)</label>
-                  <input 
+                  <input
                     type="email" 
                     value={formData.email}
                     onChange={e => setFormData({ ...formData, email: e.target.value })}
@@ -361,11 +361,22 @@ export default function UserManagement() {
 
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Nomor Telepon (Opsional)</label>
-                  <input 
+                  <input
                     type="tel" 
                     value={formData.phone}
                     onChange={e => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="08123456789"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Password (Opsional)</label>
+                  <input
+                    type="password"
+                    value={formData.password}
+                    onChange={e => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="Masukkan password akun"
                     className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   />
                 </div>
@@ -387,7 +398,7 @@ export default function UserManagement() {
 
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Avatar URL (Opsional)</label>
-                  <input 
+                  <input
                     type="text" 
                     value={formData.avatar_url}
                     onChange={e => setFormData({ ...formData, avatar_url: e.target.value })}
@@ -449,7 +460,7 @@ export default function UserManagement() {
               <form onSubmit={handleAddCoins} className="space-y-4">
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Jumlah Koin *</label>
-                  <input 
+                  <input
                     required 
                     type="number" 
                     min={1}

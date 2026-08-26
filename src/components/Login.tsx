@@ -218,12 +218,9 @@ export default function Login() {
                       </div>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Peran (Role)</label>
+                      <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Peran Akun Baru</label>
                       <select value={regRole} onChange={(e) => setRegRole(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900">
                         <option value="Kasir">Kasir</option>
-                        <option value="Koki">Koki</option>
-                        <option value="Super Admin">Super Admin</option>
-                        <option value="Support">Support</option>
                       </select>
                     </div>
                   </div>

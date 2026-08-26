@@ -1,22 +1,21 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/db.js";
-import crypto from "crypto";
+import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
+import { normalizeEmail } from "../lib/auth.js";
 
 const router = Router();
 
-function hashPassword(password: string) {
-  return crypto.createHash("sha256").update(password).digest("hex");
-}
 
 // POST /api/auth/login
 router.post("/login", async (req: Request, res: Response) => {
   try {
     const { email, password, phone_number } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
     // Hybrid Check: Jika menggunakan phone_number, asumsikan ini Customer (Pelanggan)
     if (phone_number) {
       const [customers]: any = await db.query(
-        "SELECT id, nama, nim, coin_balance, avatar_url, phone, role FROM users WHERE phone = ?",
+        "SELECT id, nama, nim, coin_balance, avatar_url, phone, role, password_hash FROM users WHERE phone = ?",
         [phone_number]
       );
 
@@ -25,6 +24,20 @@ router.post("/login", async (req: Request, res: Response) => {
       }
 
       const customer = customers[0];
+
+      // Verifikasi password jika akun memiliki password_hash
+      if (customer.password_hash) {
+        if (!password) {
+          return res.status(400).json({ message: "Password wajib diisi untuk akun ini" });
+        }
+        if (!(await verifyPassword(password, customer.password_hash))) {
+          return res.status(401).json({ message: "Password salah" });
+        }
+        if (needsPasswordUpgrade(customer.password_hash)) {
+          await db.query("UPDATE users SET password_hash = ? WHERE id = ?", [await hashPassword(password), customer.id]);
+        }
+      }
+
       return res.json({
         message: "Login berhasil",
         user: {
@@ -43,34 +56,68 @@ router.post("/login", async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Email dan password wajib diisi" });
     }
 
-    const hashedPassword = hashPassword(password);
-
-    const [users]: any = await db.query(
-      "SELECT id, name, role, email, status FROM staff WHERE email = ? AND password_hash = ?",
-      [email, hashedPassword]
+    // Cek di tabel staff (Super Admin, Kasir, Koki, dll.)
+    const [staffUsers]: any = await db.query(
+      "SELECT id, name, role, email, status, password_hash FROM staff WHERE email = ?",
+      [normalizedEmail]
     );
 
-    if (users.length === 0) {
-      return res.status(401).json({ message: "Email atau password salah" });
-    }
+    if (staffUsers.length > 0) {
+      const user = staffUsers[0];
 
-    const user = users[0];
-
-    if (user.status !== "active") {
-      return res.status(403).json({ message: "Akun Anda tidak aktif" });
-    }
-
-    // Untuk sementara kita tidak pakai JWT kompleks, cukup kembalikan data user
-    // Di frontend kita akan menyimpannya di localStorage.
-    res.json({
-      message: "Login berhasil",
-      user: {
-        id: user.id,
-        name: user.name,
-        role: user.role,
-        email: user.email
+      if (!(await verifyPassword(password, user.password_hash))) {
+        return res.status(401).json({ message: "Email atau password salah" });
       }
-    });
+
+      if (user.status !== "active") {
+        return res.status(403).json({ message: "Akun Anda tidak aktif" });
+      }
+
+      if (needsPasswordUpgrade(user.password_hash)) {
+        await db.query("UPDATE staff SET password_hash = ? WHERE id = ?", [await hashPassword(password), user.id]);
+      }
+
+      return res.json({
+        message: "Login berhasil",
+        user: {
+          id: user.id,
+          name: user.name,
+          role: user.role,
+          email: user.email
+        }
+      });
+    }
+
+    // Cek di tabel users (Pelanggan) jika tidak ditemukan di staff
+    const [customers]: any = await db.query(
+      "SELECT id, nama, nim, coin_balance, avatar_url, phone, role, email, password_hash FROM users WHERE email = ?",
+      [normalizedEmail]
+    );
+
+    if (customers.length > 0) {
+      const customer = customers[0];
+      if (!(await verifyPassword(password, customer.password_hash))) {
+        return res.status(401).json({ message: "Email atau password salah" });
+      }
+      if (needsPasswordUpgrade(customer.password_hash)) {
+        await db.query("UPDATE users SET password_hash = ? WHERE id = ?", [await hashPassword(password), customer.id]);
+      }
+      return res.json({
+        message: "Login berhasil",
+        user: {
+          id: customer.id,
+          nama: customer.nama,
+          nim: customer.nim,
+          coin_balance: customer.coin_balance,
+          avatar_url: customer.avatar_url,
+          phone: customer.phone,
+          role: customer.role,
+          email: customer.email
+        }
+      });
+    }
+
+    return res.status(401).json({ message: "Email atau password salah" });
   } catch (err: any) {
     res.status(500).json({ message: "Terjadi kesalahan server", error: err.message });
   }
@@ -80,6 +127,7 @@ router.post("/login", async (req: Request, res: Response) => {
 router.post("/register", async (req: Request, res: Response) => {
   try {
     const { name, email, password, role, phone, phone_number } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
     // Hybrid Check: Jika menggunakan phone_number dan name, asumsikan ini Customer (Pelanggan)
     if (phone_number && name) {
@@ -88,14 +136,22 @@ router.post("/register", async (req: Request, res: Response) => {
       if (existing.length > 0) {
         return res.status(400).json({ message: "Nomor telepon sudah terdaftar" });
       }
+      if (normalizedEmail) {
+        const [existingEmail]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+        if (existingEmail.length > 0) {
+          return res.status(400).json({ message: "Email sudah terdaftar sebagai pelanggan" });
+        }
+      }
 
       const newId = `u-${Date.now()}`;
       const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
       const avatar = `https://picsum.photos/seed/${newId}/100/100`;
+      const hashedPassword = password ? await hashPassword(password) : null;
+      const userEmail = normalizedEmail;
 
       await db.query(
-        "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, phone, role) VALUES (?, ?, ?, ?, ?, ?, 'Pelanggan')",
-        [newId, name, phone_number, initialCoin, avatar, phone_number]
+        "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, phone, role, email, password_hash) VALUES (?, ?, ?, ?, ?, ?, 'Pelanggan', ?, ?)",
+        [newId, name, phone_number, initialCoin, avatar, phone_number, userEmail, hashedPassword]
       );
 
       // Catat riwayat bonus pendaftaran
@@ -119,28 +175,35 @@ router.post("/register", async (req: Request, res: Response) => {
       });
     }
 
-    if (!name || !email || !password) {
+    if (!name || !normalizedEmail || !password) {
       return res.status(400).json({ message: "Nama, email, dan password wajib diisi" });
     }
 
-    // Cek apakah email sudah terdaftar
-    const [existing]: any = await db.query("SELECT id FROM staff WHERE email = ?", [email]);
-    if (existing.length > 0) {
-      return res.status(400).json({ message: "Email sudah terdaftar" });
+    // Cek apakah email sudah terdaftar di staff
+    const [existingStaff]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
+    if (existingStaff.length > 0) {
+      return res.status(400).json({ message: "Email sudah terdaftar sebagai staf" });
+    }
+
+    // Cek apakah email sudah terdaftar di users
+    const [existingUser]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+    if (existingUser.length > 0) {
+      return res.status(400).json({ message: "Email sudah terdaftar sebagai pelanggan" });
     }
 
     const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}-${Date.now().toString().slice(-4)}`;
-    const hashedPassword = hashPassword(password);
-    const assignedRole = role || 'Kasir';
+    const hashedPassword = await hashPassword(password);
+    // Registrasi publik tidak boleh memilih role istimewa (mencegah self-escalation).
+    const assignedRole = 'Kasir';
 
     await db.query(
       "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
-      [newId, name, assignedRole, email, phone || null, hashedPassword]
+      [newId, name, assignedRole, normalizedEmail, phone || null, hashedPassword]
     );
 
     res.status(201).json({
       message: "Registrasi berhasil",
-      user: { id: newId, name, role: assignedRole, email }
+      user: { id: newId, name, role: assignedRole, email: normalizedEmail }
     });
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mendaftar akun", error: err.message });

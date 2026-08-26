@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { db, addAuditLog } from "../db/db.js";
+import { hashPassword } from "../lib/password.js";
 
 const router = Router();
 
@@ -27,8 +28,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
     // Default password 'password' for manually added staff
-    const { createHash } = await import('crypto');
-    const hashedPassword = createHash("sha256").update("password").digest("hex");
+    const hashedPassword = await hashPassword("password");
 
     await db.query(
       "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
