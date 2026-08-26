@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db, addAuditLog } from "../db/db.js";
 import { hashPassword } from "../lib/password.js";
+import { normalizeEmail } from "../lib/auth.js";
 
 const router = Router();
 
@@ -20,10 +21,19 @@ router.get("/", async (_req: Request, res: Response) => {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const { name, role, email, phone } = req.body;
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!name || !role || !normalizedEmail) {
+      return res.status(400).json({ message: "Nama, role, dan email wajib diisi" });
+    }
     
-    const [existing]: any = await db.query("SELECT id FROM staff WHERE email = ?", [email]);
+    const [existing]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
     if (existing.length > 0) {
       return res.status(400).json({ message: "Email sudah terdaftar" });
+    }
+    const [existingCustomer]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+    if (existingCustomer.length > 0) {
+      return res.status(400).json({ message: "Email sudah terdaftar sebagai pelanggan" });
     }
 
     const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
@@ -32,7 +42,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     await db.query(
       "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
-      [newId, name, role, email, phone, hashedPassword]
+      [newId, name, role, normalizedEmail, phone, hashedPassword]
     );
 
     const [newStaff]: any = await db.query("SELECT id, name, role, email, phone, status FROM staff WHERE id = ?", [newId]);
@@ -49,13 +59,21 @@ router.patch("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { role, name, email, phone, status } = req.body;
+    const normalizedEmail = email === undefined ? undefined : normalizeEmail(email);
 
     const updates = [];
     const params = [];
     
     if (role !== undefined) { updates.push("role = ?"); params.push(role); }
     if (name !== undefined) { updates.push("name = ?"); params.push(name); }
-    if (email !== undefined) { updates.push("email = ?"); params.push(email); }
+    if (email !== undefined) {
+      if (!normalizedEmail) return res.status(400).json({ message: "Format email tidak valid" });
+      const [staffOwner]: any = await db.query("SELECT id FROM staff WHERE email = ? AND id != ?", [normalizedEmail, id]);
+      if (staffOwner.length > 0) return res.status(400).json({ message: "Email sudah digunakan staf lain" });
+      const [customerOwner]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+      if (customerOwner.length > 0) return res.status(400).json({ message: "Email sudah digunakan pelanggan" });
+      updates.push("email = ?"); params.push(normalizedEmail);
+    }
     if (phone !== undefined) { updates.push("phone = ?"); params.push(phone); }
     if (status !== undefined) { updates.push("status = ?"); params.push(status); }
 

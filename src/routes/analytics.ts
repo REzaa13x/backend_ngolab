@@ -80,6 +80,7 @@ router.get('/reports/monthly', async (_req: Request, res: Response) => {
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN menus m ON oi.menu_id = m.id
       WHERE o.payment_status = 'lunas'
+        AND YEAR(o.created_at) = YEAR(CURDATE())
       GROUP BY COALESCE(m.category, 'Main Course')
     `);
     const categoryData = categoryRows.length

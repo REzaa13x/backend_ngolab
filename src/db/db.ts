@@ -15,8 +15,9 @@ export const db = mysql.createPool({
 
 // Test koneksi saat startup
 export async function testDbConnection() {
+  let connection: any;
   try {
-    const connection = await db.getConnection();
+    connection = await db.getConnection();
     console.log("✅ MySQL terhubung ke database:", process.env.DB_NAME || "gesture_eats");
     
     // Migration: Add columns to coin_promos if they don't exist
@@ -61,6 +62,45 @@ export async function testDbConnection() {
         await connection.query("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) DEFAULT NULL");
         console.log("✅ Added column 'password_hash' to 'users'");
       }
+      const [duplicateEmails]: any = await connection.query(`
+        SELECT LOWER(TRIM(email)) AS normalized_email, COUNT(*) AS total
+        FROM users
+        WHERE email IS NOT NULL AND TRIM(email) != ''
+        GROUP BY LOWER(TRIM(email))
+        HAVING COUNT(*) > 1
+      `);
+      if (duplicateEmails.length > 0) {
+        throw new Error(`Duplicate customer emails must be resolved before migration: ${duplicateEmails.map((row: any) => row.normalized_email).join(', ')}`);
+      }
+      await connection.query("UPDATE users SET email = NULL WHERE email IS NOT NULL AND TRIM(email) = ''");
+      await connection.query("UPDATE users SET email = LOWER(TRIM(email)) WHERE email IS NOT NULL");
+
+      const [invalidStaffEmails]: any = await connection.query("SELECT id FROM staff WHERE email IS NULL OR TRIM(email) = '' LIMIT 1");
+      if (invalidStaffEmails.length > 0) {
+        throw new Error('Staff with an empty email must be resolved before migration');
+      }
+      const [duplicateStaffEmails]: any = await connection.query(`
+        SELECT LOWER(TRIM(email)) AS normalized_email, COUNT(*) AS total
+        FROM staff
+        GROUP BY LOWER(TRIM(email))
+        HAVING COUNT(*) > 1
+      `);
+      if (duplicateStaffEmails.length > 0) {
+        throw new Error(`Duplicate staff emails must be resolved before migration: ${duplicateStaffEmails.map((row: any) => row.normalized_email).join(', ')}`);
+      }
+      await connection.query("UPDATE staff SET email = LOWER(TRIM(email))");
+
+      const [crossTableCollisions]: any = await connection.query(`
+        SELECT u.email
+        FROM users u
+        JOIN staff s ON s.email = u.email
+        WHERE u.email IS NOT NULL
+        LIMIT 1
+      `);
+      if (crossTableCollisions.length > 0) {
+        throw new Error(`Email is shared by customer and staff: ${crossTableCollisions[0].email}`);
+      }
+
       const [emailIndexes]: any = await connection.query("SHOW INDEX FROM users WHERE Column_name = 'email' AND Non_unique = 0");
       if (emailIndexes.length === 0) {
         await connection.query("ALTER TABLE users ADD UNIQUE INDEX uniq_users_email (email)");
@@ -68,6 +108,7 @@ export async function testDbConnection() {
       }
     } catch (migErr: any) {
       console.warn("⚠️ Users Migration warning:", migErr.message);
+      throw migErr;
     }
 
     // Migration: Persistent ingredient inventory and recipe requirements
@@ -131,6 +172,7 @@ export async function testDbConnection() {
       console.log("✅ Ingredient inventory verified/seeded");
     } catch (ingredientErr: any) {
       console.warn("⚠️ Ingredient migration warning:", ingredientErr.message);
+      throw ingredientErr;
     }
 
     // Migration: Create shifts table
@@ -281,9 +323,11 @@ export async function testDbConnection() {
       console.warn("⚠️ Patungan Contributions Table migration warning:", err.message);
     }
 
-    connection.release();
   } catch (error: any) {
     console.error("❌ Gagal koneksi MySQL:", error.message);
+    throw error;
+  } finally {
+    connection?.release();
   }
 }
 

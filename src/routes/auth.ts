@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { db } from "../db/db.js";
 import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
 import { normalizeEmail } from "../lib/auth.js";
+import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
 
 const router = Router();
 
@@ -34,7 +35,7 @@ router.post("/login", async (req: Request, res: Response) => {
           return res.status(401).json({ message: "Password salah" });
         }
         if (needsPasswordUpgrade(customer.password_hash)) {
-          await db.query("UPDATE users SET password_hash = ? WHERE id = ?", [await hashPassword(password), customer.id]);
+          await upgradeLegacyPassword('users', customer.id, password);
         }
       }
 
@@ -74,7 +75,7 @@ router.post("/login", async (req: Request, res: Response) => {
       }
 
       if (needsPasswordUpgrade(user.password_hash)) {
-        await db.query("UPDATE staff SET password_hash = ? WHERE id = ?", [await hashPassword(password), user.id]);
+        await upgradeLegacyPassword('staff', user.id, password);
       }
 
       return res.json({
@@ -100,7 +101,7 @@ router.post("/login", async (req: Request, res: Response) => {
         return res.status(401).json({ message: "Email atau password salah" });
       }
       if (needsPasswordUpgrade(customer.password_hash)) {
-        await db.query("UPDATE users SET password_hash = ? WHERE id = ?", [await hashPassword(password), customer.id]);
+        await upgradeLegacyPassword('users', customer.id, password);
       }
       return res.json({
         message: "Login berhasil",
@@ -140,6 +141,10 @@ router.post("/register", async (req: Request, res: Response) => {
         const [existingEmail]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
         if (existingEmail.length > 0) {
           return res.status(400).json({ message: "Email sudah terdaftar sebagai pelanggan" });
+        }
+        const [existingStaffEmail]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
+        if (existingStaffEmail.length > 0) {
+          return res.status(400).json({ message: "Email sudah terdaftar sebagai staf" });
         }
       }
 

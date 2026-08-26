@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { db } from "../db/db.js";
 import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
 import { normalizeEmail } from "../lib/auth.js";
+import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
 
 const router = Router();
 
@@ -133,6 +134,8 @@ router.post("/register", async (req: Request, res: Response) => {
     if (normalizedEmail) {
       const [emailOwner]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
       if (emailOwner.length > 0) return res.status(400).json({ message: "Email sudah terdaftar" });
+      const [staffEmailOwner]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
+      if (staffEmailOwner.length > 0) return res.status(400).json({ message: "Email sudah terdaftar sebagai staf" });
     }
     if (phone) {
       const [phoneOwner]: any = await db.query("SELECT id FROM users WHERE phone = ?", [phone]);
@@ -195,7 +198,7 @@ router.post("/login", async (req: Request, res: Response) => {
         return res.status(401).json({ message: "User ID / NIM atau password salah" });
       }
       if (needsPasswordUpgrade(user.password_hash)) {
-        await db.query("UPDATE users SET password_hash = ? WHERE id = ?", [await hashPassword(password), user.id]);
+        await upgradeLegacyPassword('users', user.id, password);
       }
     }
     res.json({
@@ -375,6 +378,8 @@ router.put("/:id", async (req: Request, res: Response) => {
       if (normalizedUpdateEmail) {
         const [emailOwner]: any = await db.query("SELECT id FROM users WHERE email = ? AND id != ?", [normalizedUpdateEmail, id]);
         if (emailOwner.length > 0) return res.status(400).json({ message: "Email sudah digunakan pengguna lain" });
+        const [staffEmailOwner]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedUpdateEmail]);
+        if (staffEmailOwner.length > 0) return res.status(400).json({ message: "Email sudah digunakan staf" });
       }
       updates.push("email = ?");
       params.push(normalizedUpdateEmail);
