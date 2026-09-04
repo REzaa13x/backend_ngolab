@@ -4,6 +4,14 @@ import { authApiKey } from "../middleware/authApiKey.js";
 
 const router = Router();
 
+async function getPreorderIdentity(orderId: string) {
+  const [rows]: any = await db.query(
+    'SELECT id, order_type, preorder_campaign_id FROM orders WHERE id = ? LIMIT 1',
+    [orderId]
+  );
+  return rows[0] || null;
+}
+
 // ==========================================
 // 1. ORDERS API
 // ==========================================
@@ -31,10 +39,23 @@ router.get("/", async (_req: Request, res: Response) => {
 });
 
 // GET /api/orders/kds — Ambil pesanan untuk Kitchen Display
-router.get("/kds", async (_req: Request, res: Response) => {
+router.get("/kds", async (req: Request, res: Response) => {
   try {
+    const outlet = String(req.query.outlet || 'ngolab');
+    if (outlet !== 'ngolab' && outlet !== 'coworking') {
+      return res.status(400).json({ message: 'Outlet tidak valid' });
+    }
     const [orders]: any = await db.query(
-      "SELECT * FROM orders WHERE payment_status = 'lunas' AND status != 'selesai' ORDER BY created_at ASC"
+      `SELECT * FROM orders
+       WHERE outlet = ?
+         AND LOWER(status) IN ('menunggu', 'sedang_diproses', 'siap')
+         AND (
+           (order_type = 'regular' AND payment_status = 'lunas')
+           OR
+           (order_type = 'preorder' AND fulfillment_at <= NOW())
+         )
+       ORDER BY COALESCE(fulfillment_at, created_at) ASC`,
+      [outlet]
     );
     
     for (const order of orders) {
@@ -103,16 +124,17 @@ router.post("/manual", async (req: Request, res: Response) => {
     const finalPaymentStatus = payment_status || 'belum_bayar';
     const amountPaid = finalPaymentStatus === 'lunas' ? totalPrice : 0;
 
-    const finalSource = source || 'ngolab';
+    const finalOutlet = source === 'coworking' ? 'coworking' : 'ngolab';
+    const finalSource = 'manual';
 
     await connection.query(
-      `INSERT INTO orders (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method, amount_paid, external_id, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method, amount_paid, external_id, source, outlet)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderId, 
         null, // manual order tidak spesifik user untuk sekarang, jika ada user_id bisa di set
         customer_name, invoiceNumber, totalPrice, status, finalPaymentStatus, 
-        payment_method || 'Tunai', amountPaid, "MANUAL", finalSource
+        payment_method || 'Tunai', amountPaid, "MANUAL", finalSource, finalOutlet
       ]
     );
 
@@ -288,10 +310,18 @@ router.post("/:id/verify", async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const [orders]: any = await connection.query("SELECT * FROM orders WHERE id = ?", [id]);
-    if (!orders.length) return res.status(404).json({ message: "Pesanan tidak ditemukan" });
+    if (!orders.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Pesanan tidak ditemukan" });
+    }
     
     const order = orders[0];
+    if (order.order_type === 'preorder') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Pelunasan PO harus melalui aksi Tandai Lunas agar aturan operasional PO tervalidasi' });
+    }
     if (order.payment_status === 'lunas') {
+      await connection.rollback();
       return res.status(400).json({ message: "Pesanan sudah lunas" });
     }
 
@@ -346,6 +376,10 @@ router.post("/:id/verify", async (req: Request, res: Response) => {
 // POST /api/orders/:id/reject
 router.post("/:id/reject", async (req: Request, res: Response) => {
   try {
+    const identity = await getPreorderIdentity(req.params.id);
+    if (identity?.order_type === 'preorder') {
+      return res.status(409).json({ message: 'Pembatalan PO harus melalui aksi Batalkan PO agar deadline dan kuota tervalidasi' });
+    }
     await db.query("UPDATE orders SET payment_status = 'ditolak', status = 'dibatalkan' WHERE id = ?", [req.params.id]);
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
     
@@ -377,8 +411,15 @@ router.patch("/:id/payment-status", async (req: Request, res: Response) => {
     }
 
     const [orders]: any = await connection.query("SELECT * FROM orders WHERE id = ?", [id]);
-    if (!orders.length) return res.status(404).json({ message: "Pesanan tidak ditemukan" });
+    if (!orders.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: "Pesanan tidak ditemukan" });
+    }
     const order = orders[0];
+    if (order.order_type === 'preorder') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Status pembayaran PO harus diubah melalui halaman Pesanan Pre-order' });
+    }
 
     // Saat lunas: status 'menunggu' agar masuk ke kolom "Pesanan Masuk" di KDS
     // Koki yang akan menggeser ke 'sedang_diproses' lewat tombol "Mulai Masak"
@@ -431,6 +472,13 @@ router.patch("/:id/payment-status", async (req: Request, res: Response) => {
 router.patch("/:id/status", async (req: Request, res: Response) => {
   try {
     const { status } = req.body;
+    if (!['menunggu', 'sedang_diproses', 'siap', 'selesai', 'dibatalkan'].includes(status)) {
+      return res.status(400).json({ message: 'Status pesanan tidak valid' });
+    }
+    const identity = await getPreorderIdentity(req.params.id);
+    if (identity?.order_type === 'preorder' && status === 'dibatalkan') {
+      return res.status(409).json({ message: 'Gunakan aksi Batalkan PO agar deadline dan kuota tervalidasi' });
+    }
     await db.query("UPDATE orders SET status = ? WHERE id = ?", [status, req.params.id]);
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
     
@@ -458,6 +506,10 @@ router.patch("/:id/status", async (req: Request, res: Response) => {
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const identity = await getPreorderIdentity(id);
+    if (identity?.order_type === 'preorder') {
+      return res.status(409).json({ message: 'Transaksi PO tidak boleh dihapus melalui endpoint pesanan umum' });
+    }
     const actor = (req.headers["x-user-name"] as string) || "Admin";
     const [orderData]: any = await db.query("SELECT invoice_number FROM orders WHERE id = ?", [id]);
     const inv = orderData.length ? orderData[0].invoice_number : id;

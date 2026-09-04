@@ -9,7 +9,11 @@ import {
   Check,
   RefreshCw,
   Coffee,
-  Package
+  Package,
+  ReceiptText,
+  Trash2,
+  Banknote,
+  CreditCard
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -26,14 +30,36 @@ export default function ManualOrder() {
   const [selectedOutlet, setSelectedOutlet] = useState<'ngolab' | 'coworking'>('ngolab');
   const [paymentMethod, setPaymentMethod] = useState('Tunai');
   const [paymentStatus, setPaymentStatus] = useState<'belum_bayar' | 'lunas'>('belum_bayar');
+  const [selectedCategory, setSelectedCategory] = useState('Semua');
+  const [orderMode, setOrderMode] = useState<'regular' | 'preorder'>('regular');
+  const [preorderCampaigns, setPreorderCampaigns] = useState<any[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [paymentTiming, setPaymentTiming] = useState<'before_pickup' | 'on_pickup'>('before_pickup');
 
   useEffect(() => {
     let active = true;
-    fetch(`/api/menu?outlet=${selectedOutlet}`)
+    const url = orderMode === 'regular'
+      ? `/api/menu?outlet=${selectedOutlet}`
+      : `/api/preorders/active?outlet=${selectedOutlet}`;
+    fetch(url)
       .then(res => res.json())
       .then(data => {
-        if (active && Array.isArray(data)) {
+        if (!active || !Array.isArray(data)) return;
+        if (orderMode === 'regular') {
+          setPreorderCampaigns([]);
+          setSelectedCampaignId('');
           setMenuItems(data);
+        } else {
+          setPreorderCampaigns(data);
+          const campaign = data[0];
+          setSelectedCampaignId(campaign?.id || '');
+          setMenuItems((campaign?.items || []).map((item: any) => ({
+            ...item,
+            image: item.image_url,
+            stock: item.remaining_quota,
+            campaignId: campaign.id,
+            preorder: true
+          })));
         }
       })
       .catch(err => console.error("Menu fetch failed:", err));
@@ -41,15 +67,39 @@ export default function ManualOrder() {
     return () => {
       active = false;
     };
-  }, [selectedOutlet]);
+  }, [selectedOutlet, orderMode]);
+
+  const chooseCampaign = (campaignId: string) => {
+    const campaign = preorderCampaigns.find(item => item.id === campaignId);
+    setSelectedCampaignId(campaignId);
+    setSelectedItems([]);
+    setSelectedCategory('Semua');
+    setMenuItems((campaign?.items || []).map((item: any) => ({
+      ...item,
+      image: item.image_url,
+      stock: item.remaining_quota,
+      campaignId: campaign.id,
+      preorder: true
+    })));
+  };
 
   const filteredMenu = useMemo(() => {
     if (!Array.isArray(menuItems)) return [];
-    return menuItems.filter(m => 
-      (m.name || '').toLowerCase().includes(searchMenu.toLowerCase()) || 
-      (m.category || '').toLowerCase().includes(searchMenu.toLowerCase())
-    );
-  }, [menuItems, searchMenu]);
+    return menuItems.filter(m => {
+      const matchesSearch =
+        (m.name || '').toLowerCase().includes(searchMenu.toLowerCase()) ||
+        (m.category || '').toLowerCase().includes(searchMenu.toLowerCase());
+      const matchesCategory = selectedCategory === 'Semua' || m.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [menuItems, searchMenu, selectedCategory]);
+
+  const categories = useMemo(() => {
+    const values = menuItems
+      .map(item => item.category)
+      .filter((category): category is string => Boolean(category));
+    return ['Semua', ...Array.from(new Set(values))];
+  }, [menuItems]);
 
   const addToManualOrder = (id: string | number) => {
     setSelectedItems(prev => {
@@ -94,19 +144,27 @@ export default function ManualOrder() {
         };
       });
 
-      const res = await fetch('/api/orders/manual', {
+      const isPreorder = orderMode === 'preorder';
+      const endpoint = isPreorder ? `/api/preorders/${selectedCampaignId}/orders` : '/api/orders/manual';
+      const payload = isPreorder ? {
+        customer_name: manualCustomerName,
+        items: selectedItems,
+        payment_timing: paymentTiming,
+        payment_method: paymentMethod
+      } : {
+        customer_name: manualCustomerName,
+        items: itemsPayload,
+        payment_method: paymentMethod,
+        payment_status: paymentStatus,
+        source: selectedOutlet
+      };
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'x-user-name': user?.name || 'Kasir'
         },
-        body: JSON.stringify({
-          customer_name: manualCustomerName,
-          items: itemsPayload,
-          payment_method: paymentMethod,
-          payment_status: paymentStatus,
-          source: selectedOutlet
-        })
+        body: JSON.stringify(payload)
       });
 
       const data = await res.json();
@@ -116,6 +174,7 @@ export default function ManualOrder() {
         setSelectedItems([]);
         setPaymentMethod('Tunai');
         setPaymentStatus('belum_bayar');
+        setPaymentTiming('before_pickup');
         setSuccessMessage(`Pesanan berhasil dibuat! Invoice: ${data.invoice_number}`);
         setTimeout(() => setSuccessMessage(''), 5000);
       } else {
@@ -133,198 +192,249 @@ export default function ManualOrder() {
     setSelectedOutlet(outlet);
     setSelectedItems([]);
     setSearchMenu('');
+    setSelectedCategory('Semua');
+  };
+
+  const handleModeChange = (mode: 'regular' | 'preorder') => {
+    setOrderMode(mode);
+    setSelectedItems([]);
+    setSearchMenu('');
+    setSelectedCategory('Semua');
   };
 
   return (
-    <div className="h-full flex flex-col space-y-6 animate-in fade-in duration-500">
-      <div>
-        <h2 className="text-2xl font-black tracking-tight text-slate-900">Pesanan Manual</h2>
-        <p className="text-sm text-slate-500 font-medium tracking-tight">Input pesanan via Telepon atau Walk-in langsung ke sistem.</p>
-      </div>
-
-      {/* Outlet Toggle */}
-      <div className="flex items-center gap-2 p-1.5 bg-white border border-slate-100 rounded-2xl w-fit shadow-sm">
-        <button
-          onClick={() => handleOutletChange('ngolab')}
-          className={cn(
-            "flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold transition-all",
-            selectedOutlet === 'ngolab'
-              ? "bg-indigo-600 text-white shadow-md shadow-indigo-200"
-              : "text-slate-500 hover:bg-slate-50"
-          )}
-        >
-          <Package size={16} />
-          Menu Ngolab
-        </button>
-        <button
-          onClick={() => handleOutletChange('coworking')}
-          className={cn(
-            "flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold transition-all",
-            selectedOutlet === 'coworking'
-              ? "bg-amber-600 text-white shadow-md shadow-amber-200"
-              : "text-slate-500 hover:bg-slate-50"
-          )}
-        >
-          <Coffee size={16} />
-          Menu Coworking
-        </button>
-      </div>
-
-      <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
-        {/* Left Side: Product Selector */}
-        <div className="flex-[3] flex flex-col bg-white rounded-3xl border border-slate-100 shadow-premium overflow-hidden">
-          <div className="p-6 border-b border-slate-50 bg-slate-50/30">
-            <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text" 
-                placeholder={`Cari Menu ${selectedOutlet === 'ngolab' ? 'Ngolab' : 'Coworking'}...`}
-                value={searchMenu}
-                onChange={(e) => setSearchMenu(e.target.value)}
-                className="w-full bg-white border border-slate-100 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
-              />
-            </div>
-            <div className={cn(
-              "mt-3 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg inline-flex items-center gap-2",
-              selectedOutlet === 'ngolab' ? "bg-indigo-50 text-indigo-600" : "bg-amber-50 text-amber-700"
-            )}>
-              {selectedOutlet === 'ngolab' ? <Package size={12} /> : <Coffee size={12} />}
-              {selectedOutlet === 'ngolab' ? 'Outlet Ngolab' : 'Outlet Coworking'} — {filteredMenu.length} item
-            </div>
+    <div className="h-full min-h-0 flex flex-col bg-[#f7f7f8] -m-8 animate-in fade-in duration-300">
+      <div className="min-h-16 shrink-0 bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0">
+            <ReceiptText size={18} />
           </div>
-          
-          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filteredMenu.map((item) => (
-                <div 
-                  key={item.id}
-                  className={cn(
-                    "group bg-white border p-4 rounded-3xl hover:shadow-xl transition-all cursor-pointer relative flex flex-col",
-                    selectedOutlet === 'ngolab'
-                      ? "border-slate-100 hover:border-indigo-600 hover:shadow-indigo-50/50"
-                      : "border-slate-100 hover:border-amber-500 hover:shadow-amber-50/50"
-                  )}
-                  onClick={() => addToManualOrder(item.id)}
-                >
-                  <div className="flex items-center gap-4 mb-4">
-                    <img src={item.image} className="w-16 h-16 rounded-2xl object-cover shadow-sm border border-slate-50" referrerPolicy="no-referrer" />
-                    <div className="flex-1">
-                      <span className={cn(
-                        "text-[10px] font-black uppercase tracking-widest mb-1 block",
-                        selectedOutlet === 'ngolab' ? "text-indigo-600" : "text-amber-700"
-                      )}>{item.category}</span>
-                      <h4 className="text-xs font-black text-slate-900 line-clamp-2 leading-tight">{item.name}</h4>
-                    </div>
-                  </div>
-                  <div className="mt-auto flex items-center justify-between">
-                    <p className="text-sm font-black text-slate-900">Rp {(item.price || 0).toLocaleString()}</p>
-                    <div className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity",
-                      selectedOutlet === 'ngolab' ? "bg-indigo-50 text-indigo-600" : "bg-amber-50 text-amber-600"
-                    )}>
-                      <Plus size={16} />
-                    </div>
-                  </div>
-                </div>
-              ))}
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-slate-900 leading-tight">Point of Sale</h2>
+            <div className="mt-1 flex items-center gap-1">
+              <button type="button" onClick={() => handleModeChange('regular')} className={cn('px-2.5 py-1 rounded text-[10px] font-bold', orderMode === 'regular' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-500')}>Menu Tetap</button>
+              <button type="button" onClick={() => handleModeChange('preorder')} className={cn('px-2.5 py-1 rounded text-[10px] font-bold', orderMode === 'preorder' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-500')}>Pre-order</button>
             </div>
           </div>
         </div>
 
-        {/* Right Side: Cart Summary */}
-        <div className="flex-[2] flex flex-col bg-slate-50 rounded-3xl border border-slate-100 shadow-inner overflow-hidden">
-          <div className="p-6 border-b border-slate-200 bg-white space-y-4">
-            <div>
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block">Identitas Pelanggan</label>
-              <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Nama Pelanggan / No. Telp"
-                  value={manualCustomerName}
-                  onChange={(e) => setManualCustomerName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-xs font-black text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white transition-all shadow-sm"
-                />
+        <div className="flex items-center bg-slate-100 rounded-lg p-1 shrink-0">
+          <button
+            onClick={() => handleOutletChange('ngolab')}
+            className={cn(
+              'h-9 px-4 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors',
+              selectedOutlet === 'ngolab' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            )}
+          >
+            <Package size={15} /> Ngolab
+          </button>
+          <button
+            onClick={() => handleOutletChange('coworking')}
+            className={cn(
+              'h-9 px-4 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors',
+              selectedOutlet === 'coworking' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            )}
+          >
+            <Coffee size={15} /> Coworking
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <section className="min-h-0 flex flex-col border-r border-slate-200">
+          <div className="bg-white px-5 py-4 border-b border-slate-200 space-y-3">
+            {orderMode === 'preorder' && (
+              <div className="flex items-center gap-3">
+                <label className="text-xs font-semibold text-slate-600 shrink-0">Program PO</label>
+                <select
+                  value={selectedCampaignId}
+                  onChange={event => chooseCampaign(event.target.value)}
+                  className="flex-1 h-10 border border-slate-200 rounded-lg px-3 text-sm bg-white focus:outline-none focus:border-primary"
+                >
+                  {preorderCampaigns.length === 0 && <option value="">Belum ada PO yang sedang dibuka</option>}
+                  {preorderCampaigns.map(campaign => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.name} — penyajian {new Date(campaign.service_at).toLocaleString('id-ID')}
+                    </option>
+                  ))}
+                </select>
               </div>
+            )}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+              <input
+                type="search"
+                placeholder="Cari produk atau kategori..."
+                value={searchMenu}
+                onChange={(event) => setSearchMenu(event.target.value)}
+                className="w-full h-11 bg-slate-50 border border-slate-200 rounded-lg pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+              />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block">Metode Bayar</label>
-                <select
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white transition-all"
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
+              {categories.map(category => (
+                <button
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={cn(
+                    'h-8 px-3.5 rounded-md whitespace-nowrap text-xs font-medium border transition-colors',
+                    selectedCategory === category
+                      ? 'bg-primary border-primary text-primary-foreground'
+                      : 'bg-white border-slate-200 text-slate-600 hover:border-primary/50 hover:text-primary'
+                  )}
                 >
-                  <option value="Tunai">Tunai</option>
-                  <option value="QRIS">QRIS</option>
-                  <option value="Transfer">Transfer Bank</option>
-                  <option value="Debit">Kartu Debit</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 block">Status Bayar</label>
-                <select
-                  value={paymentStatus}
-                  onChange={(e) => setPaymentStatus(e.target.value as 'belum_bayar' | 'lunas')}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 text-xs font-bold text-slate-900 focus:outline-none focus:border-indigo-600 focus:bg-white transition-all"
-                >
-                  <option value="belum_bayar">Belum Bayar</option>
-                  <option value="lunas">Lunas</option>
-                </select>
-              </div>
+                  {category}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200/60">
-              <span className="text-[10px] font-black text-slate-400 uppercase">Keranjang Pesanan</span>
-              <span className={cn(
-                "text-[10px] font-black px-2 py-1 rounded-md",
-                selectedOutlet === 'ngolab' ? "text-indigo-600 bg-indigo-50" : "text-amber-700 bg-amber-50"
-              )}>{selectedItems.length} Item</span>
+          <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-sm font-semibold text-slate-700">Produk</p>
+              <p className="text-xs text-slate-500">{filteredMenu.length} produk tersedia</p>
             </div>
 
-            {selectedItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center opacity-40">
-                <ShoppingBag size={48} className="text-slate-300 mb-4" />
-                <p className="text-[10px] font-black uppercase tracking-widest">Pilih menu di sisi kiri</p>
+            {filteredMenu.length === 0 ? (
+              <div className="h-52 rounded-xl border border-dashed border-slate-300 bg-white flex flex-col items-center justify-center text-center">
+                <Search size={28} className="text-slate-300 mb-3" />
+                <p className="text-sm font-medium text-slate-600">Produk tidak ditemukan</p>
+                <p className="text-xs text-slate-400 mt-1">Coba kata kunci atau kategori lain.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {selectedItems.map((cartItem) => {
-                  const menu = menuItems.find(m => m.id.toString() === cartItem.id.toString());
+              <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-3">
+                {filteredMenu.map(item => {
+                  const cartItem = selectedItems.find(selected => selected.id.toString() === item.id.toString());
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => addToManualOrder(item.id)}
+                      className="group text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-primary hover:shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <div className="relative aspect-[4/3] bg-slate-100 overflow-hidden">
+                        <div className="absolute inset-0 flex items-center justify-center text-slate-300">
+                          <Coffee size={30} />
+                        </div>
+                        {item.image && (
+                          <img
+                            src={item.image}
+                            alt=""
+                            className="relative w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
+                            referrerPolicy="no-referrer"
+                            onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                          />
+                        )}
+                        {cartItem && (
+                          <span className="absolute top-2 right-2 min-w-7 h-7 px-2 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center shadow-sm">
+                            {cartItem.quantity}
+                          </span>
+                        )}
+                      </div>
+                      <div className="p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-wide text-slate-400 truncate">{item.category || 'Menu'}</p>
+                          {item.preorder && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">PO · sisa {item.stock}</span>}
+                        </div>
+                        <h3 className="text-sm font-semibold text-slate-800 line-clamp-2 min-h-10 mt-1">{item.name}</h3>
+                        <div className="flex items-center justify-between mt-2 gap-2">
+                          <span className="text-sm font-bold text-primary">Rp {(item.price || 0).toLocaleString()}</span>
+                          <span className="w-7 h-7 rounded-md bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                            <Plus size={15} />
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <aside className="min-h-[520px] xl:min-h-0 bg-white flex flex-col">
+          <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingBag size={18} className="text-primary" />
+              <h3 className="text-sm font-semibold text-slate-900">Pesanan Saat Ini</h3>
+            </div>
+            {selectedItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedItems([])}
+                className="text-xs font-medium text-rose-600 hover:bg-rose-50 px-2.5 py-1.5 rounded-md flex items-center gap-1.5"
+              >
+                <Trash2 size={13} /> Kosongkan
+              </button>
+            )}
+          </div>
+
+          <div className="p-5 border-b border-slate-200 space-y-3">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600 mb-1.5 block">Pelanggan</span>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  type="text"
+                  placeholder="Nama atau nomor telepon"
+                  value={manualCustomerName}
+                  onChange={(event) => setManualCustomerName(event.target.value)}
+                  className="w-full h-10 bg-white border border-slate-200 rounded-lg pl-9 pr-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                />
+              </div>
+            </label>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            {selectedItems.length === 0 ? (
+              <div className="h-full min-h-52 flex flex-col items-center justify-center text-center px-8">
+                <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+                  <ShoppingBag size={25} className="text-slate-300" />
+                </div>
+                <p className="text-sm font-medium text-slate-600">Keranjang masih kosong</p>
+                <p className="text-xs text-slate-400 mt-1">Klik produk untuk menambahkannya.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {selectedItems.map(cartItem => {
+                  const menu = menuItems.find(item => item.id.toString() === cartItem.id.toString());
                   if (!menu) return null;
                   return (
-                    <motion.div 
+                    <motion.div
                       layout
-                      initial={{ opacity: 0, y: 10 }}
+                      initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
-                      key={cartItem.id} 
-                      className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group"
+                      key={cartItem.id}
+                      className="px-5 py-3.5 flex items-center gap-3"
                     >
-                      <div className="flex-1 pr-2">
-                        <h5 className="text-[11px] font-black text-slate-900 leading-tight">{menu.name}</h5>
-                        <span className={cn(
-                          "text-[10px] font-bold",
-                          selectedOutlet === 'ngolab' ? "text-indigo-600" : "text-amber-700"
-                        )}>Rp {((menu.price || 0) * cartItem.quantity).toLocaleString()}</span>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-sm font-medium text-slate-800 truncate">{menu.name}</h4>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Rp {(menu.price || 0).toLocaleString()} × {cartItem.quantity}
+                        </p>
                       </div>
-                      <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-100 shrink-0">
-                        <button 
+                      <div className="h-8 flex items-center border border-slate-200 rounded-md overflow-hidden shrink-0">
+                        <button
+                          type="button"
                           onClick={() => removeFromManualOrder(menu.id)}
-                          className="p-1 text-slate-400 hover:text-rose-500 hover:bg-white rounded-lg transition-all"
+                          className="w-8 h-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-rose-600"
+                          aria-label={`Kurangi ${menu.name}`}
                         >
-                          <Minus size={12} />
+                          <Minus size={13} />
                         </button>
-                        <span className="text-[11px] font-black text-slate-900 w-4 text-center">{cartItem.quantity}</span>
-                        <button 
+                        <span className="w-8 text-center text-xs font-semibold text-slate-800">{cartItem.quantity}</span>
+                        <button
+                          type="button"
                           onClick={() => addToManualOrder(menu.id)}
-                          className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-all"
+                          className="w-8 h-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-primary"
+                          aria-label={`Tambah ${menu.name}`}
                         >
-                          <Plus size={12} />
+                          <Plus size={13} />
                         </button>
                       </div>
+                      <p className="w-24 text-right text-sm font-semibold text-slate-800 shrink-0">
+                        Rp {((menu.price || 0) * cartItem.quantity).toLocaleString()}
+                      </p>
                     </motion.div>
                   );
                 })}
@@ -332,45 +442,105 @@ export default function ManualOrder() {
             )}
           </div>
 
-          <div className="p-6 bg-white border-t border-slate-200">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Total Bayar:</span>
-              <span className="text-2xl font-black text-slate-900">Rp {manualOrderTotal.toLocaleString()}</span>
+          <div className="border-t border-slate-200 p-5 space-y-4 bg-white">
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'Tunai', label: 'Tunai', icon: Banknote },
+                { value: 'QRIS', label: 'QRIS', icon: CreditCard },
+                { value: 'Transfer', label: 'Transfer', icon: CreditCard },
+                { value: 'Debit', label: 'Debit', icon: CreditCard }
+              ].map(method => (
+                <button
+                  type="button"
+                  key={method.value}
+                  onClick={() => setPaymentMethod(method.value)}
+                  className={cn(
+                    'h-10 border rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors',
+                    paymentMethod === method.value
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  )}
+                >
+                  <method.icon size={15} /> {method.label}
+                </button>
+              ))}
+            </div>
+
+            {orderMode === 'preorder' ? (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-slate-500">Waktu pembayaran PO</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setPaymentTiming('before_pickup')} className={cn('p-2.5 rounded-lg border text-xs font-semibold', paymentTiming === 'before_pickup' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600')}>Bayar sebelum pengambilan</button>
+                  <button type="button" onClick={() => setPaymentTiming('on_pickup')} className={cn('p-2.5 rounded-lg border text-xs font-semibold', paymentTiming === 'on_pickup' ? 'border-primary bg-primary/10 text-primary' : 'border-slate-200 text-slate-600')}>Bayar saat/setelah pengambilan</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-slate-500">Status pembayaran</span>
+                <div className="flex bg-slate-100 rounded-md p-1">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentStatus('belum_bayar')}
+                    className={cn(
+                      'px-3 py-1.5 rounded text-xs font-medium',
+                      paymentStatus === 'belum_bayar' ? 'bg-white text-amber-700 shadow-sm' : 'text-slate-500'
+                    )}
+                  >
+                    Belum Bayar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentStatus('lunas')}
+                    className={cn(
+                      'px-3 py-1.5 rounded text-xs font-medium',
+                      paymentStatus === 'lunas' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
+                    )}
+                  >
+                    Lunas
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-slate-100 flex items-end justify-between">
+              <div>
+                <p className="text-xs text-slate-500">Total pembayaran</p>
+                <p className="text-2xl font-bold text-slate-900 mt-0.5">Rp {manualOrderTotal.toLocaleString()}</p>
+              </div>
+              <p className="text-xs text-slate-400">{selectedItems.reduce((total, item) => total + item.quantity, 0)} item</p>
             </div>
 
             {successMessage && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-4 p-3 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-2"
+                className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium flex items-center gap-2"
               >
-                <Check size={16} /> {successMessage}
+                <Check size={15} /> {successMessage}
               </motion.div>
             )}
 
             {errorMessage && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-4 p-3 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl text-xs font-bold text-center"
+                className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-xs font-medium"
               >
-                ⚠️ {errorMessage}
+                {errorMessage}
               </motion.div>
             )}
 
-            <button 
-              disabled={!manualCustomerName || selectedItems.length === 0 || manualSubmitting}
+            <button
+              type="button"
+              disabled={!manualCustomerName || selectedItems.length === 0 || manualSubmitting || (orderMode === 'preorder' && !selectedCampaignId)}
               onClick={submitManualOrder}
-              className="w-full py-5 bg-slate-900 text-white rounded-[1.5rem] text-sm font-black uppercase tracking-[0.2em] hover:bg-black transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-3 disabled:opacity-50 disabled:shadow-none"
+              className="w-full h-12 bg-primary text-primary-foreground rounded-lg text-sm font-semibold hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {manualSubmitting ? (
-                <RefreshCw size={20} className="animate-spin" />
-              ) : (
-                <>Simpan & Lanjutkan <Check size={20}/></>
-              )}
+              {manualSubmitting ? <RefreshCw size={18} className="animate-spin" /> : <Check size={18} />}
+              {manualSubmitting ? 'Menyimpan pesanan...' : 'Konfirmasi Pesanan'}
             </button>
           </div>
-        </div>
+        </aside>
       </div>
     </div>
   );

@@ -19,7 +19,9 @@ import {
   UtensilsCrossed,
   TrendingUp,
   Tag,
-  Gift
+  Gift,
+  CalendarClock,
+  CalendarCheck
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
@@ -49,6 +51,8 @@ const navItems = [
   { id: 'users', label: 'Database Pengguna', icon: Users, section: 'Manajemen', roles: ['Super Admin', 'Kasir'] },
   { id: 'staff', label: 'Tim & Shift', icon: Users, section: 'Manajemen', roles: ['Super Admin'] },
   { id: 'menu-management', label: 'Manajemen Menu', icon: UtensilsCrossed, section: 'Manajemen', roles: ['Super Admin', 'Koki'] },
+  { id: 'preorders', label: 'Menu Pre-order', icon: CalendarClock, section: 'Manajemen', roles: ['Super Admin', 'Kasir', 'Koki'] },
+  { id: 'preorder-orders', label: 'Pesanan Pre-order', icon: CalendarCheck, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki'] },
   { id: 'logs', label: 'Log Audit', icon: History, section: 'Sistem', roles: ['Super Admin', 'Kasir', 'Koki'] },
   { id: 'settings', label: 'Pengaturan Admin', icon: Settings, section: 'Sistem', roles: ['Super Admin', 'Kasir', 'Koki'] },
 ];

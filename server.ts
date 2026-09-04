@@ -5,7 +5,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { testDbConnection } from './src/db/db.js';
+import { db, testDbConnection } from './src/db/db.js';
 import digitalBoardRouter from './src/routes/digitalBoard.js';
 import ordersRouter from './src/routes/orders.js';
 import orderSimulationRouter from './src/routes/orderSimulation.js';
@@ -24,6 +24,7 @@ import ingredientsRouter from './src/routes/ingredients.js';
 import catalogRouter from './src/routes/catalog.js';
 import kioskRouter from './src/routes/kiosk.js';
 import promotionsRouter from './src/routes/promotions.js';
+import preordersRouter from './src/routes/preorders.js';
 
 async function startServer() {
   const app = express();
@@ -45,6 +46,32 @@ async function startServer() {
     socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
   });
 
+  const releaseDuePreorders = async () => {
+    try {
+      const [campaigns]: any = await db.query(
+        `SELECT p.id, p.name, p.outlet, p.service_at FROM preorder_campaigns p
+         WHERE p.is_active = 1 AND p.service_at <= NOW() AND p.kds_released_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM orders o
+             WHERE o.preorder_campaign_id = p.id
+               AND LOWER(o.status) IN ('menunggu', 'sedang_diproses', 'siap')
+           )`
+      );
+      for (const campaign of campaigns) {
+        const [result]: any = await db.query(
+          'UPDATE preorder_campaigns SET kds_released_at = NOW() WHERE id = ? AND kds_released_at IS NULL',
+          [campaign.id]
+        );
+        if (result.affectedRows) io.emit('preorder_due', campaign);
+      }
+    } catch (error) {
+      console.error('Pre-order release scheduler failed:', error);
+    }
+  };
+  await releaseDuePreorders();
+  const preorderTimer = setInterval(releaseDuePreorders, 30_000);
+  preorderTimer.unref();
+
   // API routes. Routers with specific endpoints are mounted before generic routers.
   app.use('/api/auth', authRouter);
   app.use('/api/staff', staffRouter);
@@ -60,6 +87,7 @@ async function startServer() {
   app.use('/api/patungan-rooms', crowdfundingRouter);
   app.use('/api/digital-board', digitalBoardRouter);
   app.use('/api/promotions', promotionsRouter);
+  app.use('/api/preorders', preordersRouter);
   app.use('/api/ingredients', ingredientsRouter);
   app.use('/api/admin/catalog', catalogRouter);
   app.use('/api/v1', kioskRouter);

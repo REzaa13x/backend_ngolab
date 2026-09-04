@@ -111,6 +111,73 @@ export async function testDbConnection() {
       throw migErr;
     }
 
+    // Migration: Pre-order campaigns, items, and order snapshots
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS preorder_campaigns (
+          id VARCHAR(50) NOT NULL,
+          name VARCHAR(200) NOT NULL,
+          description TEXT DEFAULT NULL,
+          outlet ENUM('ngolab', 'coworking') NOT NULL,
+          order_start_at DATETIME NOT NULL,
+          order_deadline_at DATETIME NOT NULL,
+          service_at DATETIME NOT NULL,
+          is_active TINYINT(1) NOT NULL DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          INDEX idx_preorder_window (outlet, is_active, order_start_at, order_deadline_at),
+          INDEX idx_preorder_service (service_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS preorder_items (
+          id VARCHAR(50) NOT NULL,
+          campaign_id VARCHAR(50) NOT NULL,
+          name VARCHAR(200) NOT NULL,
+          category VARCHAR(100) NOT NULL DEFAULT 'PO',
+          price INT NOT NULL,
+          quota_total INT NOT NULL,
+          quota_sold INT NOT NULL DEFAULT 0,
+          image_url VARCHAR(500) DEFAULT NULL,
+          description TEXT DEFAULT NULL,
+          is_active TINYINT(1) NOT NULL DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          INDEX idx_preorder_items_campaign (campaign_id, is_active),
+          CONSTRAINT fk_preorder_items_campaign FOREIGN KEY (campaign_id) REFERENCES preorder_campaigns(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+      const [campaignColumns]: any = await connection.query("SHOW COLUMNS FROM preorder_campaigns");
+      if (!campaignColumns.some((column: any) => column.Field === 'kds_released_at')) {
+        await connection.query("ALTER TABLE preorder_campaigns ADD COLUMN kds_released_at DATETIME DEFAULT NULL AFTER is_active");
+      }
+
+      const [orderColumns]: any = await connection.query("SHOW COLUMNS FROM orders");
+      const orderFields = new Set(orderColumns.map((column: any) => column.Field));
+      if (!orderFields.has('outlet')) await connection.query("ALTER TABLE orders ADD COLUMN outlet VARCHAR(50) NOT NULL DEFAULT 'ngolab' AFTER source");
+      if (!orderFields.has('order_type')) await connection.query("ALTER TABLE orders ADD COLUMN order_type VARCHAR(30) NOT NULL DEFAULT 'regular' AFTER outlet");
+      await connection.query("ALTER TABLE orders MODIFY COLUMN order_type VARCHAR(30) NOT NULL DEFAULT 'regular'");
+      await connection.query("UPDATE orders SET order_type = 'regular' WHERE LOWER(order_type) NOT IN ('regular', 'preorder') OR order_type IS NULL");
+      if (!orderFields.has('preorder_campaign_id')) await connection.query("ALTER TABLE orders ADD COLUMN preorder_campaign_id VARCHAR(50) DEFAULT NULL AFTER order_type");
+      if (!orderFields.has('payment_timing')) await connection.query("ALTER TABLE orders ADD COLUMN payment_timing VARCHAR(30) DEFAULT NULL AFTER preorder_campaign_id");
+      if (!orderFields.has('fulfillment_at')) await connection.query("ALTER TABLE orders ADD COLUMN fulfillment_at DATETIME DEFAULT NULL AFTER payment_timing");
+      if (!orderFields.has('preorder_status')) await connection.query("ALTER TABLE orders ADD COLUMN preorder_status VARCHAR(30) DEFAULT NULL AFTER fulfillment_at");
+      if (!orderFields.has('picked_up_at')) await connection.query("ALTER TABLE orders ADD COLUMN picked_up_at DATETIME DEFAULT NULL AFTER preorder_status");
+      await connection.query("UPDATE orders SET preorder_status = 'reserved' WHERE order_type = 'preorder' AND preorder_status IS NULL");
+      await connection.query("UPDATE orders SET outlet = 'coworking' WHERE source = 'coworking'");
+
+      const [itemColumns]: any = await connection.query("SHOW COLUMNS FROM order_items");
+      if (!itemColumns.some((column: any) => column.Field === 'preorder_item_id')) {
+        await connection.query("ALTER TABLE order_items ADD COLUMN preorder_item_id VARCHAR(50) DEFAULT NULL");
+      }
+      console.log("✅ Pre-order schema verified/created");
+    } catch (preorderErr: any) {
+      console.warn("⚠️ Pre-order migration failed:", preorderErr.message);
+      throw preorderErr;
+    }
+
     // Migration: Persistent ingredient inventory and recipe requirements
     try {
       await connection.query(`

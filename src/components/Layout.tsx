@@ -16,12 +16,15 @@ import SalesReport from './SalesReport';
 import MenuManagement from './MenuManagement';
 import SalesHistory from './SalesHistory';
 import IoTConfig from './IoTConfig';
+import PreorderManagement from './PreorderManagement';
+import PreorderOrders from './PreorderOrders';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, Search, Settings, User, HelpCircle, Volume2, VolumeX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import socket from '../lib/socket';
 import { playBellWithResume, unlockAudioContext } from '../lib/audioHelper';
+import { getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
 
 export default function Layout() {
   const { user, activeRole } = useAuth();
@@ -96,7 +99,8 @@ const rungReadyOrders = new Set<string>();
     const handleNewOrder = (newOrder: any) => {
       console.log("🔔 [Global Layout] Socket new_order received:", newOrder);
       const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
-      if (isSoundOn && newOrder.payment_status === 'lunas') {
+      const bellType = getOrderBellType('new_order', newOrder);
+      if (isSoundOn && bellType === 'new_order') {
         if (!rungNewOrders.has(newOrder.id)) {
           rungNewOrders.add(newOrder.id);
           console.log("🔔 [Global Layout] Playing sound: new_order");
@@ -108,14 +112,15 @@ const rungReadyOrders = new Set<string>();
     const handleOrderUpdated = (updatedOrder: any) => {
       console.log("🔄 [Global Layout] Socket order_updated received:", updatedOrder);
       const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
+      const bellType = getOrderBellType('order_updated', updatedOrder);
       if (isSoundOn) {
-        if (updatedOrder.payment_status === 'lunas' && updatedOrder.status === 'menunggu') {
+        if (bellType === 'new_order') {
           if (!rungNewOrders.has(updatedOrder.id)) {
             rungNewOrders.add(updatedOrder.id);
             console.log("🔔 [Global Layout] Playing sound: new_order (payment lunas)");
             playBellWithResume('new_order');
           }
-        } else if (updatedOrder.status === 'siap') {
+        } else if (bellType === 'ready') {
           if (!rungReadyOrders.has(updatedOrder.id)) {
             rungReadyOrders.add(updatedOrder.id);
             console.log("🔔 [Global Layout] Playing sound: ready");
@@ -125,12 +130,23 @@ const rungReadyOrders = new Set<string>();
       }
     };
 
-    socket.on("new_order", handleNewOrder);
-    socket.on("order_updated", handleOrderUpdated);
+    const handlePreorderDue = (campaign: any) => {
+      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
+      const releaseId = `po-${campaign.id}`;
+      if (isSoundOn && !rungNewOrders.has(releaseId)) {
+        rungNewOrders.add(releaseId);
+        playBellWithResume('new_order');
+      }
+    };
 
+    const cleanupOrders = subscribeToOrderEvents(socket, {
+      onNewOrder: handleNewOrder,
+      onOrderUpdated: handleOrderUpdated
+    });
+    socket.on('preorder_due', handlePreorderDue);
     return () => {
-      socket.off("new_order", handleNewOrder);
-      socket.off("order_updated", handleOrderUpdated);
+      cleanupOrders();
+      socket.off('preorder_due', handlePreorderDue);
     };
   }, []);
 
@@ -162,6 +178,8 @@ const rungReadyOrders = new Set<string>();
     'vouchers': 'Manajemen Voucher Koin',
     'coworking-menu': 'Katalog Menu Coworking',
     'menu-management': 'Manajemen Menu',
+    'preorders': 'Menu Pre-order',
+    'preorder-orders': 'Pesanan Pre-order',
     'sales-history': 'Riwayat Transaksi',
     'settings': 'Hardware & IoT Configuration'
   };
@@ -182,6 +200,8 @@ const rungReadyOrders = new Set<string>();
       case 'vouchers': return <VoucherManagement />;
       case 'coworking-menu': return <CoworkingMenu />;
       case 'menu-management': return <MenuManagement onNavigate={setActiveTab} />;
+      case 'preorders': return <PreorderManagement />;
+      case 'preorder-orders': return <PreorderOrders />;
       case 'sales-history': return <SalesHistory />;
       case 'settings': return <IoTConfig />;
       default: return <Dashboard />;

@@ -17,6 +17,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import socket from '../lib/socket';
+import { getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
 
 interface KDSItem {
   id: string;
@@ -34,11 +35,16 @@ interface KDSOrder {
   items: KDSItem[];
   notes?: string;
   status: 'queue' | 'cooking' | 'ready';
+  outlet?: 'ngolab' | 'coworking';
+  orderType?: string;
+  paymentTiming?: string;
+  paymentStatus?: string;
 }
 
 export default function KDS() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<KDSOrder[]>([]);
+  const [selectedOutlet, setSelectedOutlet] = useState<'ngolab' | 'coworking'>('ngolab');
   const [lastOrderVoice, setLastOrderVoice] = useState(false);
   const [bellType, setBellType] = useState<'new_order' | 'ready' | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(() => {
@@ -77,7 +83,7 @@ export default function KDS() {
 
   const fetchOrders = async () => {
     try {
-      const res = await fetch('/api/orders/kds');
+      const res = await fetch(`/api/orders/kds?outlet=${selectedOutlet}`);
       const data = await res.json();
       
       if (!Array.isArray(data)) {
@@ -92,7 +98,11 @@ export default function KDS() {
         invoice: o.invoice_number,
         customer: o.customer_name || (o.user_id === '1' ? 'Ahmad Fauzi' : o.user_id === '2' ? 'Siti Aminah' : 'Budi Santoso'),
         time: new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: o.status === 'siap' ? 'ready' : o.status === 'sedang_diproses' ? 'cooking' : 'queue',
+        status: String(o.status).toLowerCase() === 'siap' ? 'ready' : String(o.status).toLowerCase() === 'sedang_diproses' ? 'cooking' : 'queue',
+        outlet: o.outlet,
+        orderType: o.order_type,
+        paymentTiming: o.payment_timing,
+        paymentStatus: o.payment_status,
         items: o.items ? o.items.map((item: any, idx: number) => ({
           id: `i-${o.id}-${idx}`,
           name: item.name,
@@ -115,26 +125,29 @@ export default function KDS() {
   useEffect(() => {
     fetchOrders();
 
-    socket.on("new_order", (newOrder: any) => {
+    const handleNewOrder = (newOrder: any) => {
+      if (newOrder.outlet && newOrder.outlet !== selectedOutlet) return;
       // Pesanan baru langsung lunas → tampilkan di KDS + bell kencang
-      if (newOrder.payment_status === 'lunas') {
+      if (getOrderBellType('new_order', newOrder) === 'new_order') {
         fetchOrders();
         if (!rungKdsNewOrders.current.has(newOrder.id)) {
           rungKdsNewOrders.current.add(newOrder.id);
           triggerBell('new_order');
         }
       }
-    });
+    };
 
-    socket.on("order_updated", (updatedOrder: any) => {
-      if (updatedOrder.payment_status === 'lunas' && updatedOrder.status === 'menunggu') {
+    const handleOrderUpdated = (updatedOrder: any) => {
+      if (updatedOrder.outlet && updatedOrder.outlet !== selectedOutlet) return;
+      const bellType = getOrderBellType('order_updated', updatedOrder);
+      if (bellType === 'new_order') {
         // Kasir baru saja memverifikasi → pesanan masuk ke KDS → bell kencang
         fetchOrders();
         if (!rungKdsNewOrders.current.has(updatedOrder.id)) {
           rungKdsNewOrders.current.add(updatedOrder.id);
           triggerBell('new_order');
         }
-      } else if (updatedOrder.status === 'siap') {
+      } else if (bellType === 'ready') {
         // Koki selesai masak → pesanan siap diambil → chime melodik
         fetchOrders();
         if (!rungKdsReadyOrders.current.has(updatedOrder.id)) {
@@ -145,20 +158,35 @@ export default function KDS() {
         // Update lainnya (dibatalkan, dll) → refresh saja
         fetchOrders();
       }
-    });
-
-    return () => {
-      socket.off("new_order");
-      socket.off("order_updated");
     };
-  }, [triggerBell]);
+
+    const handlePreorderDue = (campaign: any) => {
+      if (campaign.outlet !== selectedOutlet) return;
+      fetchOrders();
+      const releaseId = `po-${campaign.id}`;
+      if (!rungKdsNewOrders.current.has(releaseId)) {
+        rungKdsNewOrders.current.add(releaseId);
+        triggerBell('new_order');
+      }
+    };
+
+    const cleanupOrders = subscribeToOrderEvents(socket, {
+      onNewOrder: handleNewOrder,
+      onOrderUpdated: handleOrderUpdated
+    });
+    socket.on('preorder_due', handlePreorderDue);
+    return () => {
+      cleanupOrders();
+      socket.off('preorder_due', handlePreorderDue);
+    };
+  }, [triggerBell, selectedOutlet]);
 
   const moveOrder = async (orderId: string, nextKdsStatus: 'queue' | 'cooking' | 'ready' | 'completed') => {
     // Map KDS status to API status
     const apiStatus = 
       nextKdsStatus === 'completed' ? 'selesai' :
       nextKdsStatus === 'ready' ? 'siap' : 
-      nextKdsStatus === 'cooking' ? 'sedang_diproses' : 'antrean';
+      nextKdsStatus === 'cooking' ? 'sedang_diproses' : 'menunggu';
     
     try {
       const res = await fetch(`/api/orders/${orderId}/status`, {
@@ -249,13 +277,17 @@ export default function KDS() {
               {/* Card Header */}
               <div className="p-5 border-b border-slate-50 flex items-start justify-between bg-white">
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <span className="text-xs font-bold text-indigo-600 font-mono">{order.invoice}</span>
                     <span className="w-1 h-1 bg-slate-300 rounded-full" />
                     <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                       <Clock size={10} />
                       {order.time}
                     </div>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-bold uppercase text-slate-600">{order.outlet || selectedOutlet}</span>
+                    {order.orderType === 'preorder' && <span className="px-1.5 py-0.5 rounded bg-violet-50 text-[9px] font-bold text-violet-700">PO</span>}
+                    {order.paymentTiming === 'before_pickup' && order.paymentStatus !== 'lunas' && <span className="px-1.5 py-0.5 rounded bg-rose-50 text-[9px] font-bold text-rose-700">Belum lunas</span>}
+                    {order.paymentTiming === 'on_pickup' && order.paymentStatus !== 'lunas' && <span className="px-1.5 py-0.5 rounded bg-amber-50 text-[9px] font-bold text-amber-700">Bayar saat pengambilan</span>}
                   </div>
                   <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                     <User size={14} className="text-slate-400" />
@@ -365,6 +397,23 @@ export default function KDS() {
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Sistem Tampilan Dapur</h2>
           <p className="text-sm text-slate-500 font-medium">Pantau pesanan dapur dan persiapan secara real-time.</p>
+          <div className="mt-4 inline-flex items-center gap-1 p-1 bg-slate-100 border border-slate-200 rounded-xl">
+            {(['ngolab', 'coworking'] as const).map(outlet => (
+              <button
+                key={outlet}
+                type="button"
+                onClick={() => { setOrders([]); setSelectedOutlet(outlet); }}
+                className={cn(
+                  'px-4 py-2 rounded-lg text-xs font-bold transition-all',
+                  selectedOutlet === outlet
+                    ? 'bg-white text-primary shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800'
+                )}
+              >
+                KDS {outlet === 'ngolab' ? 'Ngolab' : 'Coworking'}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold text-slate-600 shadow-sm">
