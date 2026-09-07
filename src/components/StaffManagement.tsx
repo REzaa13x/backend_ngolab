@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 
 interface Staff {
   id: string;
@@ -52,8 +53,8 @@ export default function StaffManagement() {
       setLoading(true);
       try {
         const [staffRes, shiftRes] = await Promise.all([
-          fetch('/api/staff'),
-          fetch('/api/shifts')
+          authFetch('/api/staff'),
+          authFetch('/api/shifts')
         ]);
         setStaff(await staffRes.json());
         setShifts(await shiftRes.json());
@@ -76,7 +77,7 @@ export default function StaffManagement() {
   const handleRegisterStaff = async () => {
     if (!newStaff.name || !newStaff.email) return;
     try {
-      const res = await fetch('/api/staff', {
+      const res = await authFetch('/api/staff', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -98,7 +99,7 @@ export default function StaffManagement() {
   const handleUpdateStaff = async () => {
     if (!selectedStaffMember) return;
     try {
-      const res = await fetch(`/api/staff/${selectedStaffMember.id}`, {
+      const res = await authFetch(`/api/staff/${selectedStaffMember.id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -119,7 +120,7 @@ export default function StaffManagement() {
   const handleDeleteStaff = async () => {
     if (!selectedStaffMember) return;
     try {
-      const res = await fetch(`/api/staff/${selectedStaffMember.id}`, {
+      const res = await authFetch(`/api/staff/${selectedStaffMember.id}`, {
         method: 'DELETE',
         headers: {
           'x-user-name': user?.name || 'Super Admin'
@@ -138,7 +139,7 @@ export default function StaffManagement() {
   const handleAssignShift = async () => {
     if (!newShift.staff_id) return;
     try {
-      const res = await fetch('/api/shifts', {
+      const res = await authFetch('/api/shifts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

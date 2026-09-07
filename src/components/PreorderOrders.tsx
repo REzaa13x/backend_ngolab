@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarCheck, CheckCircle2, Clock3, Coffee, Package, Search, UserRound, WalletCards, XCircle } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import { useAuth } from '../contexts/AuthContext';
+import { authFetch } from '../lib/authFetch';
+
 
 type OutletFilter = 'all' | 'ngolab' | 'coworking';
 type StatusFilter = 'all' | 'reserved' | 'picked_up' | 'no_show' | 'cancelled' | 'unpaid';
@@ -40,7 +41,7 @@ const operationClass: Record<string, string> = {
 };
 
 export default function PreorderOrders() {
-  const { user } = useAuth();
+
   const [orders, setOrders] = useState<PreorderOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [outlet, setOutlet] = useState<OutletFilter>('all');
@@ -56,7 +57,7 @@ export default function PreorderOrders() {
       if (outlet !== 'all') params.set('outlet', outlet);
       if (status === 'unpaid') params.set('payment_status', 'belum_bayar');
       else if (status !== 'all') params.set('preorder_status', status);
-      const response = await fetch(`/api/preorders/orders?${params}`);
+      const response = await authFetch(`/api/preorders/orders?${params}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Gagal mengambil pesanan PO');
       setOrders(Array.isArray(data) ? data : []);
@@ -87,9 +88,9 @@ export default function PreorderOrders() {
     if (!confirm(`Yakin ingin ${labels[action]} untuk ${order.invoice_number}?`)) return;
     setBusyId(order.id); setError('');
     try {
-      const response = await fetch(`/api/preorders/orders/${order.id}/${action}`, {
+      const response = await authFetch(`/api/preorders/orders/${order.id}/${action}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-name': user?.name || 'Kasir' },
+        headers: { 'Content-Type': 'application/json' },
         body: action === 'pay' ? JSON.stringify({ payment_method: order.payment_method || 'Tunai' }) : undefined
       });
       const data = await response.json();

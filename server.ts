@@ -25,6 +25,8 @@ import catalogRouter from './src/routes/catalog.js';
 import kioskRouter from './src/routes/kiosk.js';
 import promotionsRouter from './src/routes/promotions.js';
 import preordersRouter from './src/routes/preorders.js';
+import { authenticateAuthorization, getAuthTokenSecret, isRoleAllowed } from './src/lib/authToken.js';
+import { lookupCurrentIdentity } from './src/middleware/authSession.js';
 
 async function startServer() {
   const app = express();
@@ -38,6 +40,22 @@ async function startServer() {
   app.use(express.json({ limit: '20mb' }));
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.set('io', io);
+
+  const authTokenSecret = getAuthTokenSecret();
+  io.use(async (socket, next) => {
+    try {
+      const token = typeof socket.handshake.auth?.token === 'string' ? socket.handshake.auth.token : '';
+      const tokenIdentity = authenticateAuthorization(token ? `Bearer ${token}` : undefined, { secret: authTokenSecret });
+      const identity = tokenIdentity ? await lookupCurrentIdentity(tokenIdentity) : null;
+      if (!identity || !isRoleAllowed(identity, ['Super Admin', 'Kasir', 'Koki'])) {
+        return next(new Error('Sesi Socket.io staf tidak valid'));
+      }
+      socket.data.auth = identity;
+      next();
+    } catch {
+      next(new Error('Autentikasi Socket.io tidak tersedia'));
+    }
+  });
 
   await testDbConnection();
 

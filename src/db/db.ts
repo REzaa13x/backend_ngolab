@@ -157,9 +157,15 @@ export async function testDbConnection() {
       const [orderColumns]: any = await connection.query("SHOW COLUMNS FROM orders");
       const orderFields = new Set(orderColumns.map((column: any) => column.Field));
       if (!orderFields.has('outlet')) await connection.query("ALTER TABLE orders ADD COLUMN outlet VARCHAR(50) NOT NULL DEFAULT 'ngolab' AFTER source");
-      if (!orderFields.has('order_type')) await connection.query("ALTER TABLE orders ADD COLUMN order_type VARCHAR(30) NOT NULL DEFAULT 'regular' AFTER outlet");
-      await connection.query("ALTER TABLE orders MODIFY COLUMN order_type VARCHAR(30) NOT NULL DEFAULT 'regular'");
-      await connection.query("UPDATE orders SET order_type = 'regular' WHERE LOWER(order_type) NOT IN ('regular', 'preorder') OR order_type IS NULL");
+      if (!orderFields.has('order_type')) {
+        await connection.query("ALTER TABLE orders ADD COLUMN order_type VARCHAR(30) NOT NULL DEFAULT 'regular' AFTER outlet");
+      } else {
+        await connection.query("UPDATE orders SET order_type = 'regular' WHERE order_type IS NULL OR LOWER(order_type) NOT IN ('regular', 'preorder')");
+        const orderTypeColumn = orderColumns.find((column: any) => column.Field === 'order_type');
+        if (orderTypeColumn.Null !== 'NO' || orderTypeColumn.Default !== 'regular') {
+          await connection.query("ALTER TABLE orders MODIFY COLUMN order_type VARCHAR(30) NOT NULL DEFAULT 'regular'");
+        }
+      }
       if (!orderFields.has('preorder_campaign_id')) await connection.query("ALTER TABLE orders ADD COLUMN preorder_campaign_id VARCHAR(50) DEFAULT NULL AFTER order_type");
       if (!orderFields.has('payment_timing')) await connection.query("ALTER TABLE orders ADD COLUMN payment_timing VARCHAR(30) DEFAULT NULL AFTER preorder_campaign_id");
       if (!orderFields.has('fulfillment_at')) await connection.query("ALTER TABLE orders ADD COLUMN fulfillment_at DATETIME DEFAULT NULL AFTER payment_timing");

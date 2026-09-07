@@ -1,12 +1,15 @@
 import { Router, Request, Response } from "express";
 import { db, addAuditLog } from "../db/db.js";
 import { authApiKey } from "../middleware/authApiKey.js";
+import { canUseGenericOrderStatus } from "../lib/preorderRules.js";
+import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 
 const router = Router();
+const requireOrderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
 
 async function getPreorderIdentity(orderId: string) {
   const [rows]: any = await db.query(
-    'SELECT id, order_type, preorder_campaign_id FROM orders WHERE id = ? LIMIT 1',
+    'SELECT id, order_type, preorder_campaign_id, preorder_status FROM orders WHERE id = ? LIMIT 1',
     [orderId]
   );
   return rows[0] || null;
@@ -17,7 +20,7 @@ async function getPreorderIdentity(orderId: string) {
 // ==========================================
 
 // GET /api/orders — Ambil semua pesanan
-router.get("/", async (_req: Request, res: Response) => {
+router.get("/", requireOrderStaff, async (_req: Request, res: Response) => {
   try {
     const [orders]: any = await db.query("SELECT * FROM orders ORDER BY created_at DESC");
     
@@ -39,7 +42,7 @@ router.get("/", async (_req: Request, res: Response) => {
 });
 
 // GET /api/orders/kds — Ambil pesanan untuk Kitchen Display
-router.get("/kds", async (req: Request, res: Response) => {
+router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
   try {
     const outlet = String(req.query.outlet || 'ngolab');
     if (outlet !== 'ngolab' && outlet !== 'coworking') {
@@ -96,7 +99,7 @@ router.get("/queue-status", async (_req: Request, res: Response) => {
 });
 
 // POST /api/orders/manual — Buat pesanan baru (dari admin/telp/kiosk)
-router.post("/manual", async (req: Request, res: Response) => {
+router.post("/manual", requireOrderStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -165,7 +168,7 @@ router.post("/manual", async (req: Request, res: Response) => {
     }));
 
     // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Buat Pesanan Manual", `${invoiceNumber} (${customer_name})`);
 
     const io = req.app.get('io');
@@ -303,7 +306,7 @@ router.get("/external/incoming", authApiKey, async (req: Request, res: Response)
 });
 
 // POST /api/orders/:id/verify — Verifikasi Pembayaran & Beri Cashback
-router.post("/:id/verify", async (req: Request, res: Response) => {
+router.post("/:id/verify", requireOrderStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -355,7 +358,7 @@ router.post("/:id/verify", async (req: Request, res: Response) => {
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [id]);
     
     // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Verifikasi Pembayaran", `${order.invoice_number} (Lunas)`);
 
     const io = req.app.get('io');
@@ -374,7 +377,7 @@ router.post("/:id/verify", async (req: Request, res: Response) => {
 });
 
 // POST /api/orders/:id/reject
-router.post("/:id/reject", async (req: Request, res: Response) => {
+router.post("/:id/reject", requireOrderStaff, async (req: Request, res: Response) => {
   try {
     const identity = await getPreorderIdentity(req.params.id);
     if (identity?.order_type === 'preorder') {
@@ -384,7 +387,7 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
     
     // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Tolak Pesanan", `${updatedOrder[0].invoice_number} (Dibatalkan)`, "warning");
 
     const io = req.app.get('io');
@@ -399,7 +402,7 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
 });
 
 // PATCH /api/orders/:id/payment-status — Ubah Status Pembayaran (belum_bayar, lunas)
-router.patch("/:id/payment-status", async (req: Request, res: Response) => {
+router.patch("/:id/payment-status", requireOrderStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -450,7 +453,7 @@ router.patch("/:id/payment-status", async (req: Request, res: Response) => {
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [id]);
     
     // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Kasir";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Ubah Status Bayar", `${order.invoice_number} (${payment_status})`);
 
     const io = req.app.get('io');
@@ -469,21 +472,29 @@ router.patch("/:id/payment-status", async (req: Request, res: Response) => {
 });
 
 // PATCH /api/orders/:id/status — Ubah Status Pesanan (menunggu, sedang_diproses, ready, selesai, dibatalkan)
-router.patch("/:id/status", async (req: Request, res: Response) => {
+router.patch("/:id/status", requireOrderStaff, async (req: Request, res: Response) => {
   try {
     const { status } = req.body;
     if (!['menunggu', 'sedang_diproses', 'siap', 'selesai', 'dibatalkan'].includes(status)) {
       return res.status(400).json({ message: 'Status pesanan tidak valid' });
     }
     const identity = await getPreorderIdentity(req.params.id);
-    if (identity?.order_type === 'preorder' && status === 'dibatalkan') {
-      return res.status(409).json({ message: 'Gunakan aksi Batalkan PO agar deadline dan kuota tervalidasi' });
+    if (identity && !canUseGenericOrderStatus(identity, status)) {
+      return res.status(409).json({ message: 'Status PO terminal atau pembatalan hanya dapat diubah melalui halaman Pesanan Pre-order' });
     }
-    await db.query("UPDATE orders SET status = ? WHERE id = ?", [status, req.params.id]);
+    if (identity?.order_type === 'preorder') {
+      const [result]: any = await db.query(
+        "UPDATE orders SET status = ? WHERE id = ? AND preorder_status = 'reserved'",
+        [status, req.params.id]
+      );
+      if (!result.affectedRows) return res.status(409).json({ message: 'Status PO berubah; muat ulang sebelum mencoba lagi' });
+    } else {
+      await db.query("UPDATE orders SET status = ? WHERE id = ?", [status, req.params.id]);
+    }
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
     
     // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Kasir/Koki";
+    const actor = getVerifiedActor(req);
     if (updatedOrder.length > 0) {
       await addAuditLog(actor, "Update Status Pesanan", `${updatedOrder[0].invoice_number} (${status})`);
     }
@@ -503,14 +514,14 @@ router.patch("/:id/status", async (req: Request, res: Response) => {
 
 
 // DELETE /api/orders/:id — Hapus Pesanan
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", requireOrderStaff, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const identity = await getPreorderIdentity(id);
     if (identity?.order_type === 'preorder') {
       return res.status(409).json({ message: 'Transaksi PO tidak boleh dihapus melalui endpoint pesanan umum' });
     }
-    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const actor = getVerifiedActor(req);
     const [orderData]: any = await db.query("SELECT invoice_number FROM orders WHERE id = ?", [id]);
     const inv = orderData.length ? orderData[0].invoice_number : id;
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   aggregatePreorderItems,
   canCancelPreorder,
+  canUseGenericOrderStatus,
   canMarkPreorderPickedUp,
   canMarkPreorderNoShow,
   getPreorderStatus
@@ -26,9 +27,22 @@ test('campaign nonaktif selalu draft', () => {
   assert.equal(getPreorderStatus({ ...campaign, is_active: 0 }, new Date('2026-09-02T10:00:00+07:00')), 'draft');
 });
 
-test('pembatalan PO hanya diperbolehkan sebelum deadline', () => {
-  assert.equal(canCancelPreorder(campaign, new Date('2026-09-03T17:59:59+07:00')), true);
+test('pembatalan PO hanya diperbolehkan sebelum deadline dan sebelum terminal', () => {
+  const beforeDeadline = new Date('2026-09-03T17:59:59+07:00');
+  assert.equal(canCancelPreorder({ ...campaign, preorder_status: 'reserved' }, beforeDeadline), true);
+  assert.equal(canCancelPreorder({ ...campaign, preorder_status: 'picked_up' }, beforeDeadline), false);
+  assert.equal(canCancelPreorder({ ...campaign, preorder_status: 'no_show' }, beforeDeadline), false);
+  assert.equal(canCancelPreorder({ ...campaign, preorder_status: 'cancelled' }, beforeDeadline), false);
   assert.equal(canCancelPreorder(campaign, new Date('2026-09-03T18:00:00+07:00')), false);
+});
+
+test('endpoint status umum tidak dapat membatalkan atau menghidupkan kembali PO terminal', () => {
+  assert.equal(canUseGenericOrderStatus({ order_type: 'regular' }, 'selesai'), true);
+  assert.equal(canUseGenericOrderStatus({ order_type: 'preorder', preorder_status: 'reserved' }, 'sedang_diproses'), true);
+  assert.equal(canUseGenericOrderStatus({ order_type: 'preorder', preorder_status: 'reserved' }, 'dibatalkan'), false);
+  assert.equal(canUseGenericOrderStatus({ order_type: 'preorder', preorder_status: 'cancelled' }, 'menunggu'), false);
+  assert.equal(canUseGenericOrderStatus({ order_type: 'preorder', preorder_status: 'picked_up' }, 'siap'), false);
+  assert.equal(canUseGenericOrderStatus({ order_type: 'preorder', preorder_status: 'no_show' }, 'selesai'), false);
 });
 
 test('pesanan hanya dapat ditandai diambil setelah lunas', () => {

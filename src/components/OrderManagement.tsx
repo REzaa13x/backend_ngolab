@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import socket from '../lib/socket';
+import { authFetch } from '../lib/authFetch';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -62,7 +63,7 @@ export default function OrderManagement() {
 
   const fetchOrders = () => {
     setLoading(true);
-    fetch('/api/orders')
+    authFetch('/api/orders')
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -81,7 +82,7 @@ export default function OrderManagement() {
   };
 
   const fetchSummary = () => {
-    fetch('/api/reports/summary')
+    authFetch('/api/reports/summary')
       .then(res => res.json())
       .then(data => setSummary(data))
       .catch(err => console.error("Summary fetch failed:", err));
@@ -156,7 +157,7 @@ export default function OrderManagement() {
 
   const verifyPayment = async (id: string, paymentDetails?: { method: string, amount: number }) => {
     try {
-      const res = await fetch(`/api/orders/${id}/verify`, { 
+      const res = await authFetch(`/api/orders/${id}/verify`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -183,7 +184,7 @@ export default function OrderManagement() {
 
   const updatePaymentStatus = async (id: string, paymentStatus: 'belum_bayar' | 'lunas') => {
     try {
-      const res = await fetch(`/api/orders/${id}/payment-status`, { 
+      const res = await authFetch(`/api/orders/${id}/payment-status`, {
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
@@ -210,7 +211,7 @@ export default function OrderManagement() {
   const rejectOrder = async (id: string) => {
     if (!window.confirm("Apakah Anda yakin ingin menolak pembayaran ini? Pesanan akan dibatalkan.")) return;
     try {
-      const res = await fetch(`/api/orders/${id}/reject`, { 
+      const res = await authFetch(`/api/orders/${id}/reject`, {
         method: 'POST',
         headers: {
           'x-user-name': user?.name || 'Kasir'
@@ -233,7 +234,7 @@ export default function OrderManagement() {
   const deleteOrder = async (id: string) => {
     if (!confirm("Hapus pesanan ini?")) return;
     try {
-      const res = await fetch(`/api/orders/${id}`, { 
+      const res = await authFetch(`/api/orders/${id}`, {
         method: 'DELETE',
         headers: {
           'x-user-name': user?.name || 'Super Admin'
@@ -253,7 +254,7 @@ export default function OrderManagement() {
 
   const updateStatus = async (id: string, status: string) => {
     try {
-      const res = await fetch(`/api/orders/${id}/status`, { 
+      const res = await authFetch(`/api/orders/${id}/status`, {
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',

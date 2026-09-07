@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 
 export default function ManualOrder() {
   const { user } = useAuth();
@@ -41,7 +42,7 @@ export default function ManualOrder() {
     const url = orderMode === 'regular'
       ? `/api/menu?outlet=${selectedOutlet}`
       : `/api/preorders/active?outlet=${selectedOutlet}`;
-    fetch(url)
+    authFetch(url)
       .then(res => res.json())
       .then(data => {
         if (!active || !Array.isArray(data)) return;
@@ -158,7 +159,7 @@ export default function ManualOrder() {
         payment_status: paymentStatus,
         source: selectedOutlet
       };
-      const res = await fetch(endpoint, {
+      const res = await authFetch(endpoint, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

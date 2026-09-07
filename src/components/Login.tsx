@@ -36,7 +36,7 @@ export default function Login() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Login gagal');
 
-      login(data.user);
+      login(data.user, data.token);
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -60,7 +60,7 @@ export default function Login() {
       if (!res.ok) throw new Error(data.message || 'Registrasi gagal');
 
       // Setelah register, langsung login
-      login(data.user);
+      login(data.user, data.token);
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {

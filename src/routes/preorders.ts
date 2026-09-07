@@ -6,10 +6,18 @@ import {
   getPreorderStatus,
   canCancelPreorder,
   canMarkPreorderNoShow,
-  canMarkPreorderPickedUp
+  canMarkPreorderPickedUp,
+  isTerminalPreorderStatus
 } from '../lib/preorderRules.js';
 
+import {
+  getVerifiedActor,
+  requireAuthenticated,
+  requireRoles
+} from '../middleware/authSession.js';
+
 const router = Router();
+const requirePreorderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
 const validOutlets = new Set(['ngolab', 'coworking']);
 const validPaymentTimings = new Set(['before_pickup', 'on_pickup']);
 
@@ -41,7 +49,7 @@ async function loadCampaigns(where = '', params: any[] = []) {
   ));
 }
 
-router.get('/admin', async (req: Request, res: Response) => {
+router.get('/admin', requirePreorderStaff, async (req: Request, res: Response) => {
   try {
     const outlet = String(req.query.outlet || '');
     if (outlet && !validOutlets.has(outlet)) return res.status(400).json({ message: 'Outlet tidak valid' });
@@ -71,7 +79,7 @@ router.get('/active', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/orders', async (req: Request, res: Response) => {
+router.get('/orders', requirePreorderStaff, async (req: Request, res: Response) => {
   try {
     const outlet = String(req.query.outlet || '');
     const paymentStatus = String(req.query.payment_status || '');
@@ -105,7 +113,7 @@ router.get('/orders', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requirePreorderStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     const { name, description, outlet, order_start_at, order_deadline_at, service_at, items = [] } = req.body;
@@ -142,7 +150,7 @@ router.post('/', async (req: Request, res: Response) => {
       );
     }
     await connection.commit();
-    await addAuditLog(String(req.headers['x-user-name'] || 'Admin'), 'Buat Program PO', `${name} (${outlet})`);
+    await addAuditLog(getVerifiedActor(req), 'Buat Program PO', `${name} (${outlet})`);
     const [campaign] = await loadCampaigns('WHERE id = ?', [id]);
     res.status(201).json(campaign);
   } catch (error: any) {
@@ -153,19 +161,19 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/:id/toggle', async (req: Request, res: Response) => {
+router.patch('/:id/toggle', requirePreorderStaff, async (req: Request, res: Response) => {
   try {
     const [result]: any = await db.query('UPDATE preorder_campaigns SET is_active = NOT is_active WHERE id = ?', [req.params.id]);
     if (!result.affectedRows) return res.status(404).json({ message: 'Program PO tidak ditemukan' });
     const [campaign] = await loadCampaigns('WHERE id = ?', [req.params.id]);
-    await addAuditLog(String(req.headers['x-user-name'] || 'Admin'), 'Toggle Program PO', campaign.name);
+    await addAuditLog(getVerifiedActor(req), 'Toggle Program PO', campaign.name);
     res.json(campaign);
   } catch (error: any) {
     res.status(500).json({ message: 'Gagal mengubah status program PO', error: error.message });
   }
 });
 
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePreorderStaff, async (req: Request, res: Response) => {
   try {
     const [orders]: any = await db.query('SELECT id FROM orders WHERE preorder_campaign_id = ? LIMIT 1', [req.params.id]);
     if (orders.length) return res.status(409).json({ message: 'Program PO yang sudah memiliki transaksi tidak dapat dihapus' });
@@ -177,7 +185,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/:campaignId/orders', async (req: Request, res: Response) => {
+router.post('/:campaignId/orders', requireAuthenticated, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     const { customer_name, items, payment_timing, payment_method } = req.body;
@@ -239,7 +247,7 @@ router.post('/:campaignId/orders', async (req: Request, res: Response) => {
     const [orders]: any = await db.query('SELECT * FROM orders WHERE id = ?', [orderId]);
     req.app.get('io')?.emit('new_order', orders[0]);
     req.app.get('io')?.emit('stats_updated');
-    await addAuditLog(String(req.headers['x-user-name'] || 'Kasir'), 'Buat Pesanan PO', `${invoice} (${campaign.outlet})`);
+    await addAuditLog(getVerifiedActor(req), 'Buat Pesanan PO', `${invoice} (${campaign.outlet})`);
     res.status(201).json(orders[0]);
   } catch (error: any) {
     await connection.rollback();
@@ -249,57 +257,91 @@ router.post('/:campaignId/orders', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/orders/:orderId/pay', async (req: Request, res: Response) => {
+router.post('/orders/:orderId/pay', requirePreorderStaff, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
   try {
-    const [rows]: any = await db.query("SELECT * FROM orders WHERE id = ? AND order_type = 'preorder'", [req.params.orderId]);
-    if (!rows.length) return res.status(404).json({ message: 'Pesanan PO tidak ditemukan' });
+    await connection.beginTransaction();
+    const [rows]: any = await connection.query(
+      "SELECT * FROM orders WHERE id = ? AND order_type = 'preorder' FOR UPDATE",
+      [req.params.orderId]
+    );
+    if (!rows.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan PO tidak ditemukan' }); }
     const order = rows[0];
-    if (String(order.preorder_status) === 'cancelled') return res.status(409).json({ message: 'Pesanan yang dibatalkan tidak dapat dibayar' });
-    if (String(order.payment_status).toLowerCase() !== 'lunas') {
-      await db.query("UPDATE orders SET payment_status = 'lunas', amount_paid = total_price, payment_method = COALESCE(?, payment_method) WHERE id = ?", [req.body.payment_method || null, order.id]);
-      await addAuditLog(String(req.headers['x-user-name'] || 'Kasir'), 'Pelunasan PO', order.invoice_number);
+    if (isTerminalPreorderStatus(order.preorder_status)) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Pesanan PO yang sudah terminal tidak dapat dibayar' });
     }
-    const [updated]: any = await db.query('SELECT * FROM orders WHERE id = ?', [order.id]);
+    const changed = String(order.payment_status).toLowerCase() !== 'lunas';
+    if (changed) {
+      await connection.query(
+        "UPDATE orders SET payment_status = 'lunas', amount_paid = total_price, payment_method = COALESCE(?, payment_method) WHERE id = ?",
+        [req.body.payment_method || null, order.id]
+      );
+    }
+    const [updated]: any = await connection.query('SELECT * FROM orders WHERE id = ?', [order.id]);
+    await connection.commit();
+    if (changed) await addAuditLog(getVerifiedActor(req), 'Pelunasan PO', order.invoice_number);
     req.app.get('io')?.emit('order_updated', updated[0]);
     res.json(updated[0]);
   } catch (error: any) {
+    await connection.rollback();
     res.status(500).json({ message: 'Gagal menandai pembayaran PO', error: error.message });
+  } finally {
+    connection.release();
   }
 });
 
-router.post('/orders/:orderId/pickup', async (req: Request, res: Response) => {
+router.post('/orders/:orderId/pickup', requirePreorderStaff, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
   try {
-    const [rows]: any = await db.query("SELECT * FROM orders WHERE id = ? AND order_type = 'preorder'", [req.params.orderId]);
-    if (!rows.length) return res.status(404).json({ message: 'Pesanan PO tidak ditemukan' });
+    await connection.beginTransaction();
+    const [rows]: any = await connection.query(
+      "SELECT * FROM orders WHERE id = ? AND order_type = 'preorder' FOR UPDATE",
+      [req.params.orderId]
+    );
+    if (!rows.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan PO tidak ditemukan' }); }
     const order = rows[0];
-    if (!canMarkPreorderPickedUp(order)) return res.status(409).json({ message: 'Pesanan harus lunas dan belum dibatalkan sebelum ditandai sudah diambil' });
-    await db.query("UPDATE orders SET preorder_status = 'picked_up', status = 'selesai', picked_up_at = NOW() WHERE id = ?", [order.id]);
-    await addAuditLog(String(req.headers['x-user-name'] || 'Kasir'), 'PO Sudah Diambil', order.invoice_number);
-    const [updated]: any = await db.query('SELECT * FROM orders WHERE id = ?', [order.id]);
+    if (!canMarkPreorderPickedUp(order)) { await connection.rollback(); return res.status(409).json({ message: 'Pesanan harus lunas dan belum terminal sebelum ditandai sudah diambil' }); }
+    await connection.query("UPDATE orders SET preorder_status = 'picked_up', status = 'selesai', picked_up_at = NOW() WHERE id = ?", [order.id]);
+    const [updated]: any = await connection.query('SELECT * FROM orders WHERE id = ?', [order.id]);
+    await connection.commit();
+    await addAuditLog(getVerifiedActor(req), 'PO Sudah Diambil', order.invoice_number);
     req.app.get('io')?.emit('order_updated', updated[0]);
     res.json(updated[0]);
   } catch (error: any) {
+    await connection.rollback();
     res.status(500).json({ message: 'Gagal menyelesaikan pengambilan PO', error: error.message });
+  } finally {
+    connection.release();
   }
 });
 
-router.post('/orders/:orderId/no-show', async (req: Request, res: Response) => {
+router.post('/orders/:orderId/no-show', requirePreorderStaff, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
   try {
-    const [rows]: any = await db.query("SELECT * FROM orders WHERE id = ? AND order_type = 'preorder'", [req.params.orderId]);
-    if (!rows.length) return res.status(404).json({ message: 'Pesanan PO tidak ditemukan' });
+    await connection.beginTransaction();
+    const [rows]: any = await connection.query(
+      "SELECT * FROM orders WHERE id = ? AND order_type = 'preorder' FOR UPDATE",
+      [req.params.orderId]
+    );
+    if (!rows.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan PO tidak ditemukan' }); }
     const order = rows[0];
-    if (!canMarkPreorderNoShow(order)) return res.status(409).json({ message: 'No-show hanya dapat ditandai setelah waktu pengambilan dan sebelum order selesai' });
-    await db.query("UPDATE orders SET preorder_status = 'no_show', status = 'selesai' WHERE id = ?", [order.id]);
-    await addAuditLog(String(req.headers['x-user-name'] || 'Kasir'), 'PO No-show', order.invoice_number, 'warning');
-    const [updated]: any = await db.query('SELECT * FROM orders WHERE id = ?', [order.id]);
+    if (!canMarkPreorderNoShow(order)) { await connection.rollback(); return res.status(409).json({ message: 'No-show hanya dapat ditandai setelah waktu pengambilan dan sebelum order terminal' }); }
+    await connection.query("UPDATE orders SET preorder_status = 'no_show', status = 'selesai' WHERE id = ?", [order.id]);
+    const [updated]: any = await connection.query('SELECT * FROM orders WHERE id = ?', [order.id]);
+    await connection.commit();
+    await addAuditLog(getVerifiedActor(req), 'PO No-show', order.invoice_number, 'warning');
     req.app.get('io')?.emit('order_updated', updated[0]);
     res.json(updated[0]);
   } catch (error: any) {
+    await connection.rollback();
     res.status(500).json({ message: 'Gagal menandai no-show', error: error.message });
+  } finally {
+    connection.release();
   }
 });
 
-router.post('/orders/:orderId/cancel', async (req: Request, res: Response) => {
+router.post('/orders/:orderId/cancel', requirePreorderStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -311,8 +353,8 @@ router.post('/orders/:orderId/cancel', async (req: Request, res: Response) => {
     );
     if (!orders.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan PO tidak ditemukan' }); }
     const order = orders[0];
+    if (isTerminalPreorderStatus(order.preorder_status)) { await connection.rollback(); return res.status(409).json({ message: 'Pesanan PO sudah berada pada status terminal' }); }
     if (!canCancelPreorder(order)) { await connection.rollback(); return res.status(409).json({ message: 'PO tidak dapat dibatalkan setelah deadline' }); }
-    if (String(order.status).toLowerCase() === 'dibatalkan') { await connection.rollback(); return res.status(409).json({ message: 'Pesanan sudah dibatalkan' }); }
     const [items]: any = await connection.query('SELECT preorder_item_id, quantity FROM order_items WHERE order_id = ?', [order.id]);
     for (const item of items) {
       if (item.preorder_item_id) {
@@ -321,7 +363,8 @@ router.post('/orders/:orderId/cancel', async (req: Request, res: Response) => {
     }
     await connection.query("UPDATE orders SET status = 'dibatalkan', preorder_status = 'cancelled' WHERE id = ?", [order.id]);
     await connection.commit();
-    req.app.get('io')?.emit('order_updated', { ...order, status: 'dibatalkan' });
+    await addAuditLog(getVerifiedActor(req), 'Batalkan PO', order.invoice_number, 'warning');
+    req.app.get('io')?.emit('order_updated', { ...order, status: 'dibatalkan', preorder_status: 'cancelled' });
     res.json({ message: 'Pesanan PO dibatalkan dan kuota dikembalikan' });
   } catch (error: any) {
     await connection.rollback();

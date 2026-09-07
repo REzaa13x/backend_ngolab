@@ -29,6 +29,7 @@ import {
   FileText
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -69,7 +70,7 @@ export default function SalesReport() {
     setLoading(true);
     try {
       const [ordersRes, reportRes] = await Promise.all([
-        fetch('/api/orders'),
+        authFetch('/api/orders'),
         fetch('/api/reports/monthly')
       ]);
       

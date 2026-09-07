@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface OrderItem {
@@ -75,7 +76,7 @@ export default function SalesHistory() {
   // ── Fetch our orders ─────────────────────────────────────────────────────
   const fetchOurOrders = async () => {
     try {
-      const res = await fetch('/api/orders');
+      const res = await authFetch('/api/orders');
       if (!res.ok) throw new Error('API error');
       const data: Order[] = await res.json();
       setOurOrders(data.map(o => ({ ...o, source: o.source || 'ngolab' })));

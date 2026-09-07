@@ -119,7 +119,7 @@ router.get("/transactions", async (req: Request, res: Response) => {
 // POST /api/users/register — Registrasi User / Pelanggan Baru
 router.post("/register", async (req: Request, res: Response) => {
   try {
-    const { id, nama, nim, avatar_url, email, phone, role, password } = req.body;
+    const { id, nama, nim, avatar_url, email, phone, password } = req.body;
     const normalizedEmail = normalizeEmail(email);
 
     if (!id || !nama) {
@@ -130,6 +130,10 @@ router.post("/register", async (req: Request, res: Response) => {
     const [existing]: any = await db.query("SELECT id FROM users WHERE id = ?", [id]);
     if (existing.length > 0) {
       return res.status(400).json({ message: "User ID / NIM sudah terdaftar" });
+    }
+    const [staffIdOwner]: any = await db.query("SELECT id FROM staff WHERE id = ?", [id]);
+    if (staffIdOwner.length > 0) {
+      return res.status(400).json({ message: "User ID tidak dapat menggunakan ID staf" });
     }
     if (normalizedEmail) {
       const [emailOwner]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
@@ -144,7 +148,7 @@ router.post("/register", async (req: Request, res: Response) => {
 
     const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
     const avatar = avatar_url || `https://picsum.photos/seed/${id}/100/100`;
-    const userRole = role || 'Pelanggan';
+    const userRole = 'Pelanggan';
     const hashedPassword = password ? await hashPassword(password) : null;
 
     await db.query(

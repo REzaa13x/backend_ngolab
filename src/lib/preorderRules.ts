@@ -41,8 +41,26 @@ export function getPreorderStatus(campaign: PreorderWindow, now = new Date()): P
   return 'service_day';
 }
 
-export function canCancelPreorder(campaign: Pick<PreorderWindow, 'order_deadline_at'>, now = new Date()) {
-  return now.getTime() < asTime(campaign.order_deadline_at);
+const terminalPreorderStatuses = new Set(['cancelled', 'picked_up', 'no_show']);
+
+export function isTerminalPreorderStatus(status?: string) {
+  return terminalPreorderStatuses.has(String(status || '').toLowerCase());
+}
+
+export function canCancelPreorder(
+  campaign: Pick<PreorderWindow, 'order_deadline_at'> & { preorder_status?: string },
+  now = new Date()
+) {
+  return now.getTime() < asTime(campaign.order_deadline_at)
+    && !isTerminalPreorderStatus(campaign.preorder_status);
+}
+
+export function canUseGenericOrderStatus(
+  order: { order_type?: string; preorder_status?: string },
+  nextStatus: string
+) {
+  if (String(order.order_type).toLowerCase() !== 'preorder') return true;
+  return nextStatus !== 'dibatalkan' && !isTerminalPreorderStatus(order.preorder_status);
 }
 
 export function canMarkPreorderPickedUp(order: { payment_status?: string; preorder_status?: string }) {

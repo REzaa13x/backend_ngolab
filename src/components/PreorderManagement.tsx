@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CalendarClock, Plus, Power, Trash2, X, Package, Coffee } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import { useAuth } from '../contexts/AuthContext';
+import { authFetch } from '../lib/authFetch';
+
 
 type Outlet = 'ngolab' | 'coworking';
 
@@ -50,7 +51,7 @@ const formatDate = (value: string) => new Date(value).toLocaleString('id-ID', {
 });
 
 export default function PreorderManagement() {
-  const { user } = useAuth();
+
   const [outlet, setOutlet] = useState<Outlet>('ngolab');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,7 +63,7 @@ export default function PreorderManagement() {
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/preorders/admin?outlet=${outlet}`);
+      const response = await authFetch(`/api/preorders/admin?outlet=${outlet}`);
       const data = await response.json();
       setCampaigns(Array.isArray(data) ? data : []);
     } finally {
@@ -80,9 +81,9 @@ export default function PreorderManagement() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setSaving(true); setError('');
     try {
-      const response = await fetch('/api/preorders', {
+      const response = await authFetch('/api/preorders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-name': user?.name || 'Admin' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
       });
       const data = await response.json();
@@ -93,13 +94,13 @@ export default function PreorderManagement() {
   };
 
   const toggle = async (campaign: Campaign) => {
-    await fetch(`/api/preorders/${campaign.id}/toggle`, { method: 'PATCH', headers: { 'x-user-name': user?.name || 'Admin' } });
+    await authFetch(`/api/preorders/${campaign.id}/toggle`, { method: 'PATCH' });
     fetchCampaigns();
   };
 
   const remove = async (campaign: Campaign) => {
     if (!confirm(`Hapus program PO “${campaign.name}”?`)) return;
-    const response = await fetch(`/api/preorders/${campaign.id}`, { method: 'DELETE' });
+    const response = await authFetch(`/api/preorders/${campaign.id}`, { method: 'DELETE' });
     const data = await response.json();
     if (!response.ok) alert(data.message || 'Program tidak dapat dihapus');
     else fetchCampaigns();

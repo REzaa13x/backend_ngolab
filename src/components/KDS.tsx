@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+
 import { 
   Clock, 
   User, 
@@ -18,6 +18,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import socket from '../lib/socket';
 import { getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
+import { authFetch } from '../lib/authFetch';
 
 interface KDSItem {
   id: string;
@@ -42,7 +43,7 @@ interface KDSOrder {
 }
 
 export default function KDS() {
-  const { user } = useAuth();
+
   const [orders, setOrders] = useState<KDSOrder[]>([]);
   const [selectedOutlet, setSelectedOutlet] = useState<'ngolab' | 'coworking'>('ngolab');
   const [lastOrderVoice, setLastOrderVoice] = useState(false);
@@ -83,7 +84,7 @@ export default function KDS() {
 
   const fetchOrders = async () => {
     try {
-      const res = await fetch(`/api/orders/kds?outlet=${selectedOutlet}`);
+      const res = await authFetch(`/api/orders/kds?outlet=${selectedOutlet}`);
       const data = await res.json();
       
       if (!Array.isArray(data)) {
@@ -189,12 +190,9 @@ export default function KDS() {
       nextKdsStatus === 'cooking' ? 'sedang_diproses' : 'menunggu';
     
     try {
-      const res = await fetch(`/api/orders/${orderId}/status`, {
+      const res = await authFetch(`/api/orders/${orderId}/status`, {
         method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-name': user?.name || 'Koki'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: apiStatus })
       });
       

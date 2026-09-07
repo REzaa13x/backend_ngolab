@@ -2,8 +2,12 @@ import { Router, Request, Response } from "express";
 import { db, addAuditLog } from "../db/db.js";
 import { hashPassword } from "../lib/password.js";
 import { normalizeEmail } from "../lib/auth.js";
+import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 
 const router = Router();
+const requireSuperAdmin = requireRoles('Super Admin');
+
+router.use(requireSuperAdmin);
 
 // GET /api/staff
 router.get("/", async (_req: Request, res: Response) => {
@@ -46,7 +50,7 @@ router.post("/", async (req: Request, res: Response) => {
     );
 
     const [newStaff]: any = await db.query("SELECT id, name, role, email, phone, status FROM staff WHERE id = ?", [newId]);
-    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Registrasi Pegawai", `${name} (${role})`);
     res.status(201).json(newStaff[0]);
   } catch (err: any) {
@@ -87,7 +91,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
     const [updatedStaff]: any = await db.query("SELECT id, name, role, email, phone, status FROM staff WHERE id = ?", [id]);
     if (!updatedStaff.length) return res.status(404).json({ message: "Staf tidak ditemukan" });
     
-    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const actor = getVerifiedActor(req);
     const oldRole = oldStaff.length ? oldStaff[0].role : "";
     const newRole = updatedStaff[0].role;
     const roleChange = (role !== undefined && oldRole !== newRole) ? ` -> ${newRole}` : "";
@@ -103,7 +107,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
 router.delete("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const actor = getVerifiedActor(req);
     const [staffToDelete]: any = await db.query("SELECT name FROM staff WHERE id = ?", [id]);
     const deletedName = staffToDelete.length ? staffToDelete[0].name : id;
 
