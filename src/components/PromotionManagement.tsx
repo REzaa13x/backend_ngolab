@@ -220,7 +220,7 @@ function UploadForm({ onSuccess }: { onSuccess: () => void }) {
         <button
           type="submit"
           disabled={!selectedFile || isUploading}
-          className="w-full py-3.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full py-3.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isUploading
             ? <><Loader2 className="animate-spin" size={16} /> Mengupload ke Database...</>
@@ -704,7 +704,7 @@ export default function PromotionManagement() {
           {mediaList.length > 0 && (
             <button
               onClick={() => openPreview(0)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none"
             >
               <Eye size={13} />
               Pratinjau Layar
@@ -726,7 +726,7 @@ export default function PromotionManagement() {
             <div className="flex items-center gap-3">
               <div className={cn(
                 'w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow',
-                isIdle ? 'bg-indigo-600 shadow-indigo-200' : 'bg-emerald-500 shadow-emerald-200'
+                isIdle ? 'bg-indigo-600 shadow-indigo-200 dark:shadow-none' : 'bg-emerald-500 shadow-emerald-200 dark:shadow-none'
               )}>
                 <Monitor className="text-white" size={18} />
               </div>

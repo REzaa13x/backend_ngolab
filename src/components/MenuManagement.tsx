@@ -275,8 +275,8 @@ export default function MenuManagement({ onNavigate }: MenuManagementProps) {
                 'px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all',
                 selectedCategory === cat
                   ? activeOutlet === 'ngolab'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
-                    : 'bg-amber-600 text-white shadow-md shadow-amber-200'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none'
+                    : 'bg-amber-600 text-white shadow-md shadow-amber-200 dark:shadow-none'
                   : 'text-slate-500 hover:bg-slate-50'
               )}
             >
@@ -289,8 +289,8 @@ export default function MenuManagement({ onNavigate }: MenuManagementProps) {
           className={cn(
             'px-5 py-3.5 rounded-2xl text-white font-bold text-xs shadow-lg flex items-center gap-2 whitespace-nowrap transition-all',
             activeOutlet === 'ngolab'
-              ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
-              : 'bg-amber-600 hover:bg-amber-700 shadow-amber-200'
+              ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 dark:shadow-none'
+              : 'bg-amber-600 hover:bg-amber-700 shadow-amber-200 dark:shadow-none'
           )}
         >
           <Plus size={18} /> Tambah Menu
@@ -407,7 +407,7 @@ export default function MenuManagement({ onNavigate }: MenuManagementProps) {
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-100">
+                <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  border-b border-slate-100">
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 w-16">Foto</th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Nama Menu</th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Kategori</th>

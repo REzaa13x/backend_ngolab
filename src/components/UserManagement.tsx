@@ -167,7 +167,7 @@ export default function UserManagement() {
         </div>
         <button 
           onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-200"
+          className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-200 dark:shadow-none"
         >
           <UserPlus size={16} />
           Tambah Pengguna Baru
@@ -418,7 +418,7 @@ export default function UserManagement() {
                   <button 
                     type="submit" 
                     disabled={isSaving}
-                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 transition-all disabled:opacity-60"
+                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-60"
                   >
                     {isSaving ? 'Mendaftarkan...' : 'Daftarkan'}
                   </button>
@@ -494,7 +494,7 @@ export default function UserManagement() {
                   <button 
                     type="submit" 
                     disabled={isSavingCoins}
-                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 transition-all disabled:opacity-60"
+                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-60"
                   >
                     {isSavingCoins ? 'Menambahkan...' : 'Tambah Koin'}
                   </button>

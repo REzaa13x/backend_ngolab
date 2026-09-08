@@ -204,27 +204,27 @@ export default function ManualOrder() {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-[#f7f7f8] -m-8 animate-in fade-in duration-300">
-      <div className="min-h-16 shrink-0 bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between gap-4">
+    <div className="h-full min-h-0 flex flex-col bg-slate-50/50 dark:bg-[#020617] -m-8 animate-in fade-in duration-300">
+      <div className="min-h-16 shrink-0 bg-white dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 px-5 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-9 h-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0">
             <ReceiptText size={18} />
           </div>
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-slate-900 leading-tight">Point of Sale</h2>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white leading-tight">Point of Sale</h2>
             <div className="mt-1 flex items-center gap-1">
-              <button type="button" onClick={() => handleModeChange('regular')} className={cn('px-2.5 py-1 rounded text-[10px] font-bold', orderMode === 'regular' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-500')}>Menu Tetap</button>
-              <button type="button" onClick={() => handleModeChange('preorder')} className={cn('px-2.5 py-1 rounded text-[10px] font-bold', orderMode === 'preorder' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-500')}>Pre-order</button>
+              <button type="button" onClick={() => handleModeChange('regular')} className={cn('px-2.5 py-1 rounded text-[10px] font-bold', orderMode === 'regular' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400')}>Menu Tetap</button>
+              <button type="button" onClick={() => handleModeChange('preorder')} className={cn('px-2.5 py-1 rounded text-[10px] font-bold', orderMode === 'preorder' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400')}>Pre-order</button>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center bg-slate-100 rounded-lg p-1 shrink-0">
+        <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1 shrink-0">
           <button
             onClick={() => handleOutletChange('ngolab')}
             className={cn(
               'h-9 px-4 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors',
-              selectedOutlet === 'ngolab' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              selectedOutlet === 'ngolab' ? 'bg-white dark:bg-slate-700 text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             )}
           >
             <Package size={15} /> Ngolab
@@ -233,7 +233,7 @@ export default function ManualOrder() {
             onClick={() => handleOutletChange('coworking')}
             className={cn(
               'h-9 px-4 rounded-md text-xs font-semibold flex items-center gap-2 transition-colors',
-              selectedOutlet === 'coworking' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              selectedOutlet === 'coworking' ? 'bg-white dark:bg-slate-700 text-primary shadow-sm' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
             )}
           >
             <Coffee size={15} /> Coworking
@@ -242,8 +242,8 @@ export default function ManualOrder() {
       </div>
 
       <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <section className="min-h-0 flex flex-col border-r border-slate-200">
-          <div className="bg-white px-5 py-4 border-b border-slate-200 space-y-3">
+        <section className="min-h-0 flex flex-col border-r border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900/50 px-5 py-4 border-b border-slate-200 dark:border-slate-800 space-y-3">
             {orderMode === 'preorder' && (
               <div className="flex items-center gap-3">
                 <label className="text-xs font-semibold text-slate-600 shrink-0">Program PO</label>
@@ -297,7 +297,7 @@ export default function ManualOrder() {
             </div>
 
             {filteredMenu.length === 0 ? (
-              <div className="h-52 rounded-xl border border-dashed border-slate-300 bg-white flex flex-col items-center justify-center text-center">
+              <div className="h-52 rounded-xl border border-dashed border-slate-200 bg-white flex flex-col items-center justify-center text-center">
                 <Search size={28} className="text-slate-300 mb-3" />
                 <p className="text-sm font-medium text-slate-600">Produk tidak ditemukan</p>
                 <p className="text-xs text-slate-400 mt-1">Coba kata kunci atau kategori lain.</p>

@@ -171,7 +171,7 @@ export default function Login() {
                   <button 
                     type="submit" 
                     disabled={isLoading}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-70"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-600/20 dark:shadow-none disabled:opacity-70"
                   >
                     {isLoading ? (
                       <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

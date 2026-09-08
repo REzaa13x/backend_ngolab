@@ -239,7 +239,7 @@ export default function StaffManagement() {
                 <button
                   onClick={handleRegisterStaff}
                   disabled={!newStaff.name || !newStaff.email}
-                  className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
+                  className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50"
                 >
                   Daftarkan Sekarang
                 </button>
@@ -326,7 +326,7 @@ export default function StaffManagement() {
                 </button>
                 <button
                   onClick={handleUpdateStaff}
-                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 dark:shadow-none"
                 >
                   Simpan
                 </button>
@@ -400,7 +400,7 @@ export default function StaffManagement() {
                 <button
                   onClick={handleAssignShift}
                   disabled={!newShift.staff_id}
-                  className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50"
+                  className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50"
                 >
                   Simpan Jadwal
                 </button>
@@ -418,13 +418,13 @@ export default function StaffManagement() {
         <div className="flex items-center gap-2">
            <button 
              onClick={() => setIsAssigning(true)}
-             className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+             className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none"
            >
               <Calendar size={16} /> Tetapkan Shift
            </button>
            <button 
              onClick={() => setIsRegistering(true)}
-             className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-slate-200"
+             className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-slate-200 dark:shadow-none"
            >
               <UserPlus size={16} /> Registrasi Pegawai
            </button>
@@ -432,12 +432,12 @@ export default function StaffManagement() {
       </div>
 
       {/* Tabs Control */}
-      <div className="flex bg-white/50 backdrop-blur-sm border border-slate-100 p-1 rounded-2xl w-fit shadow-sm">
+      <div className="flex bg-white/50 dark:bg-slate-800/50 backdrop-blur-sm border border-slate-100 dark:border-slate-800 p-1 rounded-2xl w-fit shadow-sm">
         <button 
           onClick={() => setActiveTab('roster')}
           className={cn(
             "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
-            activeTab === 'roster' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+            activeTab === 'roster' ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-orange-500 shadow-sm dark:shadow-none" : "text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
           )}
         >
           <Users size={14} /> Daftar Pegawai
@@ -446,7 +446,7 @@ export default function StaffManagement() {
           onClick={() => setActiveTab('shifts')}
           className={cn(
             "px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2",
-            activeTab === 'shifts' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+            activeTab === 'shifts' ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-orange-500 shadow-sm dark:shadow-none" : "text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
           )}
         >
           <Calendar size={14} /> Jadwal Shift Hari Ini
@@ -560,7 +560,7 @@ export default function StaffManagement() {
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="bg-slate-50/50 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50">
+                  <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  dark: text-[10px] font-black uppercase tracking-widest  border-b border-slate-50">
                     <th className="px-8 py-5">Staf</th>
                     <th className="px-8 py-5">Jabatan</th>
                     <th className="px-8 py-5">Sesi Shift</th>

@@ -90,7 +90,7 @@ export default function AuditLogs() {
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="bg-slate-50/50 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50">
+              <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  dark: text-[10px] font-black uppercase tracking-widest  border-b border-slate-50">
                 <th className="px-8 py-5">Waktu</th>
                 <th className="px-8 py-5">Pengguna / Aktor</th>
                 <th className="px-8 py-5">Aktivitas</th>
@@ -116,7 +116,7 @@ export default function AuditLogs() {
                 </tr>
               ) : (
                 filteredLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <tr key={log.id} className="hover:bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800 transition-colors group">
                     <td className="px-8 py-5">
                       <div className="flex items-center gap-3">
                         <Clock size={14} className="text-slate-300" />

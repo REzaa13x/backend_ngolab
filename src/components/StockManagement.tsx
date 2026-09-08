@@ -323,7 +323,7 @@ export default function StockManagement() {
               onClick={() => setActiveTab('products')}
               className={cn(
                 "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'products' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                activeTab === 'products' ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-orange-500 shadow-sm dark:shadow-none" : "text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
               )}
             >
               Produk Jadi
@@ -332,7 +332,7 @@ export default function StockManagement() {
               onClick={() => setActiveTab('ingredients')}
               className={cn(
                 "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'ingredients' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                activeTab === 'ingredients' ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-orange-500 shadow-sm dark:shadow-none" : "text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
               )}
             >
               Bahan Baku
@@ -364,7 +364,7 @@ export default function StockManagement() {
                   className={cn(
                     "px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all",
                     selectedCategory === cat 
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-200" 
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none" 
                       : "text-slate-500 hover:bg-slate-50"
                   )}
                 >
@@ -376,7 +376,7 @@ export default function StockManagement() {
             <button 
               onClick={handleSyncSmartTag}
               disabled={isSyncing}
-              className="bg-emerald-600 text-white px-5 py-3.5 rounded-2xl hover:bg-emerald-700 transition-all font-bold text-xs shadow-lg shadow-emerald-200 flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+              className="bg-emerald-600 text-white px-5 py-3.5 rounded-2xl hover:bg-emerald-700 transition-all font-bold text-xs shadow-lg shadow-emerald-200 dark:shadow-none flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
             >
               <RefreshCcw size={18} className={cn(isSyncing && "animate-spin")} />
               {isSyncing ? "Menyelaraskan..." : "Sync Smart Tag"}
@@ -514,8 +514,8 @@ export default function StockManagement() {
                       className={cn(
                         "w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-md",
                         item.inStock 
-                          ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 shadow-rose-100/50" 
-                          : "bg-indigo-600 text-white shadow-indigo-100/50 hover:bg-indigo-700"
+                          ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 shadow-rose-100/50 dark:shadow-none" 
+                          : "bg-indigo-600 text-white shadow-indigo-100/50 dark:shadow-none hover:bg-indigo-700"
                       )}
                     >
                       {item.inStock ? 'Nonaktifkan' : 'Aktifkan'}
@@ -540,7 +540,7 @@ export default function StockManagement() {
                 <div className="overflow-x-auto">
                    <table className="w-full text-left">
                       <thead>
-                        <tr className="bg-slate-50/50 text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50">
+                        <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  dark: text-[10px] font-black uppercase tracking-widest  border-b border-slate-50">
                            <th className="px-8 py-5">Nama Bahan</th>
                            <th className="px-8 py-5">Stok Saat Ini</th>
                            <th className="px-8 py-5">Satuan</th>
@@ -550,7 +550,7 @@ export default function StockManagement() {
                       </thead>
                       <tbody className="divide-y divide-slate-50">
                         {ingredients.map(ing => (
-                          <tr key={ing.id} className="hover:bg-slate-50/50 transition-colors">
+                          <tr key={ing.id} className="hover:bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800 transition-colors">
                             <td className="px-8 py-5">
                                <p className="text-sm font-bold text-slate-900">{ing.name}</p>
                                <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">ID: {ing.id}</p>
@@ -655,7 +655,7 @@ export default function StockManagement() {
                   </div>
                   <div className="flex gap-3 pt-4">
                      <button onClick={() => setIsRestockModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest">Batal</button>
-                     <button onClick={handleRestock} className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-100">Simpan Stok</button>
+                     <button onClick={handleRestock} className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-100 dark:shadow-none">Simpan Stok</button>
                   </div>
                </div>
             </motion.div>
@@ -814,7 +814,7 @@ export default function StockManagement() {
                   </button>
                   <button 
                     type="submit"
-                    className="flex-[2] py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all"
+                    className="flex-[2] py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all"
                   >
                     Simpan Produk
                   </button>
@@ -959,7 +959,7 @@ export default function StockManagement() {
                   </button>
                   <button 
                     type="submit"
-                    className="flex-[2] py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all"
+                    className="flex-[2] py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all"
                   >
                     Simpan Perubahan
                   </button>

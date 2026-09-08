@@ -357,7 +357,7 @@ export default function KDS() {
                 {order.status === 'queue' && (
                   <button 
                     onClick={() => moveOrder(order.id, 'cooking')}
-                    className="w-full py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none flex items-center justify-center gap-2"
                   >
                     <Play size={14} fill="currentColor" />
                     Mulai Masak
@@ -366,7 +366,7 @@ export default function KDS() {
                 {order.status === 'cooking' && (
                   <button 
                     onClick={() => moveOrder(order.id, 'ready')}
-                    className="w-full py-3 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 dark:shadow-none flex items-center justify-center gap-2"
                   >
                     <CheckCircle2 size={14} />
                     Selesaikan Pesanan

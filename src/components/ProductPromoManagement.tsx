@@ -319,14 +319,14 @@ export default function ProductPromoManagement() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-200">
+            <div className="p-2.5 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none">
               <Tag size={22}/>
             </div>
             Manajemen Promo Produk
           </h2>
           <p className="text-sm text-slate-500 mt-1">Buat & kelola promo koin yang berlaku khusus per produk</p>
         </div>
-        <button onClick={() => { if (showForm) { handleCloseForm(); } else { setShowForm(true); } }} className={cn("flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg", showForm ? "bg-slate-200 text-slate-600 shadow-none" : "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-indigo-200 hover:shadow-indigo-300")}>
+        <button onClick={() => { if (showForm) { handleCloseForm(); } else { setShowForm(true); } }} className={cn("flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg", showForm ? "bg-slate-200 text-slate-600 shadow-none" : "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-indigo-200 dark:shadow-none hover:shadow-indigo-300 dark:shadow-none")}>
           {showForm ? <><X size={16}/> Tutup</> : <><Plus size={16}/> Buat Promo Baru</>}
         </button>
       </div>
@@ -334,10 +334,10 @@ export default function ProductPromoManagement() {
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label:'Total Promo Aktif', value: activeCount, icon:<Gift size={20}/>, color:'from-indigo-500 to-violet-500', shadow:'shadow-indigo-200' },
-          { label:'Koin Beredar', value: totalCoinsCirculating.toLocaleString(), icon:<Coins size={20}/>, color:'from-amber-400 to-orange-500', shadow:'shadow-amber-200' },
-          { label:'Total Penukaran', value: transactions.filter(t=>t.type==='redeem').length, icon:<Tag size={20}/>, color:'from-emerald-500 to-teal-500', shadow:'shadow-emerald-200' },
-          { label:'Koin Ditukar', value: totalRedeemed.toLocaleString(), icon:<TrendingUp size={20}/>, color:'from-rose-400 to-pink-500', shadow:'shadow-rose-200' },
+          { label:'Total Promo Aktif', value: activeCount, icon:<Gift size={20}/>, color:'from-indigo-500 to-violet-500', shadow:'shadow-indigo-200 dark:shadow-none' },
+          { label:'Koin Beredar', value: totalCoinsCirculating.toLocaleString(), icon:<Coins size={20}/>, color:'from-amber-400 to-orange-500', shadow:'shadow-amber-200 dark:shadow-none' },
+          { label:'Total Penukaran', value: transactions.filter(t=>t.type==='redeem').length, icon:<Tag size={20}/>, color:'from-emerald-500 to-teal-500', shadow:'shadow-emerald-200 dark:shadow-none' },
+          { label:'Koin Ditukar', value: totalRedeemed.toLocaleString(), icon:<TrendingUp size={20}/>, color:'from-rose-400 to-pink-500', shadow:'shadow-rose-200 dark:shadow-none' },
         ].map((s,i) => (
           <motion.div key={s.label} initial={{opacity:0,y:15}} animate={{opacity:1,y:0}} transition={{delay:i*0.08}} className="bg-white rounded-2xl border border-slate-100 p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
             <div className={cn("p-3 rounded-xl bg-gradient-to-br text-white shadow-lg", s.color, s.shadow)}>{s.icon}</div>
@@ -544,7 +544,7 @@ export default function ProductPromoManagement() {
                   <button
                     type="submit"
                     disabled={isUploading}
-                    className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl text-sm font-bold hover:from-indigo-700 hover:to-violet-750 transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                    className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl text-sm font-bold hover:from-indigo-700 hover:to-violet-750 transition-all shadow-lg shadow-indigo-200 dark:shadow-none flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                   >
                     <Coins size={16} /> {isUploading ? 'Menyimpan...' : (editingPromo ? 'Simpan Perubahan' : 'Simpan Promo')}
                   </button>

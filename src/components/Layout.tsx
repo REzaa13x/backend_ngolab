@@ -214,7 +214,7 @@ const rungReadyOrders = new Set<string>();
       
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Header */}
-        <header className="h-16 border-b border-slate-100 bg-white/80 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-10">
+        <header className="h-16 border-b border-slate-100 bg-white/80 dark:bg-[#0f172a]/80 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-10">
           <div className="flex items-center gap-4 flex-1">
             <h1 className="text-base font-bold text-slate-900">
               {tabTitles[activeTab] || activeTab}
@@ -227,7 +227,7 @@ const rungReadyOrders = new Set<string>();
               <input 
                 type="text" 
                 placeholder="Cari data..."
-                className="w-64 bg-slate-50 border border-slate-100 rounded-lg pl-10 pr-4 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                className="w-64 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 rounded-lg pl-10 pr-4 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
               />
             </div>
             
@@ -243,8 +243,8 @@ const rungReadyOrders = new Set<string>();
                 className={cn(
                   "p-2 rounded-lg transition-colors flex items-center justify-center relative",
                   soundEnabled
-                    ? "text-slate-400 hover:text-indigo-600 hover:bg-slate-50"
-                    : "text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-100/80"
+                    ? "text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    : "text-rose-500 hover:text-rose-600 bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100/80 dark:hover:bg-rose-500/20"
                 )}
               >
                 {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
@@ -266,7 +266,7 @@ const rungReadyOrders = new Set<string>();
                 <p className="text-xs font-bold text-slate-900">{user?.name || 'Guest'}</p>
                 <p className="text-[10px] text-slate-500 font-medium">Tangolab Geasture-East</p>
               </div>
-              <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
                 {(user?.name?.charAt(0) || 'U').toUpperCase()}
               </div>
             </div>
