@@ -18,6 +18,7 @@ import SalesHistory from './SalesHistory';
 import IoTConfig from './IoTConfig';
 import PreorderManagement from './PreorderManagement';
 import PreorderOrders from './PreorderOrders';
+import ApiDocumentation from './ApiDocumentation';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, Search, Settings, User, HelpCircle, Volume2, VolumeX } from 'lucide-react';
@@ -181,7 +182,8 @@ const rungReadyOrders = new Set<string>();
     'preorders': 'Menu Pre-order',
     'preorder-orders': 'Pesanan Pre-order',
     'sales-history': 'Riwayat Transaksi',
-    'settings': 'Hardware & IoT Configuration'
+    'settings': 'Hardware & IoT Configuration',
+    'api-docs': 'Dokumentasi & API'
   };
 
   const renderContent = () => {
@@ -204,6 +206,7 @@ const rungReadyOrders = new Set<string>();
       case 'preorder-orders': return <PreorderOrders />;
       case 'sales-history': return <SalesHistory />;
       case 'settings': return <IoTConfig />;
+      case 'api-docs': return <ApiDocumentation />;
       default: return <Dashboard />;
     }
   };
