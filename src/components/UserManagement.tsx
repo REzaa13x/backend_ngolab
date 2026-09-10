@@ -14,6 +14,7 @@ import {
   Ticket
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { authFetch } from '../lib/authFetch';
 
 interface User {
   id: string;
@@ -62,7 +63,7 @@ export default function UserManagement() {
   const [toast, setToast] = useState('');
 
   const fetchUsers = () => {
-    fetch('/api/users')
+    authFetch('/api/users')
       .then(res => res.json())
       .then(data => setUsers(Array.isArray(data) ? data : []))
       .catch(err => console.error("Gagal mengambil data user:", err));
@@ -83,7 +84,7 @@ export default function UserManagement() {
     setIsSaving(true);
 
     try {
-      const res = await fetch('/api/users/register', {
+      const res = await authFetch('/api/users/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -111,7 +112,7 @@ export default function UserManagement() {
     setIsSavingCoins(true);
 
     try {
-      const res = await fetch(`/api/users/${selectedUserForCoins.id}/earn-coins`, {
+      const res = await authFetch(`/api/users/${selectedUserForCoins.id}/earn-coins`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: parseInt(coinAmount), description: coinDescription })

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import socket from '../lib/socket';
+import { authFetch } from '../lib/authFetch';
 import { 
   TrendingUp, 
   Users, 
@@ -124,12 +125,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchData = () => {
-      fetch('/api/stats')
+      authFetch('/api/stats')
         .then(res => res.json())
         .then(data => setStats(data))
         .catch(err => console.error("Failed to fetch stats:", err));
 
-      fetch('/api/sales-data')
+      authFetch('/api/sales-data')
         .then(res => res.json())
         .then(data => setSalesData(data))
         .catch(err => console.error("Failed to fetch sales data:", err));
@@ -292,7 +293,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => {
-              fetch('/api/orders/simulate', { method: 'POST' });
+              authFetch('/api/orders/simulate', { method: 'POST' });
               alert('Pesanan baru telah disimulasikan! Cek di Kasir atau Dapur.');
             }}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-100 transition-all shadow-sm"

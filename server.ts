@@ -25,21 +25,42 @@ import catalogRouter from './src/routes/catalog.js';
 import kioskRouter from './src/routes/kiosk.js';
 import promotionsRouter from './src/routes/promotions.js';
 import preordersRouter from './src/routes/preorders.js';
+import apiKeysRouter from './src/routes/apiKeys.js';
 import { authenticateAuthorization, getAuthTokenSecret, isRoleAllowed } from './src/lib/authToken.js';
 import { lookupCurrentIdentity } from './src/middleware/authSession.js';
+import { createRateLimit } from './src/middleware/rateLimit.js';
 
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
-    cors: { origin: '*', methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+    cors: {
+      origin: process.env.CORS_ORIGIN
+        ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean)
+        : false,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      credentials: true,
+    },
   });
   const port = Number(process.env.PORT || 3000);
+  const configuredOrigins = (process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+  const corsOrigin = configuredOrigins.length
+    ? (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
+        if (!origin || configuredOrigins.includes(origin)) callback(null, true);
+        else callback(new Error('Origin tidak diizinkan'));
+      }
+    : false;
 
-  app.use(cors());
+  app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(express.json({ limit: '20mb' }));
+  app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'tangolab', environment: process.env.NODE_ENV || 'development' }));
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
   app.set('io', io);
+  const authRateLimit = createRateLimit(60_000, 20);
+  const externalRateLimit = createRateLimit(60_000, 120);
 
   const authTokenSecret = getAuthTokenSecret();
   io.use(async (socket, next) => {
@@ -91,12 +112,12 @@ async function startServer() {
   preorderTimer.unref();
 
   // API routes. Routers with specific endpoints are mounted before generic routers.
-  app.use('/api/auth', authRouter);
+  app.use('/api/auth', authRateLimit, authRouter);
   app.use('/api/staff', staffRouter);
   app.use('/api/shifts', shiftsRouter);
   app.use('/api/audit-logs', auditLogsRouter);
   app.use('/api/orders', orderSimulationRouter);
-  app.use('/api/orders', ordersRouter);
+  app.use('/api/orders', externalRateLimit, ordersRouter);
   app.use('/api/users', usersRouter);
   app.use('/api/coin-promos', coinPromosRouter);
   app.use('/api/menu', menuRouter);
@@ -106,10 +127,15 @@ async function startServer() {
   app.use('/api/digital-board', digitalBoardRouter);
   app.use('/api/promotions', promotionsRouter);
   app.use('/api/preorders', preordersRouter);
+  app.use('/api/api-keys', apiKeysRouter);
   app.use('/api/ingredients', ingredientsRouter);
   app.use('/api/admin/catalog', catalogRouter);
   app.use('/api/v1', kioskRouter);
   app.use('/api', analyticsRouter);
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ message: 'Endpoint API tidak ditemukan' });
+  });
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });

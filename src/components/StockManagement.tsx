@@ -1,1019 +1,208 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { 
-  Package, 
-  Search, 
-  Filter, 
-  CheckCircle2, 
-  XCircle,
-  Clock,
-  Hand,
-  Volume2,
-  Zap,
-  Upload,
-  Image as ImageIcon,
-  RefreshCcw,
-  Trash2,
-  Tag
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  AlertTriangle, Barcode, Box, Camera, CheckCircle2, ClipboardList, History,
+  Loader2, PackagePlus, Pencil, Plus, RefreshCw, Save, Search, Trash2, X, Zap
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '@/src/lib/utils';
+import socket from '../lib/socket';
+import { authFetch } from '../lib/authFetch';
 
-interface MenuItem {
-  id: string | number;
-  name: string;
-  category: string;
-  price: number;
-  inStock: boolean;
-  stock: number;
-  image: string;
-  description?: string;
-}
+type StockLevel = 'safe' | 'low' | 'critical' | 'out';
+type InventoryItem = {
+  id: string; name: string; inventoryType: 'raw_material' | 'packaged_product'; sku: string;
+  barcode: string; category: string; unit: string; purchaseUnit: string; purchaseConversion: number;
+  stock: number; minStock: number; criticalStock: number; costPrice: number; supplier: string;
+  outlet: string; isActive: boolean; level: StockLevel;
+};
+type Summary = { total: number; counts: Record<StockLevel, number>; alerts: InventoryItem[]; estimatedPurchaseValue: number };
+type Movement = { id: number; item_name: string; movement_type: string; quantity: number; stock_before: number; stock_after: number; unit: string; input_method: string; actor_name: string; created_at: string; notes?: string };
+type RecipeRow = { menu_name: string; ingredient_id: string; ingredient_name: string; amount: number; unit: string };
+type Menu = { id: string; name: string };
 
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface Ingredient {
-  id: string;
-  name: string;
-  unit: string;
-  stock: number;
-  minStock: number;
-}
-
-interface PortionYield {
-  name: string;
-  yield: number;
-}
+const emptyItem = {
+  name: '', inventoryType: 'raw_material' as const, sku: '', barcode: '', category: 'Bahan Baku', unit: 'pcs',
+  purchaseUnit: 'pcs', purchaseConversion: 1, stock: 0, minStock: 10, criticalStock: 3,
+  costPrice: 0, supplier: '', outlet: 'ngolab', isActive: true
+};
+const levelMeta: Record<StockLevel, { label: string; color: string }> = {
+  safe: { label: 'Aman', color: 'bg-emerald-100 text-emerald-700' },
+  low: { label: 'Menipis', color: 'bg-amber-100 text-amber-700' },
+  critical: { label: 'Kritis', color: 'bg-rose-100 text-rose-700' },
+  out: { label: 'Habis', color: 'bg-slate-900 text-white' }
+};
+const movementLabels: Record<string, string> = {
+  purchase: 'Stok Masuk', adjustment: 'Koreksi', waste: 'Rusak/Terbuang', stock_opname: 'Stock Opname',
+  transfer_in: 'Transfer Masuk', transfer_out: 'Transfer Keluar', sale: 'Penjualan', refund: 'Pengembalian'
+};
 
 export default function StockManagement() {
-  const { user } = useAuth();
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
-  const [portionYields, setPortionYields] = useState<PortionYield[]>([]);
-  const [activeTab, setActiveTab] = useState<'products' | 'ingredients'>('products');
+  const [tab, setTab] = useState<'dashboard' | 'items' | 'receive' | 'recipes' | 'history'>('dashboard');
+  const [outlet, setOutlet] = useState<'ngolab' | 'coworking'>('ngolab');
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [movements, setMovements] = useState<Movement[]>([]);
+  const [recipes, setRecipes] = useState<RecipeRow[]>([]);
+  const [menus, setMenus] = useState<Menu[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('Semua');
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
-  const [selectedIngredient, setSelectedIngredient] = useState<Ingredient | null>(null);
-  const [restockAmount, setRestockAmount] = useState('');
-  const [editingProduct, setEditingProduct] = useState<MenuItem | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<MenuItem | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [activePromos, setActivePromos] = useState<any[]>([]);
+  const [error, setError] = useState('');
+  const [toast, setToast] = useState('');
+  const [search, setSearch] = useState('');
+  const [itemModal, setItemModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [itemForm, setItemForm] = useState<any>(emptyItem);
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
+  const [movementForm, setMovementForm] = useState({ type: 'purchase', quantity: 1, input_method: 'manual', unit_cost: 0, supplier: '', batch_number: '', expires_at: '', notes: '', use_purchase_unit: true });
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanTimerRef = useRef<number | null>(null);
+  const [selectedMenu, setSelectedMenu] = useState('');
+  const [recipeDraft, setRecipeDraft] = useState<Array<{ ingredient_id: string; amount: number }>>([]);
 
-  const fetchIngredients = async () => {
+  const requestJson = async (url: string, init?: RequestInit) => {
+    const response = await authFetch(url, init);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || 'Permintaan gagal.');
+    return data;
+  };
+
+  const loadAll = useCallback(async () => {
+    setLoading(true); setError('');
     try {
-      const [ingRes, yieldRes] = await Promise.all([
-        fetch('/api/ingredients'),
-        fetch('/api/ingredients/yield')
+      const [inventory, stockSummary, movementData, recipeData, menuData] = await Promise.all([
+        requestJson(`/api/ingredients?outlet=${outlet}`), requestJson(`/api/ingredients/summary?outlet=${outlet}`),
+        requestJson(`/api/ingredients/movements?outlet=${outlet}&limit=200`), requestJson(`/api/ingredients/recipes?outlet=${outlet}`),
+        requestJson(`/api/menu?outlet=${outlet}&source=local`)
       ]);
-      setIngredients(await ingRes.json());
-      setPortionYields(await yieldRes.json());
-    } catch (err) {
-      console.error("Failed to fetch ingredients:", err);
-    }
-  };
+      setItems(inventory); setSummary(stockSummary); setMovements(movementData); setRecipes(recipeData);
+      setMenus((Array.isArray(menuData) ? menuData : []).map((menu: any) => ({ id: String(menu.id), name: menu.name })));
+    } catch (requestError: any) { setError(requestError.message); }
+    finally { setLoading(false); }
+  }, [outlet]);
 
-  const handleRestock = async () => {
-    if (!selectedIngredient || !restockAmount) return;
-    try {
-      const res = await fetch(`/api/ingredients/${selectedIngredient.id}/restock`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-name': user?.name || 'Koki'
-        },
-        body: JSON.stringify({ amount: restockAmount })
-      });
-      if (res.ok) {
-        setIsRestockModalOpen(false);
-        setRestockAmount('');
-        fetchIngredients();
-        playBeep(1500, 0.2);
-      }
-    } catch (err) {
-      console.error("Restock failed:", err);
-    }
-  };
-  const [newProduct, setNewProduct] = useState({
-    name: '',
-    category: 'Main Course',
-    price: '',
-    stock: '',
-    image: '',
-    description: ''
-  });
-  
-  const [dragActive, setDragActive] = useState(false);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert("File too besar. Maksimal 5MB.");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewProduct({ ...newProduct, image: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewProduct({ ...newProduct, image: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const audioContextRef = useRef<AudioContext | null>(null);
-
-  // Fetch menu on mount
-  const fetchMenu = useCallback(async () => {
-    try {
-      const url = selectedCategory === 'Semua' 
-        ? '/api/menu?outlet=ngolab' 
-        : `/api/menu?outlet=ngolab&category=${encodeURIComponent(selectedCategory)}`;
-      
-      const [res, promosRes] = await Promise.all([
-        fetch(url),
-        fetch('/api/coin-promos').then(r => r.json()).catch(() => [])
-      ]);
-      const data = await res.json();
-      setMenuItems(data);
-      setActivePromos(promosRes);
-      fetchIngredients();
-      setLoading(false);
-    } catch (err) {
-      console.error("Failed to fetch menu:", err);
-    }
-  }, [selectedCategory]);
-
-  const getPromoForItem = (itemId: string | number) => {
-    const now = new Date();
-    return activePromos.find(p => 
-      p.product_id?.toString() === itemId.toString() && 
-      p.is_active && 
-      p.used_count < p.max_usage && 
-      new Date(p.valid_until) > now
-    );
-  };
-
+  useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => {
-    fetchMenu();
-  }, [fetchMenu]);
+    const refresh = () => loadAll();
+    const alert = (change: any) => { setToast(`Stok ${change.name} ${levelMeta[change.level as StockLevel]?.label?.toLowerCase() || 'berubah'}: ${change.after} ${change.unit}`); loadAll(); };
+    socket.on('inventory_updated', refresh); socket.on('low_stock_alert', alert);
+    return () => { socket.off('inventory_updated', refresh); socket.off('low_stock_alert', alert); };
+  }, [loadAll]);
+  useEffect(() => { if (!toast) return; const id = window.setTimeout(() => setToast(''), 5000); return () => clearTimeout(id); }, [toast]);
+  useEffect(() => () => stopCamera(), []);
 
-  const handleAddProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const lookupBarcode = async (raw = barcodeInput, method: 'barcode' | 'camera' = 'barcode') => {
+    const code = raw.trim(); if (!code) return;
     try {
-      const res = await fetch('/api/menu', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProduct)
-      });
-      if (res.ok) {
-        setIsAddModalOpen(false);
-        setNewProduct({ name: '', category: 'Main Course', price: '', stock: '', image: '', description: '' });
-        fetchMenu();
-        playBeep(1000, 0.2);
-      }
-    } catch (err) {
-      console.error("Failed to add product:", err);
+      const item = await requestJson(`/api/ingredients/barcode/${encodeURIComponent(code)}?outlet=${outlet}`);
+      setSelectedItem(item); setBarcodeInput(code); setMovementForm(current => ({ ...current, input_method: method, supplier: item.supplier || '', unit_cost: item.costPrice || 0 })); setTab('receive');
+      setToast(`${item.name} ditemukan.`);
+    } catch {
+      setItemForm({ ...emptyItem, outlet, barcode: code }); setEditingId(null); setItemModal(true);
+      setToast('Barcode belum terdaftar. Lengkapi data barang baru.');
     }
   };
 
-  const handleUpdateProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingProduct) return;
+  const stopCamera = () => {
+    if (scanTimerRef.current) window.clearInterval(scanTimerRef.current);
+    scanTimerRef.current = null; streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; setCameraOpen(false);
+  };
+  const startCamera = async () => {
+    setError('');
     try {
-      const res = await fetch(`/api/menu/${editingProduct.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingProduct)
-      });
-      if (res.ok) {
-        setEditingProduct(null);
-        fetchMenu();
-        playBeep(1200, 0.2);
-      }
-    } catch (err) {
-      console.error("Failed to update product:", err);
-    }
+      const Detector = (window as any).BarcodeDetector;
+      if (!Detector) throw new Error('Browser ini belum mendukung scan barcode kamera. Gunakan Chrome/Edge terbaru atau scanner USB.');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+      streamRef.current = stream; setCameraOpen(true);
+      window.setTimeout(() => { if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); } }, 50);
+      const detector = new Detector({ formats: ['ean_13', 'ean_8', 'code_128', 'qr_code', 'upc_a', 'upc_e'] });
+      scanTimerRef.current = window.setInterval(async () => {
+        if (!videoRef.current || videoRef.current.readyState < 2) return;
+        try { const codes = await detector.detect(videoRef.current); if (codes[0]?.rawValue) { const code = codes[0].rawValue; stopCamera(); setBarcodeInput(code); lookupBarcode(code, 'camera'); } } catch { /* frame berikutnya */ }
+      }, 400);
+    } catch (cameraError: any) { stopCamera(); setError(cameraError.message || 'Kamera tidak dapat dibuka.'); }
   };
 
-  const handleSyncSmartTag = async () => {
-    setIsSyncing(true);
+  const saveItem = async (event: React.FormEvent) => {
+    event.preventDefault(); setError('');
     try {
-      const res = await fetch('/api/menu/sync-smart-tag', { method: 'POST' });
-      if (res.ok) {
-        const result = await res.json();
-        alert(result.message);
-        fetchMenu();
-        playBeep(1500, 0.3);
-      } else {
-        alert("Gagal sinkronisasi data.");
-      }
-    } catch (err) {
-      console.error("Failed to sync:", err);
-    } finally {
-      setIsSyncing(false);
-    }
+      const url = editingId ? `/api/ingredients/${editingId}` : '/api/ingredients';
+      const saved = await requestJson(url, { method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(itemForm) });
+      setItemModal(false); setEditingId(null); setItemForm({ ...emptyItem, outlet }); setSelectedItem(saved); setBarcodeInput(saved.barcode || ''); setToast('Data inventori berhasil disimpan.'); await loadAll();
+    } catch (requestError: any) { setError(requestError.message); }
   };
+  const editItem = (item: InventoryItem) => { setEditingId(item.id); setItemForm({ ...item }); setItemModal(true); };
 
-  const handleDeleteProduct = async (item: MenuItem) => {
+  const saveMovement = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!selectedItem) return; setError('');
     try {
-      const res = await fetch(`/api/menu/${item.id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setDeleteConfirm(null);
-        fetchMenu();
-        playBeep(600, 0.15);
-      } else {
-        alert("Gagal menghapus menu.");
-      }
-    } catch (err) {
-      console.error("Failed to delete:", err);
-      alert("Terjadi kesalahan saat menghapus menu.");
-    }
+      const result = await requestJson(`/api/ingredients/${selectedItem.id}/movements`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(movementForm) });
+      setSelectedItem(result.item); setMovementForm(current => ({ ...current, quantity: 1, batch_number: '', expires_at: '', notes: '' }));
+      setToast(`${movementLabels[movementForm.type]} ${result.item.name} berhasil.`); await loadAll();
+    } catch (requestError: any) { setError(requestError.message); }
   };
 
-  // Audio Feedback Implementation
-  const playBeep = (freq: number = 880, duration: number = 0.1) => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    const ctx = audioContextRef.current;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq, ctx.currentTime);
-    
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start();
-    osc.stop(ctx.currentTime + duration);
+  const chooseMenu = (menuName: string) => {
+    setSelectedMenu(menuName);
+    const existing = recipes.filter(row => row.menu_name === menuName).map(row => ({ ingredient_id: row.ingredient_id, amount: row.amount }));
+    setRecipeDraft(existing.length ? existing : [{ ingredient_id: items[0]?.id || '', amount: 1 }]);
   };
-
-  const toggleStock = async (id: string | number) => {
+  const saveRecipe = async () => {
+    if (!selectedMenu) return;
     try {
-      const res = await fetch(`/api/menu/${id}/toggle-stock`, { method: 'PATCH' });
-      if (res.ok) {
-        const result = await res.json();
-        setMenuItems(prev => prev.map(item => item.id === id ? result.item : item));
-        
-        // Success Feedback
-        playBeep(result.item.inStock ? 1200 : 600, 0.15);
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        alert(errorData.message || "Gagal mengubah status menu.");
-      }
-    } catch (err) {
-      console.error("Failed to toggle stock:", err);
-      alert("Terjadi kesalahan koneksi saat merubah status menu.");
-    }
+      await requestJson(`/api/ingredients/recipes/${encodeURIComponent(selectedMenu)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outlet, items: recipeDraft }) });
+      setToast(`Resep ${selectedMenu} berhasil disimpan.`); await loadAll(); chooseMenu(selectedMenu);
+    } catch (requestError: any) { setError(requestError.message); }
   };
 
+  const filtered = items.filter(item => `${item.name} ${item.sku} ${item.barcode} ${item.category}`.toLowerCase().includes(search.toLowerCase()));
+  const tabs = [
+    ['dashboard', 'Ringkasan', Zap], ['items', 'Master Barang', Box], ['receive', 'Input & Scan', Barcode],
+    ['recipes', 'Resep Menu', ClipboardList], ['history', 'Riwayat Mutasi', History]
+  ] as const;
 
+  if (loading && !summary) return <div className="p-12 flex justify-center"><Loader2 className="animate-spin text-indigo-600" /></div>;
 
-  const filteredMenu = menuItems.filter(item => 
-    item.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  return (
-    <div className="space-y-8 pb-32 relative">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 leading-tight">Katalog Menu Ngolab</h2>
-          <p className="text-sm text-slate-500 font-medium tracking-tight mt-1">
-            Tampilan katalog produk Ngolab. Untuk menambah, mengubah, atau menghapus menu — gunakan halaman <span className="font-bold text-indigo-600">Manajemen Menu</span>.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
-            <button 
-              onClick={() => setActiveTab('products')}
-              className={cn(
-                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'products' ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-orange-500 shadow-sm dark:shadow-none" : "text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
-              )}
-            >
-              Produk Jadi
-            </button>
-            <button 
-              onClick={() => setActiveTab('ingredients')}
-              className={cn(
-                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-                activeTab === 'ingredients' ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-orange-500 shadow-sm dark:shadow-none" : "text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
-              )}
-            >
-              Bahan Baku
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {activeTab === 'products' ? (
-        <>
-          {/* Toolbar */}
-          <div className="flex flex-col xl:flex-row items-center gap-4">
-            <div className="relative flex-1 group w-full">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-              <input 
-                type="text" 
-                placeholder="Cari nama menu..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="w-full bg-white border border-slate-100 rounded-2xl pl-12 pr-4 py-3.5 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium"
-              />
-            </div>
-            
-            <div className="flex items-center gap-2 p-1 bg-white border border-slate-100 rounded-2xl overflow-x-auto w-full xl:w-auto scrollbar-hide">
-              {['Semua', 'Main Course', 'Beverage', 'Snack'].map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={cn(
-                    "px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all",
-                    selectedCategory === cat 
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none" 
-                      : "text-slate-500 hover:bg-slate-50"
-                  )}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-
-            <button 
-              onClick={handleSyncSmartTag}
-              disabled={isSyncing}
-              className="bg-emerald-600 text-white px-5 py-3.5 rounded-2xl hover:bg-emerald-700 transition-all font-bold text-xs shadow-lg shadow-emerald-200 dark:shadow-none flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
-            >
-              <RefreshCcw size={18} className={cn(isSyncing && "animate-spin")} />
-              {isSyncing ? "Menyelaraskan..." : "Sync Smart Tag"}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredMenu.map((item) => (
-              <motion.div
-                key={item.id}
-                layout
-                className={cn(
-                  "relative bg-white rounded-[2rem] border-2 transition-all duration-300 overflow-hidden group p-2",
-                  "border-slate-100 shadow-premium hover:border-indigo-500/50"
-                )}
-              >
-                {/* Stock Toggle Visual Helper */}
-                <div className="relative aspect-video rounded-[1.5rem] overflow-hidden mb-2">
-                  <img 
-                    src={item.image} 
-                    alt={item.name} 
-                    className={cn(
-                      "w-full h-full object-cover transition-transform duration-700 group-hover:scale-110",
-                      !item.inStock && "grayscale opacity-40"
-                    )}
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&q=80`;
-                    }}
-                  />
-                  
-                  {/* Overlay Status */}
-                  <div className={cn(
-                    "absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-300 pointer-events-none",
-                    !item.inStock ? "bg-slate-900/40 opacity-100" : "opacity-0"
-                  )}>
-                    {!item.inStock && (
-                      <div className="bg-white/90 backdrop-blur-md p-4 rounded-3xl shadow-xl transform scale-110">
-                        <XCircle size={32} className="text-rose-500" />
-                      </div>
-                    )}
-                  </div>
-
-
-                </div>                 <div className="p-5 flex-1 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center flex-wrap gap-1.5 mb-1.5">
-                          <span className="inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[9px] font-black uppercase tracking-widest">
-                            {item.category}
-                          </span>
-                          {(() => {
-                            const promo = getPromoForItem(item.id);
-                            if (promo) {
-                              return (
-                                <span className="inline-block px-2 py-0.5 rounded bg-rose-50 text-rose-600 text-[9px] font-black uppercase tracking-widest animate-pulse flex items-center gap-1">
-                                  <Tag size={8} /> Promo Koin
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                        <h3 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-2 leading-tight">
-                          {item.name}
-                        </h3>
-                        {item.description && (
-                          <p className="text-[11px] text-slate-400 font-medium mt-1 line-clamp-2 leading-snug">
-                            {item.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Yield Info Badge */}
-                    {portionYields.find(y => y.name === item.name) && (
-                      <div className="mb-3 flex items-center gap-2 py-1.5 px-3 bg-amber-50 rounded-lg border border-amber-100">
-                         <Zap size={10} className="text-amber-600" />
-                         <span className="text-[10px] font-bold text-amber-900 uppercase">
-                           Estimasi Portions: {portionYields.find(y => y.name === item.name)?.yield} Porsi
-                         </span>
-                      </div>
-                    )}                     <div className="flex items-center justify-between pt-3 border-t border-slate-50">
-                      {(() => {
-                        const promo = getPromoForItem(item.id);
-                        let hasDiscountedPrice = false;
-                        let promoPrice = item.price;
-                        let isFree = false;
-                        if (promo) {
-                          if (promo.discount_type === 'percentage') {
-                            promoPrice = item.price - (item.price * promo.discount_value / 100);
-                            hasDiscountedPrice = true;
-                          } else if (promo.discount_type === 'fixed') {
-                            promoPrice = Math.max(0, item.price - promo.discount_value);
-                            hasDiscountedPrice = true;
-                          } else if (promo.discount_type === 'free_item') {
-                            promoPrice = 0;
-                            hasDiscountedPrice = true;
-                            isFree = true;
-                          }
-                        }
-                        if (hasDiscountedPrice) {
-                          return (
-                            <div className="flex flex-col">
-                              <p className="text-[13px] font-black text-rose-600 whitespace-nowrap">
-                                {isFree ? 'Gratis' : `Rp ${promoPrice.toLocaleString()}`}
-                              </p>
-                              <p className="text-[10px] text-slate-400 line-through font-semibold whitespace-nowrap">
-                                Rp {item.price.toLocaleString()}
-                              </p>
-                            </div>
-                          );
-                        } else {
-                          return (
-                            <p className="text-[13px] font-black text-indigo-600 whitespace-nowrap">
-                              Rp {item.price.toLocaleString()}
-                            </p>
-                          );
-                        }
-                      })()}
-                      <div className={cn(
-                        "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-colors",
-                        item.inStock ? "text-emerald-600 bg-emerald-50" : "text-rose-600 bg-rose-50"
-                      )}>
-                        {item.inStock ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
-                        {item.inStock ? 'Tersedia' : 'Habis'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 mt-5">
-                    <button 
-                      onClick={() => toggleStock(item.id)}
-                      className={cn(
-                        "w-full py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-md",
-                        item.inStock 
-                          ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 shadow-rose-100/50 dark:shadow-none" 
-                          : "bg-indigo-600 text-white shadow-indigo-100/50 dark:shadow-none hover:bg-indigo-700"
-                      )}
-                    >
-                      {item.inStock ? 'Nonaktifkan' : 'Aktifkan'}
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-             {/* Ingredient List */}
-             <div className="lg:col-span-2 bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
-                <div className="p-8 border-b border-slate-50 flex items-center justify-between">
-                   <div>
-                      <h3 className="text-xl font-bold text-slate-900">Gudang Bahan Baku</h3>
-                      <p className="text-xs text-slate-500 font-medium">Monitoring stok mentah untuk komposisi resep.</p>
-                   </div>
-                </div>
-                <div className="overflow-x-auto">
-                   <table className="w-full text-left">
-                      <thead>
-                        <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  dark: text-[10px] font-black uppercase tracking-widest  border-b border-slate-50">
-                           <th className="px-8 py-5">Nama Bahan</th>
-                           <th className="px-8 py-5">Stok Saat Ini</th>
-                           <th className="px-8 py-5">Satuan</th>
-                           <th className="px-8 py-5">Status</th>
-                           <th className="px-8 py-5 text-right">Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {ingredients.map(ing => (
-                          <tr key={ing.id} className="hover:bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800 transition-colors">
-                            <td className="px-8 py-5">
-                               <p className="text-sm font-bold text-slate-900">{ing.name}</p>
-                               <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">ID: {ing.id}</p>
-                            </td>
-                            <td className="px-8 py-5">
-                               <p className={cn(
-                                 "text-sm font-black font-mono",
-                                 ing.stock <= ing.minStock ? "text-rose-600" : "text-indigo-600"
-                               )}>{ing.stock}</p>
-                            </td>
-                            <td className="px-8 py-5">
-                               <span className="text-xs font-bold text-slate-500">{ing.unit}</span>
-                            </td>
-                            <td className="px-8 py-5">
-                               {ing.stock <= ing.minStock ? (
-                                 <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-rose-50 text-rose-600 rounded-md text-[9px] font-black uppercase tracking-widest">
-                                   <Zap size={10} /> Stok Rendah
-                                 </div>
-                               ) : (
-                                 <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50 text-emerald-600 rounded-md text-[9px] font-black uppercase tracking-widest">
-                                   <CheckCircle2 size={10} /> Aman
-                                 </div>
-                               )}
-                            </td>
-                            <td className="px-8 py-5 text-right">
-                               <button 
-                                 onClick={() => {
-                                   setSelectedIngredient(ing);
-                                   setIsRestockModalOpen(true);
-                                 }}
-                                 className="px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-sm"
-                               >
-                                  Restock
-                               </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                   </table>
-                </div>
-             </div>
-
-             {/* Yield Summary Card */}
-             <div className="bg-indigo-600 rounded-[2.5rem] p-8 text-white shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl" />
-                <div className="relative z-10">
-                   <h3 className="text-xl font-bold mb-2">Simulasi Yield Menu</h3>
-                   <p className="text-xs text-indigo-100 font-medium opacity-80 mb-8 border-b border-white/20 pb-4">
-                     Porsi yang dapat dihasilkan berdasarkan stok bahan baku yang tersedia saat ini.
-                   </p>
-
-                   <div className="space-y-6">
-                      {portionYields.map((py, idx) => (
-                        <div key={idx} className="flex items-center justify-between group">
-                           <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-black border border-white/10 group-hover:bg-white group-hover:text-indigo-600 transition-all">
-                                 {py.yield}
-                              </div>
-                              <span className="text-sm font-bold truncate max-w-[150px]">{py.name}</span>
-                           </div>
-                           <div className="text-right">
-                              <p className="text-[10px] font-bold text-indigo-100 uppercase tracking-widest mb-1">Status</p>
-                              <p className={cn(
-                                "text-xs font-black",
-                                py.yield < 10 ? "text-amber-300" : "text-emerald-300"
-                              )}>
-                                {py.yield < 10 ? 'Kritis' : 'Opsi Cukup'}
-                              </p>
-                           </div>
-                        </div>
-                      ))}
-                   </div>
-
-                   <button className="w-full mt-12 py-4 bg-white text-indigo-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 transition-all shadow-xl">
-                      Download Laporan Stok
-                   </button>
-                </div>
-             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Restock Modal */}
-      <AnimatePresence>
-        {isRestockModalOpen && selectedIngredient && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsRestockModalOpen(false)} className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="relative bg-white rounded-[2.5rem] p-8 w-full max-w-md shadow-2xl">
-               <h3 className="text-xl font-bold text-slate-900 mb-2">Restock {selectedIngredient.name}</h3>
-               <p className="text-xs text-slate-500 font-medium mb-6 uppercase tracking-widest">Satuan: {selectedIngredient.unit}</p>
-
-               <div className="space-y-4">
-                  <div>
-                     <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block">Jumlah Tambahan</label>
-                     <input 
-                       type="number"
-                       value={restockAmount}
-                       onChange={e => setRestockAmount(e.target.value)}
-                       className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold text-indigo-600 focus:ring-2 focus:ring-indigo-500 outline-none"
-                       placeholder="Masukkan angka..."
-                     />
-                  </div>
-                  <div className="flex gap-3 pt-4">
-                     <button onClick={() => setIsRestockModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest">Batal</button>
-                     <button onClick={handleRestock} className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-100 dark:shadow-none">Simpan Stok</button>
-                  </div>
-               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-
-
-      {/* MODAL TAMBAH PRODUK */}
-      <AnimatePresence>
-        {isAddModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsAddModalOpen(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl p-8 overflow-hidden"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">Tambah Produk Baru</h3>
-                  <p className="text-xs text-slate-500 font-medium">Lengkapi data produk makanan atau minuman.</p>
-                </div>
-                <button 
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                >
-                  <XCircle size={24} className="text-slate-400" />
-                </button>
-              </div>
-
-              <form onSubmit={handleAddProduct} className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Nama Produk</label>
-                    <input 
-                      required
-                      type="text" 
-                      value={newProduct.name}
-                      onChange={e => setNewProduct({...newProduct, name: e.target.value})}
-                      placeholder="Contoh: Nasi Goreng Gila"
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
-                    />
-                  </div>
-                  
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Deskripsi Produk</label>
-                    <textarea 
-                      value={newProduct.description}
-                      onChange={e => setNewProduct({...newProduct, description: e.target.value})}
-                      placeholder="Masukkan deskripsi singkat..."
-                      rows={2}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Kategori</label>
-                    <select 
-                      value={newProduct.category}
-                      onChange={e => setNewProduct({...newProduct, category: e.target.value})}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-                    >
-                      <option value="Main Course">Main Course</option>
-                      <option value="Beverage">Beverage</option>
-                      <option value="Snack">Snack</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Harga (Rp)</label>
-                    <input 
-                      required
-                      type="number" 
-                      value={newProduct.price}
-                      onChange={e => setNewProduct({...newProduct, price: e.target.value})}
-                      placeholder="0"
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Stok Awal</label>
-                    <input 
-                      required
-                      type="number" 
-                      value={newProduct.stock}
-                      onChange={e => setNewProduct({...newProduct, stock: e.target.value})}
-                      placeholder="0"
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-                    />
-                  </div>
-
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Foto Produk</label>
-                    <div 
-                      onDragEnter={handleDrag}
-                      onDragLeave={handleDrag}
-                      onDragOver={handleDrag}
-                      onDrop={handleDrop}
-                      className={cn(
-                        "relative h-40 rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-2 overflow-hidden bg-slate-50",
-                        dragActive ? "border-indigo-500 bg-indigo-50/50" : "border-slate-200",
-                        newProduct.image ? "border-transparent" : "hover:border-slate-300"
-                      )}
-                    >
-                      {newProduct.image ? (
-                        <>
-                          <img src={newProduct.image} className="absolute inset-0 w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                            <button 
-                              type="button"
-                              onClick={() => setNewProduct({...newProduct, image: ''})}
-                              className="bg-white/20 backdrop-blur-md p-2 rounded-full text-white"
-                            >
-                              <XCircle size={20} />
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="p-3 bg-white rounded-full shadow-sm text-slate-400">
-                            <Upload size={20} />
-                          </div>
-                          <div className="text-center">
-                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Klik atau seret gambar</p>
-                            <p className="text-[9px] text-slate-400 font-medium mt-1">PNG, JPG up to 5MB</p>
-                          </div>
-                          <input 
-                            type="file" 
-                            accept="image/*"
-                            onChange={handleFileChange}
-                            className="absolute inset-0 opacity-0 cursor-pointer"
-                          />
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button 
-                    type="button"
-                    onClick={() => setIsAddModalOpen(false)}
-                    className="flex-1 py-4 rounded-2xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all"
-                  >
-                    Batal
-                  </button>
-                  <button 
-                    type="submit"
-                    className="flex-[2] py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all"
-                  >
-                    Simpan Produk
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* MODAL EDIT PRODUK */}
-      <AnimatePresence>
-        {editingProduct && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setEditingProduct(null)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl p-8 overflow-hidden"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">Ubah Data Produk</h3>
-                  <p className="text-xs text-slate-500 font-medium">Perbarui informasi produk yang sudah ada.</p>
-                </div>
-                <button 
-                  onClick={() => setEditingProduct(null)}
-                  className="p-2 hover:bg-slate-100 rounded-full transition-colors"
-                >
-                  <XCircle size={24} className="text-slate-400" />
-                </button>
-              </div>
-
-              <form onSubmit={handleUpdateProduct} className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Nama Produk</label>
-                    <input 
-                      required
-                      type="text" 
-                      value={editingProduct.name}
-                      onChange={e => setEditingProduct({...editingProduct, name: e.target.value})}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
-                    />
-                  </div>
-                  
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Deskripsi</label>
-                    <textarea 
-                      value={editingProduct.description || ''}
-                      onChange={e => setEditingProduct({...editingProduct, description: e.target.value})}
-                      placeholder="Masukkan deskripsi singkat..."
-                      rows={2}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Kategori</label>
-                    <select 
-                      value={editingProduct.category}
-                      onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
-                    >
-                      <option value="Main Course">Main Course</option>
-                      <option value="Beverage">Beverage</option>
-                      <option value="Snack">Snack</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Harga (Rp)</label>
-                    <input 
-                      required
-                      type="number" 
-                      value={editingProduct.price}
-                      onChange={e => setEditingProduct({...editingProduct, price: parseInt(e.target.value)})}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Stok</label>
-                    <input 
-                      required
-                      type="number" 
-                      value={editingProduct.stock}
-                      onChange={e => setEditingProduct({...editingProduct, stock: parseInt(e.target.value)})}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
-                    />
-                  </div>
-                  
-                  <div className="col-span-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Ubah Foto</label>
-                    <div 
-                      className="relative h-32 rounded-2xl border-2 border-dashed border-slate-200 transition-all flex flex-col items-center justify-center gap-2 overflow-hidden bg-slate-50 hover:border-slate-300"
-                    >
-                      {editingProduct.image ? (
-                        <>
-                          <img src={editingProduct.image} className="absolute inset-0 w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                            <input 
-                              type="file" 
-                              accept="image/*"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  const reader = new FileReader();
-                                  reader.onloadend = () => setEditingProduct({...editingProduct, image: reader.result as string});
-                                  reader.readAsDataURL(file);
-                                }
-                              }}
-                              className="absolute inset-0 opacity-0 cursor-pointer"
-                            />
-                            <Upload size={20} className="text-white" />
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-center p-4">
-                          <Upload size={20} className="mx-auto text-slate-400 mb-2" />
-                          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Klik untuk ganti foto</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button 
-                    type="button"
-                    onClick={() => setEditingProduct(null)}
-                    className="flex-1 py-4 rounded-2xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all"
-                  >
-                    Batal
-                  </button>
-                  <button 
-                    type="submit"
-                    className="flex-[2] py-4 rounded-2xl bg-indigo-600 text-white text-sm font-bold shadow-xl shadow-indigo-100 dark:shadow-none hover:bg-indigo-700 transition-all"
-                  >
-                    Simpan Perubahan
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Audio Indicator */}
-      <div className="fixed bottom-8 right-8 p-3 bg-white border border-slate-100 rounded-2xl shadow-xl flex items-center gap-3">
-        <Volume2 size={16} className="text-slate-400" />
-        <span className="text-[10px] font-bold text-slate-900 uppercase tracking-widest">Audio Aktif</span>
-      </div>
-
-      {/* DELETE CONFIRM MODAL */}
-      <AnimatePresence>
-        {deleteConfirm && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setDeleteConfirm(null)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="relative bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl text-center"
-            >
-              <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 size={28} className="text-rose-500" />
-              </div>
-              <h3 className="text-lg font-bold text-slate-900 mb-2">Hapus Menu?</h3>
-              <p className="text-sm text-slate-500 mb-6">
-                <span className="font-bold text-slate-900">"{deleteConfirm.name}"</span> akan dihapus secara permanen dari Katalog Ngolab.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeleteConfirm(null)}
-                  className="flex-1 py-3.5 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest"
-                >
-                  Batal
-                </button>
-                <button
-                  onClick={() => handleDeleteProduct(deleteConfirm)}
-                  className="flex-[2] py-3.5 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:bg-rose-700 transition-all"
-                >
-                  Ya, Hapus
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+  return <div className="space-y-6 pb-24">
+    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div><h2 className="text-2xl font-bold text-slate-900 dark:text-white">Inventori {outlet === 'ngolab' ? 'Ngolab' : 'Coworking'}</h2><p className="text-sm text-slate-500">Bahan resep, minuman kemasan, barcode, mutasi, dan peringatan stok.</p></div>
+      <div className="flex items-center gap-2"><div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">{(['ngolab', 'coworking'] as const).map(value => <button key={value} onClick={() => { setOutlet(value); setSelectedItem(null); setSelectedMenu(''); }} className={`px-3 py-2 rounded-lg text-xs font-bold ${outlet === value ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-500'}`}>{value === 'ngolab' ? 'Ngolab' : 'Coworking'}</button>)}</div><button onClick={loadAll} className="self-start px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex gap-2 items-center text-sm font-bold"><RefreshCw size={16} /> Perbarui</button></div>
     </div>
-  );
+
+    {error && <div className="p-4 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 flex gap-2"><AlertTriangle size={19} />{error}</div>}
+    {toast && <div className="fixed top-5 right-5 z-[70] max-w-sm p-4 rounded-xl bg-slate-900 text-white shadow-2xl flex gap-3"><CheckCircle2 className="text-emerald-400" />{toast}</div>}
+
+    <div className="flex gap-2 overflow-x-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-2xl">
+      {tabs.map(([id, label, Icon]) => <button key={id} onClick={() => setTab(id)} className={`px-4 py-2.5 rounded-xl whitespace-nowrap flex items-center gap-2 text-sm font-bold ${tab === id ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}><Icon size={16} />{label}</button>)}
+    </div>
+
+    {tab === 'dashboard' && summary && <>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {[['Total Item', summary.total, 'bg-indigo-50 text-indigo-700'], ['Aman', summary.counts.safe, 'bg-emerald-50 text-emerald-700'], ['Menipis', summary.counts.low, 'bg-amber-50 text-amber-700'], ['Kritis', summary.counts.critical, 'bg-rose-50 text-rose-700'], ['Habis', summary.counts.out, 'bg-slate-900 text-white']].map(([label, value, color]) => <div key={String(label)} className={`rounded-2xl p-5 ${color}`}><p className="text-xs font-bold uppercase opacity-70">{label}</p><p className="text-3xl font-black mt-2">{value}</p></div>)}
+      </div>
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+        <div className="p-5 border-b dark:border-slate-800"><h3 className="font-bold dark:text-white">Perlu Dibeli</h3><p className="text-xs text-slate-500">Item yang sudah mencapai batas minimum.</p></div>
+        {!summary.alerts.length ? <p className="p-6 text-emerald-600">Semua stok dalam kondisi aman.</p> : summary.alerts.map(item => <div key={item.id} className="p-4 border-b last:border-0 dark:border-slate-800 flex items-center gap-4"><span className={`px-2 py-1 text-xs rounded-full font-bold ${levelMeta[item.level].color}`}>{levelMeta[item.level].label}</span><div className="flex-1"><p className="font-bold dark:text-white">{item.name}</p><p className="text-xs text-slate-500">Tersisa {item.stock} {item.unit} · Minimum {item.minStock}</p></div><button onClick={() => { setSelectedItem(item); setTab('receive'); }} className="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 font-bold text-xs">Restock</button></div>)}
+      </div>
+    </>}
+
+    {tab === 'items' && <>
+      <div className="flex gap-3"><div className="relative flex-1"><Search className="absolute left-4 top-3.5 text-slate-400" size={18}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cari nama, SKU, barcode..." className="w-full pl-11 pr-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 dark:text-white" /></div><button onClick={() => { setEditingId(null); setItemForm({ ...emptyItem, outlet }); setItemModal(true); }} className="px-4 py-3 bg-indigo-600 text-white rounded-xl font-bold flex gap-2"><Plus size={18}/> Item</button></div>
+      <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{filtered.map(item => <div key={item.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5"><div className="flex justify-between"><div><span className={`text-[10px] px-2 py-1 rounded-full font-bold ${levelMeta[item.level].color}`}>{levelMeta[item.level].label}</span><h3 className="font-bold mt-3 dark:text-white">{item.name}</h3><p className="text-xs text-slate-500">{item.inventoryType === 'raw_material' ? 'Bahan resep' : 'Barang kemasan'} · {item.sku}</p></div><button onClick={() => editItem(item)} className="p-2 h-9 rounded-lg bg-slate-100 dark:bg-slate-800"><Pencil size={15}/></button></div><p className="text-3xl font-black text-indigo-600 mt-5">{item.stock} <span className="text-sm font-medium text-slate-500">{item.unit}</span></p><p className="text-xs text-slate-400 mt-2">Barcode: {item.barcode || 'Belum ada'} · Min: {item.minStock} · Kritis: {item.criticalStock}</p></div>)}</div>
+    </>}
+
+    {tab === 'receive' && <div className="grid lg:grid-cols-2 gap-6">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6"><h3 className="font-bold dark:text-white flex gap-2"><Barcode/> Scan atau Cari Barang</h3><p className="text-xs text-slate-500 mt-1">Scanner USB akan mengetik barcode dan menekan Enter otomatis.</p><div className="flex gap-2 mt-5"><input autoFocus value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupBarcode(); } }} placeholder="Scan/ketik barcode lalu Enter" className="flex-1 rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 dark:text-white"/><button onClick={() => lookupBarcode()} className="px-4 rounded-xl bg-indigo-600 text-white font-bold">Cari</button><button onClick={startCamera} className="px-4 rounded-xl bg-slate-900 text-white" title="Scan kamera"><Camera/></button></div><p className="text-center text-xs text-slate-400 my-4">atau pilih manual</p><select value={selectedItem?.id || ''} onChange={e => { const item = items.find(i => i.id === e.target.value) || null; setSelectedItem(item); if (item) setMovementForm(current => ({...current, supplier: item.supplier, unit_cost: item.costPrice, input_method: 'manual'})); }} className="w-full rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 dark:text-white"><option value="">Pilih barang...</option>{items.filter(i => i.isActive).map(item => <option key={item.id} value={item.id}>{item.name} — {item.stock} {item.unit}</option>)}</select></div>
+      <form onSubmit={saveMovement} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6"><h3 className="font-bold dark:text-white flex gap-2"><PackagePlus/> Catat Mutasi Stok</h3>{!selectedItem ? <p className="mt-6 text-sm text-slate-500">Scan atau pilih barang terlebih dahulu.</p> : <div className="space-y-4 mt-5"><div className="p-4 rounded-xl bg-indigo-50 dark:bg-indigo-500/10"><p className="font-bold text-indigo-800 dark:text-indigo-300">{selectedItem.name}</p><p className="text-xs text-indigo-600">Stok: {selectedItem.stock} {selectedItem.unit} · 1 {selectedItem.purchaseUnit} = {selectedItem.purchaseConversion} {selectedItem.unit}</p></div><select value={movementForm.type} onChange={e => setMovementForm({...movementForm, type:e.target.value})} className="w-full rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-950 px-4 py-3 dark:text-white">{['purchase','waste','stock_opname','adjustment','transfer_in','transfer_out'].map(type => <option value={type} key={type}>{movementLabels[type]}</option>)}</select><label className="block text-xs font-bold text-slate-500">{movementForm.type === 'stock_opname' || movementForm.type === 'adjustment' ? `HASIL HITUNG FISIK (${selectedItem.unit})` : `JUMLAH (${movementForm.type === 'purchase' ? selectedItem.purchaseUnit : selectedItem.unit})`}<input type="number" min="0" step="any" value={movementForm.quantity} onChange={e => setMovementForm({...movementForm,quantity:Number(e.target.value)})} className="mt-1 w-full rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 dark:text-white" required/></label>{movementForm.type === 'purchase' && <div className="grid grid-cols-2 gap-3"><input placeholder="Supplier" value={movementForm.supplier} onChange={e=>setMovementForm({...movementForm,supplier:e.target.value})} className="rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-3 dark:text-white"/><input type="number" placeholder="Harga/unit dasar" value={movementForm.unit_cost} onChange={e=>setMovementForm({...movementForm,unit_cost:Number(e.target.value)})} className="rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-3 dark:text-white"/><input placeholder="Nomor batch" value={movementForm.batch_number} onChange={e=>setMovementForm({...movementForm,batch_number:e.target.value})} className="rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-3 dark:text-white"/><input type="date" value={movementForm.expires_at} onChange={e=>setMovementForm({...movementForm,expires_at:e.target.value})} className="rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-3 dark:text-white"/></div>}<textarea placeholder="Catatan/alasan" value={movementForm.notes} onChange={e=>setMovementForm({...movementForm,notes:e.target.value})} className="w-full rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 dark:text-white"/><button className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold flex justify-center gap-2"><Save size={18}/> Simpan Mutasi</button></div>}</form>
+    </div>}
+
+    {tab === 'recipes' && <div className="grid lg:grid-cols-[320px_1fr] gap-6"><div className="bg-white dark:bg-slate-900 rounded-2xl border dark:border-slate-800 p-5"><h3 className="font-bold dark:text-white mb-4">Pilih Menu</h3><div className="space-y-2 max-h-[560px] overflow-y-auto">{menus.map(menu => <button key={menu.id} onClick={() => chooseMenu(menu.name)} className={`w-full text-left px-3 py-2.5 rounded-xl text-sm ${selectedMenu === menu.name ? 'bg-indigo-600 text-white' : 'hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-300'}`}>{menu.name}</button>)}</div></div><div className="bg-white dark:bg-slate-900 rounded-2xl border dark:border-slate-800 p-6"><h3 className="font-bold dark:text-white">Komposisi {selectedMenu || 'Menu'}</h3>{!selectedMenu ? <p className="text-sm text-slate-500 mt-5">Pilih menu untuk mengatur bahan. Untuk minuman kemasan, pilih barang yang sama dengan jumlah 1.</p> : <div className="space-y-3 mt-5">{recipeDraft.map((row,index) => <div key={index} className="grid grid-cols-[1fr_120px_40px] gap-2"><select value={row.ingredient_id} onChange={e=>setRecipeDraft(current=>current.map((r,i)=>i===index?{...r,ingredient_id:e.target.value}:r))} className="rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-950 px-3 dark:text-white"><option value="">Pilih bahan...</option>{items.filter(i=>i.isActive).map(item=><option key={item.id} value={item.id}>{item.name} ({item.unit})</option>)}</select><input type="number" min="0.001" step="any" value={row.amount} onChange={e=>setRecipeDraft(current=>current.map((r,i)=>i===index?{...r,amount:Number(e.target.value)}:r))} className="rounded-xl border dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 dark:text-white"/><button onClick={()=>setRecipeDraft(current=>current.filter((_,i)=>i!==index))} className="rounded-xl bg-rose-50 text-rose-600"><Trash2 size={16} className="mx-auto"/></button></div>)}<div className="flex gap-2"><button onClick={()=>setRecipeDraft([...recipeDraft,{ingredient_id:items[0]?.id||'',amount:1}])} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl font-bold text-sm dark:text-white"><Plus size={15} className="inline"/> Bahan</button><button onClick={saveRecipe} disabled={!recipeDraft.length || recipeDraft.some(r=>!r.ingredient_id || r.amount<=0)} className="px-4 py-2 bg-indigo-600 disabled:opacity-50 text-white rounded-xl font-bold text-sm"><Save size={15} className="inline"/> Simpan Resep</button></div></div>}</div></div>}
+
+    {tab === 'history' && <div className="bg-white dark:bg-slate-900 rounded-2xl border dark:border-slate-800 overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 dark:bg-slate-950 text-slate-500"><tr>{['Waktu','Barang','Jenis','Perubahan','Sebelum → Sesudah','Metode','Petugas'].map(h=><th key={h} className="px-4 py-3 text-left">{h}</th>)}</tr></thead><tbody>{movements.map(m=><tr key={m.id} className="border-t dark:border-slate-800"><td className="px-4 py-3 whitespace-nowrap">{new Date(m.created_at).toLocaleString('id-ID')}</td><td className="px-4 py-3 font-bold dark:text-white">{m.item_name}</td><td className="px-4 py-3">{movementLabels[m.movement_type]||m.movement_type}</td><td className={`px-4 py-3 font-bold ${m.quantity>=0?'text-emerald-600':'text-rose-600'}`}>{m.quantity>=0?'+':''}{m.quantity} {m.unit}</td><td className="px-4 py-3">{m.stock_before} → {m.stock_after}</td><td className="px-4 py-3">{m.input_method}</td><td className="px-4 py-3">{m.actor_name}</td></tr>)}</tbody></table></div>}
+
+    {itemModal && <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><div className="absolute inset-0 bg-slate-950/60" onClick={()=>setItemModal(false)}/><form onSubmit={saveItem} className="relative bg-white dark:bg-slate-900 w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl p-6"><div className="flex justify-between"><h3 className="text-xl font-bold dark:text-white">{editingId?'Ubah':'Tambah'} Item Inventori</h3><button type="button" onClick={()=>setItemModal(false)}><X/></button></div><div className="grid md:grid-cols-2 gap-3 mt-5"><input required placeholder="Nama barang/bahan" value={itemForm.name} onChange={e=>setItemForm({...itemForm,name:e.target.value})} className="field"/><select value={itemForm.inventoryType} onChange={e=>setItemForm({...itemForm,inventoryType:e.target.value,category:e.target.value==='raw_material'?'Bahan Baku':'Minuman & Kemasan'})} className="field"><option value="raw_material">Bahan Resep</option><option value="packaged_product">Minuman/Barang Kemasan</option></select><input placeholder="SKU (otomatis bila kosong)" value={itemForm.sku} onChange={e=>setItemForm({...itemForm,sku:e.target.value})} className="field"/><input placeholder="Barcode" value={itemForm.barcode} onChange={e=>setItemForm({...itemForm,barcode:e.target.value})} className="field"/><input placeholder="Kategori" value={itemForm.category} onChange={e=>setItemForm({...itemForm,category:e.target.value})} className="field"/><input required placeholder="Satuan dasar: gram/ml/pcs" value={itemForm.unit} onChange={e=>setItemForm({...itemForm,unit:e.target.value})} className="field"/><input placeholder="Satuan beli: kg/dus/pack" value={itemForm.purchaseUnit} onChange={e=>setItemForm({...itemForm,purchaseUnit:e.target.value})} className="field"/><label className="text-xs text-slate-500">ISI PER SATUAN BELI<input type="number" min="0.001" step="any" value={itemForm.purchaseConversion} onChange={e=>setItemForm({...itemForm,purchaseConversion:Number(e.target.value)})} className="field mt-1"/></label><label className="text-xs text-slate-500">STOK AWAL<input type="number" min="0" step="any" disabled={!!editingId} value={itemForm.stock} onChange={e=>setItemForm({...itemForm,stock:Number(e.target.value)})} className="field mt-1"/></label><label className="text-xs text-slate-500">BATAS MENIPIS<input type="number" min="0" step="any" value={itemForm.minStock} onChange={e=>setItemForm({...itemForm,minStock:Number(e.target.value)})} className="field mt-1"/></label><label className="text-xs text-slate-500">BATAS KRITIS<input type="number" min="0" step="any" value={itemForm.criticalStock} onChange={e=>setItemForm({...itemForm,criticalStock:Number(e.target.value)})} className="field mt-1"/></label><label className="text-xs text-slate-500">HARGA BELI / UNIT DASAR<input type="number" min="0" value={itemForm.costPrice} onChange={e=>setItemForm({...itemForm,costPrice:Number(e.target.value)})} className="field mt-1"/></label><input placeholder="Supplier" value={itemForm.supplier} onChange={e=>setItemForm({...itemForm,supplier:e.target.value})} className="field md:col-span-2"/></div><button className="mt-5 w-full py-3 bg-indigo-600 text-white rounded-xl font-bold">Simpan Item</button></form></div>}
+
+    {cameraOpen && <div className="fixed inset-0 z-[60] bg-slate-950/90 flex flex-col items-center justify-center p-4"><button onClick={stopCamera} className="absolute top-5 right-5 text-white"><X size={28}/></button><h3 className="text-white font-bold mb-4">Arahkan kamera ke barcode</h3><video ref={videoRef} playsInline muted className="w-full max-w-xl rounded-2xl border-2 border-indigo-400"/><p className="text-slate-300 text-sm mt-4">Pemindaian berjalan otomatis.</p></div>}
+
+    <style>{`.field{width:100%;border:1px solid rgb(226 232 240);border-radius:.75rem;padding:.75rem 1rem;background:rgb(248 250 252);color:rgb(15 23 42)}.dark .field{background:rgb(2 6 23);border-color:rgb(51 65 85);color:white}`}</style>
+  </div>;
 }

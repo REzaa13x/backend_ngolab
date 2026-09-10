@@ -19,6 +19,8 @@ import { cn } from '@/src/lib/utils';
 import socket from '../lib/socket';
 import { getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
 import { authFetch } from '../lib/authFetch';
+import { playConfiguredKdsSound, unlockAudioContext } from '../lib/audioHelper';
+import { useSettings } from '../contexts/SettingsContext';
 
 interface KDSItem {
   id: string;
@@ -44,6 +46,7 @@ interface KDSOrder {
 
 export default function KDS() {
 
+  const { settings } = useSettings();
   const [orders, setOrders] = useState<KDSOrder[]>([]);
   const [selectedOutlet, setSelectedOutlet] = useState<'ngolab' | 'coworking'>('ngolab');
   const [lastOrderVoice, setLastOrderVoice] = useState(false);
@@ -73,10 +76,10 @@ export default function KDS() {
     window.dispatchEvent(new Event('sound_enabled_change'));
   }, [soundEnabled]);
 
-  const triggerBell = useCallback((type: 'new_order' | 'ready') => {
+  const triggerVisual = useCallback((type: 'new_order' | 'ready') => {
     setBellType(type);
     setLastOrderVoice(true);
-    setTimeout(() => {
+    window.setTimeout(() => {
       setLastOrderVoice(false);
       setBellType(null);
     }, 4000);
@@ -133,7 +136,7 @@ export default function KDS() {
         fetchOrders();
         if (!rungKdsNewOrders.current.has(newOrder.id)) {
           rungKdsNewOrders.current.add(newOrder.id);
-          triggerBell('new_order');
+          triggerVisual('new_order');
         }
       }
     };
@@ -146,14 +149,14 @@ export default function KDS() {
         fetchOrders();
         if (!rungKdsNewOrders.current.has(updatedOrder.id)) {
           rungKdsNewOrders.current.add(updatedOrder.id);
-          triggerBell('new_order');
+          triggerVisual('new_order');
         }
       } else if (bellType === 'ready') {
         // Koki selesai masak → pesanan siap diambil → chime melodik
         fetchOrders();
         if (!rungKdsReadyOrders.current.has(updatedOrder.id)) {
           rungKdsReadyOrders.current.add(updatedOrder.id);
-          triggerBell('ready');
+          triggerVisual('ready');
         }
       } else {
         // Update lainnya (dibatalkan, dll) → refresh saja
@@ -167,7 +170,7 @@ export default function KDS() {
       const releaseId = `po-${campaign.id}`;
       if (!rungKdsNewOrders.current.has(releaseId)) {
         rungKdsNewOrders.current.add(releaseId);
-        triggerBell('new_order');
+        triggerVisual('new_order');
       }
     };
 
@@ -180,7 +183,7 @@ export default function KDS() {
       cleanupOrders();
       socket.off('preorder_due', handlePreorderDue);
     };
-  }, [triggerBell, selectedOutlet]);
+  }, [triggerVisual, selectedOutlet]);
 
   const moveOrder = async (orderId: string, nextKdsStatus: 'queue' | 'cooking' | 'ready' | 'completed') => {
     // Map KDS status to API status
@@ -204,8 +207,9 @@ export default function KDS() {
             order.id === orderId ? { ...order, status: nextKdsStatus } : order
           ));
           // Bell chime saat koki sendiri menyelesaikan masak
-          if (nextKdsStatus === 'ready') {
-            triggerBell('ready');
+          if (nextKdsStatus === 'ready' && !rungKdsReadyOrders.current.has(orderId)) {
+            rungKdsReadyOrders.current.add(orderId);
+            triggerVisual('ready');
           }
         }
       }
@@ -284,6 +288,8 @@ export default function KDS() {
                     </div>
                     <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[9px] font-bold uppercase text-slate-600">{order.outlet || selectedOutlet}</span>
                     {order.orderType === 'preorder' && <span className="px-1.5 py-0.5 rounded bg-violet-50 text-[9px] font-bold text-violet-700">PO</span>}
+                    {order.orderType !== 'preorder' && order.paymentStatus !== 'lunas' && <span className="px-1.5 py-0.5 rounded bg-rose-50 text-[9px] font-bold text-rose-700">Belum lunas</span>}
+                    {order.orderType !== 'preorder' && order.paymentStatus === 'lunas' && <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-[9px] font-bold text-emerald-700">Lunas</span>}
                     {order.paymentTiming === 'before_pickup' && order.paymentStatus !== 'lunas' && <span className="px-1.5 py-0.5 rounded bg-rose-50 text-[9px] font-bold text-rose-700">Belum lunas</span>}
                     {order.paymentTiming === 'on_pickup' && order.paymentStatus !== 'lunas' && <span className="px-1.5 py-0.5 rounded bg-amber-50 text-[9px] font-bold text-amber-700">Bayar saat pengambilan</span>}
                   </div>
@@ -420,7 +426,14 @@ export default function KDS() {
           </div>
           {/* Tombol Mute Bell */}
           <button
-            onClick={() => setSoundEnabled(v => !v)}
+            onClick={async () => {
+              const enabled = !soundEnabled;
+              setSoundEnabled(enabled);
+              if (enabled) {
+                await unlockAudioContext();
+                await playConfiguredKdsSound('new_order', settings);
+              }
+            }}
             title={soundEnabled ? 'Matikan suara bell' : 'Aktifkan suara bell'}
             className={cn(
               "w-10 h-10 rounded-xl border flex items-center justify-center transition-all shadow-sm",

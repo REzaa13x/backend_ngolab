@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 
 interface AuditLog {
   id: number;
@@ -31,7 +32,7 @@ export default function AuditLogs() {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    fetch('/api/audit-logs')
+    authFetch('/api/audit-logs')
       .then(res => res.json())
       .then(data => {
         setLogs(data);

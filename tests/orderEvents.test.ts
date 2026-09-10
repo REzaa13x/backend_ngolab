@@ -1,21 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getOrderBellType, subscribeToOrderEvents } from '../src/lib/orderEvents.js';
+import { createOrderBellDeduper, getOrderBellType, subscribeToOrderEvents } from '../src/lib/orderEvents.js';
 
-test('pesanan lunas yang masuk antrean KDS membunyikan bell meski kapitalisasi status berbeda', () => {
+test('pesanan reguler langsung membunyikan bell meski kapitalisasi status pembayaran berbeda', () => {
   assert.equal(
-    getOrderBellType('order_updated', { id: '1', payment_status: 'lunas', status: 'Menunggu' }),
+    getOrderBellType('new_order', { id: '1', payment_status: 'lunas', status: 'Menunggu' }),
     'new_order'
   );
   assert.equal(
-    getOrderBellType('order_updated', { id: '2', payment_status: 'LUNAS', status: 'MENUNGGU' }),
+    getOrderBellType('new_order', { id: '2', payment_status: 'BELUM_BAYAR', status: 'MENUNGGU' }),
     'new_order'
   );
 });
 
-test('pesanan belum dibayar tidak membunyikan bell dapur', () => {
+test('pesanan belum dibayar tetap membunyikan bell dan langsung masuk dapur', () => {
   assert.equal(
     getOrderBellType('new_order', { id: '3', payment_status: 'belum_bayar', status: 'Menunggu' }),
+    'new_order'
+  );
+});
+
+test('verifikasi pembayaran tidak membunyikan bell kedua untuk pesanan yang sudah masuk dapur', () => {
+  assert.equal(
+    getOrderBellType('order_updated', { id: '3', payment_status: 'lunas', status: 'Menunggu' }),
     null
   );
 });
@@ -35,6 +42,15 @@ test('pelunasan PO sebelum waktu penyajian tidak membunyikan bell dapur', () => 
     }),
     null
   );
+});
+
+test('bell global hanya berbunyi sekali per pesanan dan jenis suara', () => {
+  const deduper = createOrderBellDeduper();
+  assert.equal(deduper.shouldRing('new_order', 'order-1'), true);
+  assert.equal(deduper.shouldRing('new_order', 'order-1'), false);
+  assert.equal(deduper.shouldRing('ready', 'order-1'), true);
+  assert.equal(deduper.shouldRing('ready', 'order-1'), false);
+  assert.equal(deduper.shouldRing('new_order', 'order-2'), true);
 });
 
 test('cleanup listener pesanan hanya melepas handler milik subscriber', () => {

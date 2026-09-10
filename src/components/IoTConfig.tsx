@@ -17,13 +17,17 @@ import {
   Square,
   Activity,
   Sun,
-  Moon
+  Moon,
+  BellRing,
+  Trash2
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSettings } from '../contexts/SettingsContext';
+import { authFetch } from '../lib/authFetch';
+import { playConfiguredKdsSound, unlockAudioContext } from '../lib/audioHelper';
 
-type ActiveTabSettings = 'brand' | 'sensor' | 'system';
+type ActiveTabSettings = 'brand' | 'sensor' | 'system' | 'sound' | 'loyalty';
 
 export default function IoTConfig() {
   const { settings, updateSettings, refreshSettings } = useSettings();
@@ -41,6 +45,11 @@ export default function IoTConfig() {
   const [kioskIdleTimeout, setKioskIdleTimeout] = useState(settings.kiosk_idle_timeout);
   const [kioskMode, setKioskMode] = useState(settings.kiosk_mode);
   const [maintenanceMode, setMaintenanceMode] = useState(settings.maintenance_mode === '1');
+  const [kdsSoundEnabled, setKdsSoundEnabled] = useState(settings.kds_sound_enabled !== '0');
+  const [kdsSoundVolume, setKdsSoundVolume] = useState([Number(settings.kds_sound_volume || 100)]);
+  const [uploadingSound, setUploadingSound] = useState<'new_order' | 'ready' | null>(null);
+  const [coinRewardRate, setCoinRewardRate] = useState(settings.coin_reward_rate || '0.001');
+
 
   // Saving Status
   const [isSaving, setIsSaving] = useState(false);
@@ -62,6 +71,9 @@ export default function IoTConfig() {
     setKioskIdleTimeout(settings.kiosk_idle_timeout);
     setKioskMode(settings.kiosk_mode);
     setMaintenanceMode(settings.maintenance_mode === '1');
+    setKdsSoundEnabled(settings.kds_sound_enabled !== '0');
+    setKdsSoundVolume([Number(settings.kds_sound_volume || 100)]);
+    setCoinRewardRate(settings.coin_reward_rate || '0.001');
   }, [settings]);
 
 
@@ -134,6 +146,48 @@ export default function IoTConfig() {
   };
 
 
+  const handleSoundUpload = async (type: 'new_order' | 'ready', file?: File) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('Ukuran suara maksimal 5 MB.'); return; }
+    setUploadingSound(type);
+    try {
+      const formData = new FormData();
+      formData.append('sound', file);
+      formData.append('type', type);
+      const response = await authFetch('/api/settings/upload-kds-sound', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Upload suara gagal.');
+      await refreshSettings();
+      setSaveMessage(type === 'new_order' ? 'Suara pesanan masuk berhasil diunggah!' : 'Suara pesanan siap berhasil diunggah!');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error: any) {
+      alert(error.message || 'Upload suara gagal.');
+    } finally {
+      setUploadingSound(null);
+    }
+  };
+
+  const testKdsSound = async (type: 'new_order' | 'ready') => {
+    await unlockAudioContext();
+    await playConfiguredKdsSound(type, {
+      ...settings,
+      kds_sound_enabled: kdsSoundEnabled ? '1' : '0',
+      kds_sound_volume: String(kdsSoundVolume[0])
+    });
+  };
+
+  const resetKdsSound = async (type: 'new_order' | 'ready') => {
+    const response = await authFetch(`/api/settings/kds-sound/${type}`, { method: 'DELETE' });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      await refreshSettings();
+      setSaveMessage(data.message || 'Suara dikembalikan ke bell bawaan.');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } else {
+      alert(data.message || 'Gagal mereset suara.');
+    }
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     setSaveMessage('');
@@ -152,6 +206,10 @@ export default function IoTConfig() {
         kiosk_idle_timeout: kioskIdleTimeout,
         kiosk_mode: kioskMode,
         maintenance_mode: maintenanceMode ? '1' : '0',
+        kds_sound_enabled: kdsSoundEnabled ? '1' : '0',
+        kds_sound_volume: String(kdsSoundVolume[0]),
+        kds_new_order_sound_url: settings.kds_new_order_sound_url,
+        kds_ready_sound_url: settings.kds_ready_sound_url,
         sidebar_bg_color: settings.sidebar_bg_color,
         sidebar_text_color: settings.sidebar_text_color,
         sidebar_active_bg_color: settings.sidebar_active_bg_color,
@@ -160,7 +218,8 @@ export default function IoTConfig() {
         sidebar_hover_bg_color: settings.sidebar_hover_bg_color,
         sidebar_hover_text_color: settings.sidebar_hover_text_color,
         sidebar_logo_text_color: settings.sidebar_logo_text_color,
-        sidebar_section_text_color: settings.sidebar_section_text_color
+        sidebar_section_text_color: settings.sidebar_section_text_color,
+        coin_reward_rate: coinRewardRate
       };
 
       const success = await updateSettings(newSettings);
@@ -192,7 +251,12 @@ export default function IoTConfig() {
         kiosk_mode: 'gesture',
         receipt_footer: 'Terima kasih atas kunjungan Anda!',
         maintenance_mode: '0',
-        theme_mode: 'light'
+        theme_mode: 'light',
+        kds_sound_enabled: '1',
+        kds_sound_volume: '100',
+        kds_new_order_sound_url: '',
+        kds_ready_sound_url: '',
+        coin_reward_rate: '0.001'
       };
 
       const success = await updateSettings(defaults);
@@ -206,6 +270,8 @@ export default function IoTConfig() {
         setKioskIdleTimeout(defaults.kiosk_idle_timeout);
         setKioskMode(defaults.kiosk_mode);
         setMaintenanceMode(false);
+        setKdsSoundEnabled(true);
+        setKdsSoundVolume([100]);
         setSaveMessage('Pengaturan di-reset ke default pabrik!');
         refreshSettings();
         setTimeout(() => setSaveMessage(''), 3000);
@@ -259,7 +325,7 @@ export default function IoTConfig() {
         </div>
 
         {/* Dashboard Tabs */}
-        <div className="flex border-b border-slate-100 gap-1 p-1 bg-slate-50 rounded-2xl w-fit border">
+        <div className="flex flex-wrap border-b border-slate-100 gap-1 p-1 bg-slate-50 rounded-2xl w-fit border">
           <button
             onClick={() => setActiveTab('brand')}
             className={cn(
@@ -295,6 +361,30 @@ export default function IoTConfig() {
           >
             <Laptop size={16} />
             Sistem Kiosk
+          </button>
+          <button
+            onClick={() => setActiveTab('sound')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all",
+              activeTab === 'sound'
+                ? "bg-white text-indigo-600 shadow-sm border border-slate-100"
+                : "text-slate-400 hover:text-slate-700"
+            )}
+          >
+            <BellRing size={16} />
+            Suara KDS
+          </button>
+          <button
+            onClick={() => setActiveTab('loyalty')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all",
+              activeTab === 'loyalty'
+                ? "bg-white text-indigo-600 shadow-sm border border-slate-100"
+                : "text-slate-400 hover:text-slate-700"
+            )}
+          >
+            <Target size={16} />
+            Loyalty Program
           </button>
         </div>
 
@@ -685,6 +775,77 @@ export default function IoTConfig() {
                         </span>
                       </div>
                     </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* KDS SOUND CONFIGURATION */}
+            {activeTab === 'sound' && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white border border-slate-100 rounded-3xl p-8 space-y-7 shadow-premium"
+              >
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><BellRing className="text-indigo-600"/> Suara Tampilan Dapur</h3>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Atur suara pesanan masuk dan pesanan siap. Format: MP3, WAV, OGG, M4A, atau WebM; maksimal 5 MB.</p>
+                </div>
+
+                <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div><p className="font-bold text-slate-800">Aktifkan suara KDS</p><p className="text-xs text-slate-400">Perangkat dapur masih dapat dimute secara lokal.</p></div>
+                  <button type="button" onClick={() => setKdsSoundEnabled(value => !value)} className={cn('w-14 h-8 rounded-full p-1 transition-colors', kdsSoundEnabled ? 'bg-emerald-500' : 'bg-slate-300')}><span className={cn('block w-6 h-6 rounded-full bg-white shadow transition-transform', kdsSoundEnabled && 'translate-x-6')} /></button>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-2"><span className="text-slate-500">Volume suara</span><span className="text-indigo-600">{kdsSoundVolume[0]}%</span></div>
+                  <input type="range" min="0" max="100" step="5" value={kdsSoundVolume[0]} onChange={event => setKdsSoundVolume([Number(event.target.value)])} className="w-full accent-indigo-600" />
+                </div>
+
+                {([
+                  { type: 'new_order' as const, title: 'Pesanan Masuk', description: 'Diputar ketika pesanan lunas masuk ke antrean dapur.', url: settings.kds_new_order_sound_url },
+                  { type: 'ready' as const, title: 'Pesanan Siap', description: 'Diputar ketika pesanan selesai dimasak dan siap diambil.', url: settings.kds_ready_sound_url }
+                ]).map(sound => (
+                  <div key={sound.type} className="p-5 rounded-2xl border border-slate-200 space-y-4">
+                    <div className="flex items-start justify-between gap-4"><div><p className="font-bold text-slate-900">{sound.title}</p><p className="text-xs text-slate-400 mt-1">{sound.description}</p></div><span className={cn('px-2 py-1 rounded-full text-[10px] font-black', sound.url ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500')}>{sound.url ? 'KUSTOM' : 'BAWAAN'}</span></div>
+                    {sound.url && <audio controls preload="metadata" src={sound.url} className="w-full h-10" />}
+                    <div className="flex flex-wrap gap-2">
+                      <label className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold cursor-pointer flex items-center gap-2"><UploadCloud size={15}/>{uploadingSound === sound.type ? 'Mengunggah...' : 'Upload Suara'}<input type="file" accept="audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/webm,.mp3,.wav,.ogg,.m4a,.webm" disabled={uploadingSound !== null} className="hidden" onChange={event => handleSoundUpload(sound.type, event.target.files?.[0])}/></label>
+                      <button type="button" onClick={() => testKdsSound(sound.type)} className="px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold flex items-center gap-2"><Play size={15}/> Tes Suara</button>
+                      {sound.url && <button type="button" onClick={() => resetKdsSound(sound.type)} className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-600 text-xs font-bold flex items-center gap-2"><Trash2 size={15}/> Gunakan Bawaan</button>}
+                    </div>
+                  </div>
+                ))}
+
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-100 text-amber-800 text-xs leading-relaxed"><strong>Catatan browser:</strong> Setelah membuka Tampilan Dapur, klik satu kali tombol suara atau area halaman agar browser mengizinkan pemutaran otomatis.</div>
+              </motion.div>
+            )}
+
+            {/* TAB: LOYALTY CONFIGURATION */}
+            {activeTab === 'loyalty' && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white border border-slate-100 rounded-3xl p-8 space-y-7 shadow-premium"
+              >
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Target className="text-indigo-600"/> Program Loyalty & Poin</h3>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Konfigurasi pemberian poin koin otomatis setiap pelanggan bertransaksi di aplikasi.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Rate Poin (poin per Rp 1)</label>
+                    <input 
+                      type="number" 
+                      step="0.001"
+                      min="0"
+                      max="0.1"
+                      value={coinRewardRate}
+                      onChange={e => setCoinRewardRate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-bold"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-2">Rekomendasi: 0.001 = 1 poin setiap Rp 1.000. Contoh 0.005 = 5 poin setiap Rp 1.000 (0,5% nilai transaksi). Maksimal 0.1 untuk mencegah pemberian poin tidak sengaja terlalu besar.</p>
                   </div>
                 </div>
               </motion.div>

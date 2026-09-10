@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+scratch/
+.hermes/
+backups/
+Laporan_Pengujian_Perangkat_Lunak_Tangolab.docx
+Laporan_Pengujian_Perangkat_Lunak_Tangolab.md
+.npmrc

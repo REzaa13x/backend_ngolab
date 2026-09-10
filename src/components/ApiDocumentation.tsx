@@ -1,315 +1,240 @@
-import React, { useState } from 'react';
-import { 
-  Key, 
-  Copy, 
-  RefreshCw, 
-  EyeOff, 
-  Eye, 
-  AlertCircle, 
-  Info,
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  AlertCircle,
   Check,
-  Webhook,
+  Copy,
+  Key,
   Lock,
-  X,
-  AlertTriangle
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  Webhook,
+  X
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
+import { authFetch } from '../lib/authFetch';
+
+type ApiScope = 'orders:read' | 'orders:write' | 'menu:read';
+
+type ApiKeyRecord = {
+  id: number;
+  name: string;
+  key_prefix: string;
+  masked_key: string;
+  scopes: ApiScope[];
+  is_active: boolean;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+};
+
+const scopeOptions: Array<{ value: ApiScope; label: string; description: string }> = [
+  { value: 'orders:read', label: 'Baca pesanan', description: 'Riwayat dan pesanan yang sedang masuk.' },
+  { value: 'orders:write', label: 'Kirim pesanan', description: 'Membuat pesanan dari sistem mitra.' },
+  { value: 'menu:read', label: 'Baca menu', description: 'Daftar menu, harga, stok, dan outlet.' }
+];
+
+const endpointDocs = [
+  { method: 'GET', path: '/api/menu/external', scope: 'menu:read', description: 'Mengambil menu lokal Ngolab/Coworking.' },
+  { method: 'GET', path: '/api/orders/external/history', scope: 'orders:read', description: 'Mengambil maksimal 100 riwayat pesanan.' },
+  { method: 'GET', path: '/api/orders/external/incoming', scope: 'orders:read', description: 'Mengambil pesanan aktif untuk integrasi.' },
+  { method: 'POST', path: '/api/orders/external', scope: 'orders:write', description: 'Mengirim pesanan baru ke Ngolab.' }
+];
 
 export default function ApiDocumentation() {
-  const [apiKey, setApiKey] = useState('uni_34880212ff12d264c6a8a495ed3b58197ad8d8bdb78230c1');
-  const [showKey, setShowKey] = useState(false);
-  const [urlProd, setUrlProd] = useState('https://api-cms.uniinside.net');
-  const [copiedUrlProd, setCopiedUrlProd] = useState(false);
-  const [copiedKey, setCopiedKey] = useState(false);
-
-  // Modals state
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
+  const [name, setName] = useState('');
   const [password, setPassword] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
+  const [scopes, setScopes] = useState<ApiScope[]>(['orders:read', 'orders:write', 'menu:read']);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [oneTimeKey, setOneTimeKey] = useState('');
+  const [copied, setCopied] = useState('');
+  const [pendingAction, setPendingAction] = useState<{ type: 'regenerate' | 'revoke'; key: ApiKeyRecord } | null>(null);
+  const [actionPassword, setActionPassword] = useState('');
 
-  const handleCopy = (text: string, setCopied: React.Dispatch<React.SetStateAction<boolean>>) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  const baseUrl = window.location.origin;
 
-  const initiateRegenerate = () => {
-    setPassword('');
-    setPasswordError('');
-    setShowPasswordModal(true);
-  };
-
-  const handleVerifyPassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password) {
-      setPasswordError('Password tidak boleh kosong.');
-      return;
+  const loadKeys = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const response = await authFetch('/api/api-keys');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Gagal memuat API Key.');
+      setKeys(Array.isArray(data) ? data : []);
+    } catch (requestError: any) {
+      setError(requestError.message || 'Gagal memuat API Key.');
+    } finally {
+      setLoading(false);
     }
-    
-    setIsVerifying(true);
-    setPasswordError('');
+  }, []);
 
-    // Simulate API call for password verification
-    setTimeout(() => {
-      setIsVerifying(false);
-      // Dummy check: For demo purposes, we accept "admin123"
-      if (password === 'admin123') {
-        setShowPasswordModal(false);
-        setTimeout(() => {
-          setShowConfirmModal(true);
-        }, 150); // Small delay for smoother transition between modals
-      } else {
-        setPasswordError('Password tidak valid. Silakan coba lagi. (hint: admin123)');
-      }
-    }, 800);
+  useEffect(() => { loadKeys(); }, [loadKeys]);
+
+  const copyText = async (label: string, value: string) => {
+    await navigator.clipboard.writeText(value);
+    setCopied(label);
+    setTimeout(() => setCopied(''), 1800);
   };
 
-  const confirmRegenerate = () => {
-    // Dummy regeneration logic
-    const newKey = 'uni_' + Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join('');
-    setApiKey(newKey);
-    setShowConfirmModal(false);
+  const toggleScope = (scope: ApiScope) => {
+    setScopes(current => current.includes(scope) ? current.filter(item => item !== scope) : [...current, scope]);
+  };
+
+  const createKey = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await authFetch('/api/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, password, scopes })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Gagal membuat API Key.');
+      setOneTimeKey(data.api_key);
+      setName('');
+      setPassword('');
+      setMessage(data.message);
+      await loadKeys();
+    } catch (requestError: any) {
+      setError(requestError.message || 'Gagal membuat API Key.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitKeyAction = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!pendingAction) return;
+    setSubmitting(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await authFetch(`/api/api-keys/${pendingAction.key.id}/${pendingAction.type}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: actionPassword })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Aksi API Key gagal.');
+      if (data.api_key) setOneTimeKey(data.api_key);
+      setMessage(data.message);
+      setPendingAction(null);
+      setActionPassword('');
+      await loadKeys();
+    } catch (requestError: any) {
+      setError(requestError.message || 'Aksi API Key gagal.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <div className="space-y-8 pb-12">
       <div>
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Panduan Integrasi API</h2>
-        <p className="text-slate-500 dark:text-slate-400">Pelajari cara menghubungkan dan mengintegrasikan frontend Anda ke API sistem.</p>
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">API & Integrasi</h2>
+        <p className="text-slate-500 dark:text-slate-400">Buat credential terpisah untuk setiap sistem mitra. Key lengkap hanya ditampilkan sekali.</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* URL Dasar API Publik */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden flex flex-col">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/10 dark:bg-orange-500/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
-          
-          <div className="relative z-10 flex flex-col h-full">
-            <div className="flex items-center gap-3 mb-6">
-              <Webhook className="text-orange-500" />
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white">URL Dasar API Publik</h3>
-            </div>
-            <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">Semua endpoint relatif terhadap URL dasar berikut.</p>
+      {(error || message) && (
+        <div className={`rounded-xl border p-4 flex gap-3 ${error ? 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-500/10 dark:border-rose-500/20 dark:text-rose-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400'}`}>
+          {error ? <AlertCircle size={20} /> : <Check size={20} />}
+          <p className="text-sm font-medium">{error || message}</p>
+        </div>
+      )}
 
-            <div className="space-y-6 mb-auto">
-              {/* URL Produksi */}
-              <div>
-                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">URL NGOLAB (PRODUKSI)</label>
-                <div className="flex bg-slate-50 dark:bg-slate-950 rounded-xl p-1 items-center border border-slate-200 dark:border-slate-800 focus-within:border-orange-500 focus-within:ring-1 focus-within:ring-orange-500 transition-all">
-                  <input
-                    type="text"
-                    value={urlProd}
-                    onChange={(e) => setUrlProd(e.target.value)}
-                    className="flex-1 bg-transparent px-4 py-2 font-mono text-sm text-slate-900 dark:text-orange-400 focus:outline-none w-full"
-                  />
-                  <button 
-                    onClick={() => handleCopy(urlProd, setCopiedUrlProd)}
-                    className="p-3 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-white/10 rounded-lg transition-colors shrink-0"
-                  >
-                    {copiedUrlProd ? <Check size={18} className="text-emerald-500" /> : <Copy size={18} />}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 space-y-4">
-              <div className="bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-xl p-4 flex gap-3 text-emerald-700 dark:text-emerald-400">
-                <Info className="w-5 h-5 shrink-0 mt-0.5" />
-                <p className="text-sm leading-relaxed">Pastikan URL CMS disesuaikan dengan environment yang Anda gunakan saat ini.</p>
-              </div>
-
-              <div className="bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 rounded-xl p-4 flex gap-3 text-orange-700 dark:text-orange-400">
-                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-bold mb-1">TIPS: KEBUTUHAN HEADERS</p>
-                  <p className="text-sm text-orange-700/80 dark:text-orange-400/80 leading-relaxed">Hampir semua permintaan membutuhkan header <code className="bg-orange-100 dark:bg-orange-500/20 px-1.5 py-0.5 rounded text-orange-800 dark:text-orange-300">x-api-key</code> untuk mengautentikasi aplikasi frontend.</p>
-                </div>
-              </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <section className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex items-center gap-3 mb-5">
+            <Webhook className="text-orange-500" />
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">URL Dasar Backend</h3>
+              <p className="text-xs text-slate-500">Gunakan dari backend mitra, bukan langsung dari browser.</p>
             </div>
           </div>
-        </div>
+          <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-2">
+            <code className="flex-1 px-2 text-sm text-slate-800 dark:text-slate-200 overflow-x-auto">{baseUrl}</code>
+            <button onClick={() => copyText('base', baseUrl)} className="p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800" title="Salin URL">
+              {copied === 'base' ? <Check size={18} className="text-emerald-500" /> : <Copy size={18} />}
+            </button>
+          </div>
+          <div className="mt-4 bg-orange-50 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 rounded-xl p-4 text-sm text-orange-800 dark:text-orange-300">
+            Sertakan header <code className="font-bold">x-api-key</code> pada setiap permintaan integrasi.
+          </div>
+        </section>
 
-        {/* Manajemen API Key */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
-
-          <div className="relative z-10 flex flex-col h-full">
-            <div className="flex items-center gap-3 mb-2">
-              <Key className="text-orange-500" />
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Manajemen API Key</h3>
-            </div>
-            <p className="text-slate-500 dark:text-slate-400 text-sm mb-8">Kelola API key yang dibutuhkan untuk otorisasi frontend.</p>
-
-            <div className="mb-6">
-              <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">KEY SAAT INI</label>
-              <div className="relative">
-                <input 
-                  type={showKey ? "text" : "password"}
-                  value={apiKey}
-                  readOnly
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl pl-4 pr-12 py-3 text-sm font-mono text-slate-900 dark:text-slate-300 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
-                />
-                <button 
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-                >
-                  {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mb-auto">
-              <button 
-                onClick={() => handleCopy(apiKey, setCopiedKey)}
-                className="flex-1 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors border border-transparent dark:border-slate-700"
-              >
-                {copiedKey ? <Check size={18} /> : <Copy size={18} />}
-                {copiedKey ? 'Tersalin!' : 'Salin Key'}
-              </button>
-              <button 
-                onClick={initiateRegenerate}
-                title="Regenerasi API Key"
-                className="bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-500 p-3 rounded-xl border border-rose-100 dark:border-rose-500/20 transition-colors shrink-0"
-              >
-                <RefreshCw size={20} />
-              </button>
-            </div>
-
-            <div className="mt-8 bg-amber-50 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-500/20 rounded-xl p-4 flex gap-3 text-amber-800 dark:text-amber-500">
-              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-500" />
-              <p className="text-sm leading-relaxed"><strong className="font-bold">Catatan:</strong> Meregenerasi API Key akan langsung menonaktifkan key sebelumnya. Pastikan Anda memperbarui variabel lingkungan frontend Anda segera setelah regenerasi.</p>
+        <form onSubmit={createKey} className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex items-center gap-3 mb-5">
+            <Plus className="text-indigo-500" />
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white">Buat API Key</h3>
+              <p className="text-xs text-slate-500">Satu key untuk satu aplikasi atau mitra.</p>
             </div>
           </div>
-        </div>
+          <div className="space-y-4">
+            <input value={name} onChange={event => setName(event.target.value)} placeholder="Nama integrasi, contoh: Smart Tag" className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm dark:text-white" required minLength={2} maxLength={100} />
+            <div className="grid gap-2">
+              {scopeOptions.map(option => (
+                <label key={option.value} className="flex gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3 cursor-pointer">
+                  <input type="checkbox" checked={scopes.includes(option.value)} onChange={() => toggleScope(option.value)} />
+                  <span><span className="block text-sm font-bold text-slate-800 dark:text-slate-200">{option.label}</span><span className="block text-xs text-slate-500">{option.description}</span></span>
+                </label>
+              ))}
+            </div>
+            <div className="relative">
+              <Lock size={17} className="absolute left-3 top-3.5 text-slate-400" />
+              <input type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder="Password Super Admin" className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 pl-10 pr-4 py-3 text-sm dark:text-white" required />
+            </div>
+            <button disabled={submitting || scopes.length === 0} className="w-full rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-3 flex items-center justify-center gap-2">
+              <Key size={18} /> {submitting ? 'Membuat...' : 'Generate API Key'}
+            </button>
+          </div>
+        </form>
       </div>
 
-      {/* Modals */}
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+          <div><h3 className="font-bold text-slate-900 dark:text-white">Credential Integrasi</h3><p className="text-xs text-slate-500 mt-1">Key mentah tidak disimpan dan tidak bisa dilihat kembali.</p></div>
+          <button onClick={loadKeys} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" title="Muat ulang"><RefreshCw size={18} /></button>
+        </div>
+        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          {loading && <p className="p-6 text-sm text-slate-500">Memuat credential...</p>}
+          {!loading && keys.length === 0 && <p className="p-6 text-sm text-slate-500">Belum ada API Key. Buat key pertama untuk sistem teman Anda.</p>}
+          {!loading && keys.map(key => (
+            <div key={key.id} className="p-5 flex flex-col lg:flex-row lg:items-center gap-4">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${key.is_active ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10' : 'bg-slate-100 text-slate-400 dark:bg-slate-800'}`}><ShieldCheck size={20} /></div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2"><h4 className="font-bold text-slate-900 dark:text-white">{key.name}</h4><span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${key.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{key.is_active ? 'AKTIF' : 'DICABUT'}</span></div>
+                <code className="text-xs text-slate-500">{key.masked_key}</code>
+                <p className="text-xs text-slate-400 mt-1">Izin: {key.scopes.join(', ')} · Terakhir dipakai: {key.last_used_at ? new Date(key.last_used_at).toLocaleString('id-ID') : 'Belum pernah'}</p>
+              </div>
+              {key.is_active && <div className="flex gap-2">
+                <button onClick={() => { setPendingAction({ type: 'regenerate', key }); setActionPassword(''); }} className="px-3 py-2 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 text-sm font-bold flex items-center gap-2"><RefreshCw size={15} /> Regenerasi</button>
+                <button onClick={() => { setPendingAction({ type: 'revoke', key }); setActionPassword(''); }} className="px-3 py-2 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 text-sm font-bold flex items-center gap-2"><Trash2 size={15} /> Cabut</button>
+              </div>}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-200 dark:border-slate-800"><h3 className="font-bold text-slate-900 dark:text-white">Endpoint Integrasi</h3></div>
+        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          {endpointDocs.map(endpoint => <div key={`${endpoint.method}-${endpoint.path}`} className="p-4 grid grid-cols-1 md:grid-cols-[70px_1fr_150px] gap-3 items-center text-sm"><span className={`font-bold ${endpoint.method === 'POST' ? 'text-orange-600' : 'text-emerald-600'}`}>{endpoint.method}</span><div><code className="text-slate-900 dark:text-slate-100">{endpoint.path}</code><p className="text-xs text-slate-500 mt-1">{endpoint.description}</p></div><span className="text-xs font-mono text-indigo-600">{endpoint.scope}</span></div>)}
+        </div>
+      </section>
+
       <AnimatePresence>
-        {showPasswordModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
-              onClick={() => !isVerifying && setShowPasswordModal(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl overflow-hidden"
-            >
-              <div className="flex items-center justify-between p-6 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-3 text-slate-900 dark:text-white">
-                  <Lock className="w-5 h-5 text-indigo-500" />
-                  <h3 className="text-lg font-bold">Verifikasi Keamanan</h3>
-                </div>
-                <button 
-                  onClick={() => setShowPasswordModal(false)}
-                  disabled={isVerifying}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-50"
-                >
-                  <X size={20} />
-                </button>
-              </div>
+        {oneTimeKey && <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" /><motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="relative w-full max-w-xl bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-2xl"><div className="flex justify-between gap-4"><div><h3 className="text-xl font-bold dark:text-white">Simpan API Key Sekarang</h3><p className="text-sm text-amber-600 mt-1">Key lengkap hanya ditampilkan sekali dan tidak dapat dipulihkan.</p></div><button onClick={() => setOneTimeKey('')}><X size={20} /></button></div><div className="mt-5 flex gap-2 bg-slate-950 rounded-xl p-3"><code className="text-emerald-400 text-xs flex-1 break-all">{oneTimeKey}</code><button onClick={() => copyText('secret', oneTimeKey)} className="text-white p-2">{copied === 'secret' ? <Check size={18} /> : <Copy size={18} />}</button></div><button onClick={() => setOneTimeKey('')} className="mt-5 w-full bg-indigo-600 text-white rounded-xl py-3 font-bold">Saya Sudah Menyimpan Key</button></motion.div></div>}
 
-              <form onSubmit={handleVerifyPassword} className="p-6">
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                  Untuk melanjutkan proses regenerasi API Key, silakan masukkan password akun admin Anda.
-                </p>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-                      PASSWORD
-                    </label>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={isVerifying}
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-slate-900 dark:text-white"
-                      placeholder="Masukkan password admin"
-                      autoFocus
-                    />
-                    {passwordError && (
-                      <p className="text-xs text-rose-500 mt-2 flex items-center gap-1">
-                        <AlertCircle size={14} />
-                        {passwordError}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      disabled={isVerifying}
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-colors disabled:opacity-70 flex justify-center items-center gap-2"
-                    >
-                      {isVerifying ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                          Memverifikasi...
-                        </>
-                      ) : (
-                        'Lanjutkan'
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-
-        {showConfirmModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
-              onClick={() => setShowConfirmModal(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl overflow-hidden"
-            >
-              <div className="p-6 flex flex-col items-center text-center">
-                <div className="w-16 h-16 bg-rose-50 dark:bg-rose-500/10 rounded-full flex items-center justify-center mb-6">
-                  <AlertTriangle className="w-8 h-8 text-rose-500" />
-                </div>
-                
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
-                  Regenerasi API Key?
-                </h3>
-                
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
-                  Tindakan ini akan membuat <strong className="text-slate-900 dark:text-white">API Key saat ini menjadi tidak valid</strong>. Semua sistem atau frontend yang menggunakan key lama akan terputus hingga Anda memperbaruinya dengan key yang baru.
-                </p>
-
-                <div className="flex gap-3 w-full">
-                  <button
-                    onClick={() => setShowConfirmModal(false)}
-                    className="flex-1 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl transition-colors"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    onClick={confirmRegenerate}
-                    className="flex-1 px-4 py-3 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-colors"
-                  >
-                    Ya, Regenerasi
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        {pendingAction && <div className="fixed inset-0 z-50 flex items-center justify-center p-4"><motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={() => !submitting && setPendingAction(null)} /><motion.form onSubmit={submitKeyAction} initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }} className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-2xl"><h3 className="text-xl font-bold dark:text-white">{pendingAction.type === 'regenerate' ? 'Regenerasi' : 'Cabut'} “{pendingAction.key.name}”?</h3><p className="text-sm text-slate-500 mt-2">Masukkan password Super Admin. {pendingAction.type === 'regenerate' ? 'Key lama akan langsung tidak berlaku.' : 'Integrasi ini akan langsung kehilangan akses.'}</p><input type="password" value={actionPassword} onChange={event => setActionPassword(event.target.value)} placeholder="Password Super Admin" autoFocus required className="mt-5 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-4 py-3 text-sm dark:text-white" /><div className="flex gap-3 mt-5"><button type="button" onClick={() => setPendingAction(null)} className="flex-1 bg-slate-100 dark:bg-slate-800 rounded-xl py-3 font-bold">Batal</button><button disabled={submitting} className={`flex-1 text-white rounded-xl py-3 font-bold ${pendingAction.type === 'regenerate' ? 'bg-amber-600' : 'bg-rose-600'}`}>{submitting ? 'Memproses...' : 'Konfirmasi'}</button></div></motion.form></div>}
       </AnimatePresence>
     </div>
   );

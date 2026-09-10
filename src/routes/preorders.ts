@@ -1,5 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { db, addAuditLog } from '../db/db.js';
 import {
   aggregatePreorderItems,
@@ -15,8 +18,10 @@ import {
   requireAuthenticated,
   requireRoles
 } from '../middleware/authSession.js';
+import { detectMediaFile } from '../lib/mediaFile.js';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 const requirePreorderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
 const validOutlets = new Set(['ngolab', 'coworking']);
 const validPaymentTimings = new Set(['before_pickup', 'on_pickup']);
@@ -48,6 +53,25 @@ async function loadCampaigns(where = '', params: any[] = []) {
     items.filter((item: any) => item.campaign_id === campaign.id)
   ));
 }
+
+router.post('/upload-image', requirePreorderStaff, upload.single('image'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'File foto wajib dipilih.' });
+    const detected = detectMediaFile(req.file.buffer.subarray(0, 16));
+    if (!detected || detected.fileType !== 'image') {
+      return res.status(400).json({ message: 'File harus berupa JPG, PNG, GIF, atau WEBP yang valid.' });
+    }
+    const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'preorders');
+    fs.mkdirSync(uploadDir, { recursive: true });
+    const filename = `preorder-${randomUUID()}${detected.extension}`;
+    fs.writeFileSync(path.join(uploadDir, filename), req.file.buffer);
+    const url = `/uploads/preorders/${filename}`;
+    await addAuditLog((req as any).auth?.name || 'Admin', 'Upload Foto Menu PO', filename);
+    res.status(201).json({ message: 'Foto menu PO berhasil diunggah.', url });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Gagal mengunggah foto menu PO', error: error.message });
+  }
+});
 
 router.get('/admin', requirePreorderStaff, async (req: Request, res: Response) => {
   try {
@@ -161,6 +185,31 @@ router.post('/', requirePreorderStaff, async (req: Request, res: Response) => {
   }
 });
 
+router.put('/:id', requirePreorderStaff, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
+  try {
+    const { name, description, outlet, order_start_at, order_deadline_at, service_at, items = [] } = req.body;
+    if (!name || !validOutlets.has(outlet) || !order_start_at || !order_deadline_at || !service_at) return res.status(400).json({ message: 'Nama, outlet, periode PO, deadline, dan waktu penyajian wajib diisi' });
+    const start = new Date(order_start_at); const deadline = new Date(order_deadline_at); const service = new Date(service_at);
+    if (![start, deadline, service].every(date => Number.isFinite(date.getTime())) || !(start < deadline && deadline < service)) return res.status(400).json({ message: 'Urutan waktu harus: mulai PO < deadline < waktu penyajian' });
+    const [existingOrders]: any = await db.query('SELECT id FROM orders WHERE preorder_campaign_id = ? LIMIT 1', [req.params.id]);
+    if (existingOrders.length && Array.isArray(items) && items.length) return res.status(409).json({ message: 'Menu, harga, dan kuota tidak dapat diubah setelah program memiliki pesanan' });
+    await connection.beginTransaction();
+    await connection.query('UPDATE preorder_campaigns SET name = ?, description = ?, outlet = ?, order_start_at = ?, order_deadline_at = ?, service_at = ? WHERE id = ?', [name.trim(), description || '', outlet, start, deadline, service, req.params.id]);
+    if (!existingOrders.length && Array.isArray(items) && items.length) {
+      for (const item of items) if (!item.name || Number(item.price) <= 0 || Number(item.quota_total) <= 0) { await connection.rollback(); return res.status(400).json({ message: 'Nama, harga, dan kuota menu PO harus valid' }); }
+      await connection.query('DELETE FROM preorder_items WHERE campaign_id = ?', [req.params.id]);
+      for (const item of items) await connection.query('INSERT INTO preorder_items (id, campaign_id, name, category, price, quota_total, image_url, description, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)', [randomUUID(), req.params.id, item.name.trim(), item.category || 'PO', Number(item.price), Number(item.quota_total), item.image_url || '', item.description || '']);
+    }
+    await connection.commit();
+    await addAuditLog(getVerifiedActor(req), 'Edit Program PO', `${name} (${outlet})`);
+    const [campaign] = await loadCampaigns('WHERE id = ?', [req.params.id]);
+    if (!campaign) return res.status(404).json({ message: 'Program PO tidak ditemukan' });
+    res.json(campaign);
+  } catch (error: any) { await connection.rollback(); res.status(500).json({ message: 'Gagal mengedit program PO', error: error.message }); }
+  finally { connection.release(); }
+});
+
 router.patch('/:id/toggle', requirePreorderStaff, async (req: Request, res: Response) => {
   try {
     const [result]: any = await db.query('UPDATE preorder_campaigns SET is_active = NOT is_active WHERE id = ?', [req.params.id]);
@@ -188,7 +237,7 @@ router.delete('/:id', requirePreorderStaff, async (req: Request, res: Response) 
 router.post('/:campaignId/orders', requireAuthenticated, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
-    const { customer_name, items, payment_timing, payment_method } = req.body;
+    const { customer_name, customer_phone, items, payment_timing, payment_method } = req.body;
     if (!customer_name || !Array.isArray(items) || !items.length || !validPaymentTimings.has(payment_timing)) {
       return res.status(400).json({ message: 'Pelanggan, item, dan pilihan pembayaran wajib diisi' });
     }
@@ -230,10 +279,10 @@ router.post('/:campaignId/orders', requireAuthenticated, async (req: Request, re
     const invoice = `PO-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
     await connection.query(
       `INSERT INTO orders
-       (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method,
+       (id, user_id, customer_name, customer_phone, invoice_number, total_price, status, payment_status, payment_method,
         amount_paid, external_id, source, outlet, order_type, preorder_campaign_id, payment_timing, fulfillment_at, preorder_status)
-       VALUES (?, NULL, ?, ?, ?, 'menunggu', 'belum_bayar', ?, 0, ?, 'preorder', ?, 'preorder', ?, ?, ?, 'reserved')`,
-      [orderId, customer_name.trim(), invoice, total, payment_method || null, invoice, campaign.outlet, campaign.id, payment_timing, campaign.service_at]
+       VALUES (?, NULL, ?, ?, ?, ?, 'menunggu', 'belum_bayar', ?, 0, ?, 'preorder', ?, 'preorder', ?, ?, ?, 'reserved')`,
+      [orderId, customer_name.trim(), customer_phone?.trim() || null, invoice, total, payment_method || null, invoice, campaign.outlet, campaign.id, payment_timing, campaign.service_at]
     );
     for (const item of resolved) {
       await connection.query(

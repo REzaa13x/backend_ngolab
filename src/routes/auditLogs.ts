@@ -1,7 +1,9 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/db.js";
+import { requireRoles } from "../middleware/authSession.js";
 
 const router = Router();
+router.use(requireRoles('Super Admin'));
 
 // GET /api/audit-logs
 router.get("/", async (req: Request, res: Response) => {

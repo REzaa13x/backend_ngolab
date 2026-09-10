@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
 import Dashboard from './Dashboard';
 import OrderManagement from './OrderManagement';
@@ -11,7 +11,7 @@ import StaffManagement from './StaffManagement';
 import AuditLogs from './AuditLogs';
 import ProductPromoManagement from './ProductPromoManagement';
 import VoucherManagement from './VoucherManagement';
-import CoworkingMenu from './CoworkingMenu';
+import MenuAvailability from './MenuAvailability';
 import SalesReport from './SalesReport';
 import MenuManagement from './MenuManagement';
 import SalesHistory from './SalesHistory';
@@ -23,12 +23,17 @@ import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, Search, Settings, User, HelpCircle, Volume2, VolumeX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 import socket from '../lib/socket';
-import { playBellWithResume, unlockAudioContext } from '../lib/audioHelper';
-import { getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
+import { playBellWithResume, playConfiguredKdsSound, unlockAudioContext } from '../lib/audioHelper';
+import { createOrderBellDeduper, getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
 
 export default function Layout() {
   const { user, activeRole } = useAuth();
+  const { settings } = useSettings();
+  const bellDeduper = useRef(createOrderBellDeduper());
+  // Ref agar handler socket selalu baca nilai soundEnabled terbaru (no stale closure)
+  const soundEnabledRef = useRef(localStorage.getItem('tangolab_sound_enabled') !== 'false');
   
   // Define default tab based on role
   const getDefaultTab = () => {
@@ -68,6 +73,7 @@ export default function Layout() {
   useEffect(() => {
     localStorage.setItem('tangolab_sound_enabled', String(soundEnabled));
     window.dispatchEvent(new Event('sound_enabled_change'));
+    soundEnabledRef.current = soundEnabled; // always up-to-date in socket handlers
   }, [soundEnabled]);
 
   // Auto-unlock AudioContext on first user interaction anywhere on the document
@@ -92,64 +98,55 @@ export default function Layout() {
     };
   }, []);
 
-const rungNewOrders = new Set<string>();
-const rungReadyOrders = new Set<string>();
+  // ─── GLOBAL KITCHEN BELL ───────────────────────────────────────────────────
+  // Subscribe ke socket events SEKALI di level Layout agar suara berbunyi
+  // untuk SEMUA jenis pesanan (manual, online, preorder) tanpa perlu
+  // setiap komponen mendaftarkan listener sendiri-sendiri.
+  // soundEnabledRef & settingsRef memastikan handler selalu baca nilai terbaru
+  // tanpa harus unsubscribe/re-subscribe setiap state berubah.
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
-  // Global socket listener for new order bell sounds
   useEffect(() => {
-    const handleNewOrder = (newOrder: any) => {
-      console.log("🔔 [Global Layout] Socket new_order received:", newOrder);
-      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
-      const bellType = getOrderBellType('new_order', newOrder);
-      if (isSoundOn && bellType === 'new_order') {
-        if (!rungNewOrders.has(newOrder.id)) {
-          rungNewOrders.add(newOrder.id);
-          console.log("🔔 [Global Layout] Playing sound: new_order");
-          playBellWithResume('new_order');
-        }
+    const ringBell = async (type: 'new_order' | 'ready', orderId: string | number) => {
+      if (!soundEnabledRef.current) return;
+      if (!bellDeduper.current.shouldRing(type, orderId)) return;
+      console.log(`🔔 [Layout] Bell "${type}" untuk order #${orderId}`);
+      try {
+        await playConfiguredKdsSound(type, settingsRef.current as Record<string, unknown>);
+      } catch (e) {
+        console.warn('[Layout] Bell gagal diputar:', e);
       }
     };
 
-    const handleOrderUpdated = (updatedOrder: any) => {
-      console.log("🔄 [Global Layout] Socket order_updated received:", updatedOrder);
-      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
-      const bellType = getOrderBellType('order_updated', updatedOrder);
-      if (isSoundOn) {
-        if (bellType === 'new_order') {
-          if (!rungNewOrders.has(updatedOrder.id)) {
-            rungNewOrders.add(updatedOrder.id);
-            console.log("🔔 [Global Layout] Playing sound: new_order (payment lunas)");
-            playBellWithResume('new_order');
-          }
-        } else if (bellType === 'ready') {
-          if (!rungReadyOrders.has(updatedOrder.id)) {
-            rungReadyOrders.add(updatedOrder.id);
-            console.log("🔔 [Global Layout] Playing sound: ready");
-            playBellWithResume('ready');
-          }
-        }
-      }
+    const onPreorderDue = (campaign: any) => {
+      const releaseId = `preorder:${campaign?.id ?? 'unknown'}`;
+      if (campaign?.id != null) ringBell('new_order', releaseId);
     };
 
-    const handlePreorderDue = (campaign: any) => {
-      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
-      const releaseId = `po-${campaign.id}`;
-      if (isSoundOn && !rungNewOrders.has(releaseId)) {
-        rungNewOrders.add(releaseId);
-        playBellWithResume('new_order');
-      }
-    };
-
-    const cleanupOrders = subscribeToOrderEvents(socket, {
-      onNewOrder: handleNewOrder,
-      onOrderUpdated: handleOrderUpdated
+    const unsubscribe = subscribeToOrderEvents(socket, {
+      onNewOrder: (payload: any) => {
+        const bellType = getOrderBellType('new_order', payload);
+        if (bellType && payload?.id != null) ringBell(bellType, payload.id);
+      },
+      onOrderUpdated: (payload: any) => {
+        const bellType = getOrderBellType('order_updated', payload);
+        if (bellType && payload?.id != null) ringBell(bellType, payload.id);
+      },
     });
-    socket.on('preorder_due', handlePreorderDue);
+    socket.on('preorder_due', onPreorderDue);
+
+    // Pastikan socket terhubung
+    if (!socket.connected) socket.connect();
+
     return () => {
-      cleanupOrders();
-      socket.off('preorder_due', handlePreorderDue);
+      unsubscribe();
+      socket.off('preorder_due', onPreorderDue);
     };
+  // Mount once — soundEnabledRef & settingsRef selalu up-to-date via effect above
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   const toggleSound = async () => {
     const newSoundEnabled = !soundEnabled;
@@ -172,12 +169,12 @@ const rungReadyOrders = new Set<string>();
     'users': 'Database Pengguna',
     'kds': 'Sistem Tampilan Dapur',
     'promotions': 'Manajer Papan Digital',
-    'stock': 'Katalog Menu Ngolab',
+    'stock': 'Inventori Ngolab',
     'staff': 'Tim & Manajemen Shift',
     'logs': 'Pusat Log & Audit Sistem',
     'product-promos': 'Manajemen Promo Produk',
     'vouchers': 'Manajemen Voucher Koin',
-    'coworking-menu': 'Katalog Menu Coworking',
+    'menu-availability': 'Ketersediaan Menu',
     'menu-management': 'Manajemen Menu',
     'preorders': 'Menu Pre-order',
     'preorder-orders': 'Pesanan Pre-order',
@@ -200,7 +197,7 @@ const rungReadyOrders = new Set<string>();
       case 'logs': return <AuditLogs />;
       case 'product-promos': return <ProductPromoManagement />;
       case 'vouchers': return <VoucherManagement />;
-      case 'coworking-menu': return <CoworkingMenu />;
+      case 'menu-availability': return <MenuAvailability onNavigate={setActiveTab} />;
       case 'menu-management': return <MenuManagement onNavigate={setActiveTab} />;
       case 'preorders': return <PreorderManagement />;
       case 'preorder-orders': return <PreorderOrders />;

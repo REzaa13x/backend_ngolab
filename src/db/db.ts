@@ -171,6 +171,7 @@ export async function testDbConnection() {
       if (!orderFields.has('fulfillment_at')) await connection.query("ALTER TABLE orders ADD COLUMN fulfillment_at DATETIME DEFAULT NULL AFTER payment_timing");
       if (!orderFields.has('preorder_status')) await connection.query("ALTER TABLE orders ADD COLUMN preorder_status VARCHAR(30) DEFAULT NULL AFTER fulfillment_at");
       if (!orderFields.has('picked_up_at')) await connection.query("ALTER TABLE orders ADD COLUMN picked_up_at DATETIME DEFAULT NULL AFTER preorder_status");
+      if (!orderFields.has('customer_phone')) await connection.query("ALTER TABLE orders ADD COLUMN customer_phone VARCHAR(50) DEFAULT NULL AFTER customer_name");
       await connection.query("UPDATE orders SET preorder_status = 'reserved' WHERE order_type = 'preorder' AND preorder_status IS NULL");
       await connection.query("UPDATE orders SET outlet = 'coworking' WHERE source = 'coworking'");
 
@@ -182,6 +183,25 @@ export async function testDbConnection() {
     } catch (preorderErr: any) {
       console.warn("⚠️ Pre-order migration failed:", preorderErr.message);
       throw preorderErr;
+    }
+
+    // Migration: Separate menu master, manual override, and inventory availability.
+    try {
+      const [menuColumns]: any = await connection.query("SHOW COLUMNS FROM menus");
+      const menuFields = new Set(menuColumns.map((column: any) => column.Field));
+      if (!menuFields.has('is_active')) await connection.query("ALTER TABLE menus ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER in_stock");
+      if (!menuFields.has('inventory_available')) await connection.query("ALTER TABLE menus ADD COLUMN inventory_available TINYINT(1) NOT NULL DEFAULT 1 AFTER is_active");
+      if (!menuFields.has('availability_override')) await connection.query("ALTER TABLE menus ADD COLUMN availability_override VARCHAR(20) NOT NULL DEFAULT 'auto' AFTER inventory_available");
+      if (!menuFields.has('availability_reason')) await connection.query("ALTER TABLE menus ADD COLUMN availability_reason VARCHAR(255) DEFAULT NULL AFTER availability_override");
+      if (!menuFields.has('availability_updated_by')) await connection.query("ALTER TABLE menus ADD COLUMN availability_updated_by VARCHAR(100) DEFAULT NULL AFTER availability_reason");
+      if (!menuFields.has('availability_updated_at')) await connection.query("ALTER TABLE menus ADD COLUMN availability_updated_at DATETIME DEFAULT NULL AFTER availability_updated_by");
+      if (!menuFields.has('inventory_available')) await connection.query('UPDATE menus SET inventory_available = in_stock');
+      await connection.query("UPDATE menus SET availability_override = 'auto' WHERE availability_override NOT IN ('auto', 'force_off') OR availability_override IS NULL");
+      await connection.query("UPDATE menus SET in_stock = IF(is_active = 1 AND availability_override = 'auto' AND inventory_available = 1, 1, 0)");
+      console.log("✅ Menu availability schema verified/created");
+    } catch (menuAvailabilityError: any) {
+      console.warn("⚠️ Menu availability migration failed:", menuAvailabilityError.message);
+      throw menuAvailabilityError;
     }
 
     // Migration: Persistent ingredient inventory and recipe requirements
@@ -198,15 +218,79 @@ export async function testDbConnection() {
           PRIMARY KEY (id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
       `);
+      const [inventoryColumns]: any = await connection.query("SHOW COLUMNS FROM ingredients");
+      const inventoryFields = new Set(inventoryColumns.map((column: any) => column.Field));
+      const inventoryMigrations = [
+        ['inventory_type', "ALTER TABLE ingredients ADD COLUMN inventory_type VARCHAR(30) NOT NULL DEFAULT 'raw_material' AFTER name"],
+        ['sku', "ALTER TABLE ingredients ADD COLUMN sku VARCHAR(100) DEFAULT NULL AFTER inventory_type"],
+        ['barcode', "ALTER TABLE ingredients ADD COLUMN barcode VARCHAR(100) DEFAULT NULL AFTER sku"],
+        ['category', "ALTER TABLE ingredients ADD COLUMN category VARCHAR(100) NOT NULL DEFAULT 'Bahan Baku' AFTER barcode"],
+        ['purchase_unit', "ALTER TABLE ingredients ADD COLUMN purchase_unit VARCHAR(50) DEFAULT NULL AFTER unit"],
+        ['purchase_conversion', "ALTER TABLE ingredients ADD COLUMN purchase_conversion DECIMAL(12,3) NOT NULL DEFAULT 1 AFTER purchase_unit"],
+        ['critical_stock', "ALTER TABLE ingredients ADD COLUMN critical_stock DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER min_stock"],
+        ['cost_price', "ALTER TABLE ingredients ADD COLUMN cost_price DECIMAL(14,2) NOT NULL DEFAULT 0 AFTER critical_stock"],
+        ['supplier', "ALTER TABLE ingredients ADD COLUMN supplier VARCHAR(150) DEFAULT NULL AFTER cost_price"],
+        ['outlet', "ALTER TABLE ingredients ADD COLUMN outlet VARCHAR(50) NOT NULL DEFAULT 'ngolab' AFTER supplier"],
+        ['is_active', "ALTER TABLE ingredients ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER outlet"]
+      ];
+      for (const [field, sql] of inventoryMigrations) {
+        if (!inventoryFields.has(field)) await connection.query(sql);
+      }
+      await connection.query("UPDATE ingredients SET critical_stock = GREATEST(1, FLOOR(min_stock * 0.3)) WHERE critical_stock = 0 AND min_stock > 0");
+      const [barcodeIndexes]: any = await connection.query("SHOW INDEX FROM ingredients WHERE Key_name = 'uniq_inventory_barcode_outlet'");
+      if (!barcodeIndexes.length) {
+        await connection.query("ALTER TABLE ingredients ADD UNIQUE INDEX uniq_inventory_barcode_outlet (barcode, outlet)");
+      }
+      const [skuIndexes]: any = await connection.query("SHOW INDEX FROM ingredients WHERE Key_name = 'uniq_inventory_sku_outlet'");
+      if (!skuIndexes.length) {
+        await connection.query("ALTER TABLE ingredients ADD UNIQUE INDEX uniq_inventory_sku_outlet (sku, outlet)");
+      }
+
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS inventory_movements (
+          id BIGINT NOT NULL AUTO_INCREMENT,
+          ingredient_id VARCHAR(50) NOT NULL,
+          outlet VARCHAR(50) NOT NULL DEFAULT 'ngolab',
+          movement_type VARCHAR(30) NOT NULL,
+          quantity DECIMAL(12,2) NOT NULL,
+          stock_before DECIMAL(12,2) NOT NULL,
+          stock_after DECIMAL(12,2) NOT NULL,
+          input_method VARCHAR(30) NOT NULL DEFAULT 'manual',
+          reference_type VARCHAR(50) DEFAULT NULL,
+          reference_id VARCHAR(100) DEFAULT NULL,
+          purchase_unit VARCHAR(50) DEFAULT NULL,
+          purchase_quantity DECIMAL(12,2) DEFAULT NULL,
+          unit_cost DECIMAL(14,2) DEFAULT NULL,
+          supplier VARCHAR(150) DEFAULT NULL,
+          batch_number VARCHAR(100) DEFAULT NULL,
+          expires_at DATE DEFAULT NULL,
+          notes VARCHAR(500) DEFAULT NULL,
+          actor_id VARCHAR(50) DEFAULT NULL,
+          actor_name VARCHAR(100) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          INDEX idx_inventory_movements_item (ingredient_id, created_at),
+          INDEX idx_inventory_movements_reference (reference_type, reference_id),
+          INDEX idx_inventory_movements_outlet (outlet, created_at),
+          CONSTRAINT fk_inventory_movements_item FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE RESTRICT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+
       await connection.query(`
         CREATE TABLE IF NOT EXISTS recipe_ingredients (
           menu_name VARCHAR(200) NOT NULL,
+          outlet VARCHAR(50) NOT NULL DEFAULT 'ngolab',
           ingredient_id VARCHAR(50) NOT NULL,
           amount DECIMAL(12,2) NOT NULL,
-          PRIMARY KEY (menu_name, ingredient_id),
+          PRIMARY KEY (menu_name, outlet, ingredient_id),
           FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
       `);
+      const [recipeColumns]: any = await connection.query('SHOW COLUMNS FROM recipe_ingredients');
+      if (!recipeColumns.some((column: any) => column.Field === 'outlet')) {
+        await connection.query("ALTER TABLE recipe_ingredients ADD COLUMN outlet VARCHAR(50) NOT NULL DEFAULT 'ngolab' AFTER menu_name");
+        await connection.query("ALTER TABLE recipe_ingredients DROP PRIMARY KEY, ADD PRIMARY KEY (menu_name, outlet, ingredient_id)");
+      }
 
       const ingredientSeeds = [
         ['ing-1', 'Mie Basah', 'Porsi', 100, 20],
@@ -238,7 +322,7 @@ export async function testDbConnection() {
       ];
       for (const seed of recipeSeeds) {
         await connection.query(
-          "INSERT IGNORE INTO recipe_ingredients (menu_name, ingredient_id, amount) VALUES (?, ?, ?)",
+          "INSERT IGNORE INTO recipe_ingredients (menu_name, outlet, ingredient_id, amount) VALUES (?, 'ngolab', ?, ?)",
           seed
         );
       }
@@ -286,6 +370,31 @@ export async function testDbConnection() {
       console.warn("⚠️ Audit Logs Table migration warning:", auditErr.message);
     }
 
+    // Migration: API keys for external integrations. Raw secrets are never stored.
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS api_keys (
+          id BIGINT NOT NULL AUTO_INCREMENT,
+          name VARCHAR(100) NOT NULL,
+          key_prefix VARCHAR(32) NOT NULL,
+          key_hash CHAR(64) NOT NULL,
+          scopes JSON NOT NULL,
+          is_active TINYINT(1) NOT NULL DEFAULT 1,
+          created_by VARCHAR(50) NOT NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          last_used_at DATETIME DEFAULT NULL,
+          revoked_at DATETIME DEFAULT NULL,
+          PRIMARY KEY (id),
+          UNIQUE INDEX uniq_api_keys_hash (key_hash),
+          INDEX idx_api_keys_active (is_active, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+      console.log("✅ API key schema verified/created");
+    } catch (apiKeyErr: any) {
+      console.warn("⚠️ API Key migration failed:", apiKeyErr.message);
+      throw apiKeyErr;
+    }
+
     // Migration: Create app_settings table
     try {
       await connection.query(`
@@ -306,6 +415,10 @@ export async function testDbConnection() {
         ['dwell_time', '1.5'],
         ['kiosk_idle_timeout', '60'],
         ['kiosk_mode', 'gesture'],
+        ['kds_sound_enabled', '1'],
+        ['kds_sound_volume', '100'],
+        ['kds_new_order_sound_url', ''],
+        ['kds_ready_sound_url', ''],
         ['receipt_footer', 'Terima kasih atas kunjungan Anda!'],
         ['maintenance_mode', '0'],
         ['theme_color', '#4f46e5'],
@@ -318,7 +431,8 @@ export async function testDbConnection() {
         ['sidebar_hover_bg_color', '#f8fafc'],
         ['sidebar_hover_text_color', '#0f172a'],
         ['sidebar_logo_text_color', '#0f172a'],
-        ['sidebar_section_text_color', '#94a3b8']
+        ['sidebar_section_text_color', '#94a3b8'],
+        ['coin_reward_rate', '0.001']
       ];
       for (const [k, v] of defaults) {
         await connection.query(

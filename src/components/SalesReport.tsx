@@ -71,7 +71,7 @@ export default function SalesReport() {
     try {
       const [ordersRes, reportRes] = await Promise.all([
         authFetch('/api/orders'),
-        fetch('/api/reports/monthly')
+        authFetch('/api/reports/monthly')
       ]);
       
       const ordersData = await ordersRes.json();

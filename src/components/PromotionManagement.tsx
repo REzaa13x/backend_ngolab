@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 
 interface MediaFile {
   id: number;
@@ -94,7 +95,7 @@ function UploadForm({ onSuccess }: { onSuccess: () => void }) {
     formData.append('uploaded_by', 'Admin');
 
     try {
-      const res = await fetch('/api/digital-board/media/upload', {
+      const res = await authFetch('/api/digital-board/media/upload', {
         method: 'POST',
         body: formData,
       });
@@ -616,7 +617,7 @@ export default function PromotionManagement() {
   const fetchMedia = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await fetch('/api/digital-board/media');
+      const res = await authFetch('/api/digital-board/media');
       if (!res.ok) throw new Error('Gagal fetch');
       const data = await res.json();
       setMediaList(data);
@@ -647,7 +648,7 @@ export default function PromotionManagement() {
 
   const handleToggle = async (id: number) => {
     try {
-      const res = await fetch(`/api/digital-board/media/${id}/toggle`, { method: 'PATCH' });
+      const res = await authFetch(`/api/digital-board/media/${id}/toggle`, { method: 'PATCH' });
       const data = await res.json();
       if (res.ok) {
         setMediaList(prev => prev.map(m =>
@@ -662,7 +663,7 @@ export default function PromotionManagement() {
   const handleDelete = async (id: number) => {
     if (!confirm('Hapus media ini? File akan dihapus dari server dan database.')) return;
     try {
-      const res = await fetch(`/api/digital-board/media/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/digital-board/media/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setMediaList(prev => prev.filter(m => m.id !== id));
       }

@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { authFetch } from '../lib/authFetch';
+import socket from '../lib/socket';
 
 export interface AppSettings {
   brand_name: string;
@@ -11,6 +13,10 @@ export interface AppSettings {
   receipt_footer: string;
   maintenance_mode: string;
   theme_mode: string;
+  kds_sound_enabled: string;
+  kds_sound_volume: string;
+  kds_new_order_sound_url: string;
+  kds_ready_sound_url: string;
 }
 
 interface SettingsContextType {
@@ -33,13 +39,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     kiosk_mode: 'gesture',
     receipt_footer: 'Terima kasih atas kunjungan Anda!',
     maintenance_mode: '0',
-    theme_mode: 'light'
+    theme_mode: 'light',
+    kds_sound_enabled: '1',
+    kds_sound_volume: '100',
+    kds_new_order_sound_url: '',
+    kds_ready_sound_url: ''
   });
   const [loading, setLoading] = useState(true);
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch('/api/settings');
+      const res = await authFetch('/api/settings');
       if (res.ok) {
         const data = await res.json();
         setSettings({
@@ -52,7 +62,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           kiosk_mode: data.kiosk_mode || 'gesture',
           receipt_footer: data.receipt_footer || 'Terima kasih atas kunjungan Anda!',
           maintenance_mode: data.maintenance_mode || '0',
-          theme_mode: data.theme_mode || 'light'
+          theme_mode: data.theme_mode || 'light',
+          kds_sound_enabled: data.kds_sound_enabled ?? '1',
+          kds_sound_volume: data.kds_sound_volume || '100',
+          kds_new_order_sound_url: data.kds_new_order_sound_url || '',
+          kds_ready_sound_url: data.kds_ready_sound_url || ''
         });
       }
     } catch (err) {
@@ -64,6 +78,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     fetchSettings();
+    socket.on('settings_updated', fetchSettings);
+    return () => { socket.off('settings_updated', fetchSettings); };
   }, []);
 
 
@@ -107,14 +123,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const updateSettings = async (newSettings: Partial<AppSettings>): Promise<boolean> => {
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authFetch('/api/settings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-name': localStorage.getItem('tangolab_admin_user') 
-            ? JSON.parse(localStorage.getItem('tangolab_admin_user')!).name 
-            : 'Admin'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newSettings)
       });
       if (res.ok) {

@@ -1,19 +1,13 @@
 import { Router, Request, Response } from "express";
 import { db, addAuditLog } from "../db/db.js";
-import { authApiKey } from "../middleware/authApiKey.js";
+import { requireApiKeyScope } from "../middleware/authApiKey.js";
 import { canUseGenericOrderStatus } from "../lib/preorderRules.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
+import { consumeInventoryForOrder, emitInventoryChanges, restoreInventoryForOrder } from "../lib/inventoryDb.js";
+import { processLoyaltyPoints } from "../lib/loyaltyHelper.js";
 
 const router = Router();
 const requireOrderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
-
-async function getPreorderIdentity(orderId: string) {
-  const [rows]: any = await db.query(
-    'SELECT id, order_type, preorder_campaign_id, preorder_status FROM orders WHERE id = ? LIMIT 1',
-    [orderId]
-  );
-  return rows[0] || null;
-}
 
 // ==========================================
 // 1. ORDERS API
@@ -53,7 +47,7 @@ router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
        WHERE outlet = ?
          AND LOWER(status) IN ('menunggu', 'sedang_diproses', 'siap')
          AND (
-           (order_type = 'regular' AND payment_status = 'lunas')
+           (order_type = 'regular')
            OR
            (order_type = 'preorder' AND fulfillment_at <= NOW())
          )
@@ -74,6 +68,29 @@ router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
     res.json(orders);
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil pesanan KDS", error: err.message });
+  }
+});
+
+// GET /api/orders/kds/pending-count — Badge pesanan baru pada sidebar.
+router.get('/kds/pending-count', requireOrderStaff, async (_req: Request, res: Response) => {
+  try {
+    const [rows]: any = await db.query(
+      `SELECT outlet, COUNT(*) AS total
+       FROM orders
+       WHERE LOWER(status) = 'menunggu'
+         AND (
+           order_type = 'regular'
+           OR (order_type = 'preorder' AND fulfillment_at <= NOW())
+         )
+       GROUP BY outlet`
+    );
+    const byOutlet = { ngolab: 0, coworking: 0 };
+    rows.forEach((row: any) => {
+      if (row.outlet === 'ngolab' || row.outlet === 'coworking') byOutlet[row.outlet] = Number(row.total);
+    });
+    res.json({ total: byOutlet.ngolab + byOutlet.coworking, byOutlet });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Gagal mengambil jumlah pesanan dapur', error: error.message });
   }
 });
 
@@ -103,7 +120,7 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const { customer_name, items, payment_method, payment_status, source } = req.body;
+    const { customer_name, items, payment_method, payment_status, source, user_id } = req.body;
 
     if (!customer_name || !items || items.length === 0) {
       return res.status(400).json({ message: "Data pesanan tidak lengkap" });
@@ -135,7 +152,7 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderId, 
-        null, // manual order tidak spesifik user untuk sekarang, jika ada user_id bisa di set
+        user_id || null, // manual order bisa disertakan user_id member
         customer_name, invoiceNumber, totalPrice, status, finalPaymentStatus, 
         payment_method || 'Tunai', amountPaid, "MANUAL", finalSource, finalOutlet
       ]
@@ -159,6 +176,19 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
       }
     }
 
+    const actor = getVerifiedActor(req);
+    const inventoryChanges = await consumeInventoryForOrder(
+      connection,
+      orderId,
+      orderItems.map((item: any) => ({ name: item.item_name, quantity: Number(item.quantity) })),
+      finalOutlet,
+      actor
+    );
+    
+    if (finalPaymentStatus === 'lunas' && user_id) {
+      await processLoyaltyPoints(connection, user_id, customer_name, invoiceNumber, totalPrice);
+    }
+    
     await connection.commit();
 
     // Fetch the inserted order to return
@@ -168,7 +198,6 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
     }));
 
     // Log to security audit
-    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Buat Pesanan Manual", `${invoiceNumber} (${customer_name})`);
 
     const io = req.app.get('io');
@@ -176,26 +205,38 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
       io.emit("new_order", insertedOrder[0]);
       if (finalPaymentStatus === 'lunas') io.emit("order_updated", insertedOrder[0]);
       io.emit("stats_updated");
+      emitInventoryChanges(io, inventoryChanges);
     }
 
     res.status(201).json(insertedOrder[0]);
   } catch (err: any) {
     await connection.rollback();
-    res.status(500).json({ message: "Gagal membuat pesanan", error: err.message });
+    res.status(err.statusCode || 500).json({ message: err.statusCode ? err.message : "Gagal membuat pesanan", ...(err.statusCode ? {} : { error: err.message }) });
   } finally {
     connection.release();
   }
 });
 
 // POST /api/orders/external — Endpoint Master untuk Aplikasi Eksternal (contoh: Smart Tag QR)
-router.post("/external", authApiKey, async (req: Request, res: Response) => {
+router.post("/external", requireApiKeyScope('orders:write'), async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const { user_id, customer_name, items, payment_method, payment_status, total_price, external_id, source } = req.body;
 
     if (!customer_name || !items || items.length === 0) {
+      await connection.rollback();
       return res.status(400).json({ message: "Data pesanan tidak lengkap" });
+    }
+    if (external_id) {
+      const [existing]: any = await connection.query(
+        'SELECT id, invoice_number FROM orders WHERE external_id = ? AND source = ? LIMIT 1',
+        [external_id, source || 'ngolab']
+      );
+      if (existing.length) {
+        await connection.rollback();
+        return res.status(409).json({ message: 'Pesanan external_id tersebut sudah pernah diterima', order_id: existing[0].id, invoice_number: existing[0].invoice_number });
+      }
     }
 
     const orderId = Date.now().toString();
@@ -204,15 +245,16 @@ router.post("/external", authApiKey, async (req: Request, res: Response) => {
     const status = finalPaymentStatus === 'lunas' ? 'sedang_diproses' : 'menunggu';
     const amountPaid = finalPaymentStatus === 'lunas' ? total_price : 0;
     const finalSource = source || 'ngolab';
+    const finalOutlet = source === 'coworking' ? 'coworking' : 'ngolab';
 
     await connection.query(
-      `INSERT INTO orders (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method, amount_paid, external_id, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method, amount_paid, external_id, source, outlet)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        orderId, 
-        user_id || null, 
-        customer_name, invoiceNumber, total_price, status, finalPaymentStatus, 
-        payment_method || 'QRIS', amountPaid, external_id || "EXTERNAL", finalSource
+        orderId,
+        user_id || null,
+        customer_name, invoiceNumber, total_price, status, finalPaymentStatus,
+        payment_method || 'QRIS', amountPaid, external_id || "EXTERNAL", finalSource, finalOutlet
       ]
     );
 
@@ -235,6 +277,19 @@ router.post("/external", authApiKey, async (req: Request, res: Response) => {
       }
     }
 
+    const inventoryActor = (req as any).apiClient?.name || 'Integrasi eksternal';
+    const inventoryChanges = await consumeInventoryForOrder(
+      connection,
+      orderId,
+      items.map((item: any) => ({ name: item.name || item.item_name, quantity: Number(item.quantity) })),
+      finalOutlet,
+      inventoryActor
+    );
+    
+    if (finalPaymentStatus === 'lunas' && user_id) {
+      await processLoyaltyPoints(connection, user_id, customer_name, invoiceNumber, total_price);
+    }
+    
     await connection.commit();
 
     // Fetch the inserted order to return
@@ -246,19 +301,20 @@ router.post("/external", authApiKey, async (req: Request, res: Response) => {
       io.emit("new_order", insertedOrder[0]);
       if (finalPaymentStatus === 'lunas') io.emit("order_updated", insertedOrder[0]);
       io.emit("stats_updated");
+      emitInventoryChanges(io, inventoryChanges);
     }
 
     res.status(201).json({ message: "Pesanan berhasil diterima", order: insertedOrder[0] });
   } catch (err: any) {
     await connection.rollback();
-    res.status(500).json({ message: "Gagal memproses pesanan eksternal", error: err.message });
+    res.status(err.statusCode || 500).json({ message: err.statusCode ? err.message : "Gagal memproses pesanan eksternal", ...(err.statusCode ? {} : { error: err.message }) });
   } finally {
     connection.release();
   }
 });
 
 // GET /api/orders/external/history — Endpoint Riwayat untuk Aplikasi Eksternal (contoh: Smart Tag QR)
-router.get("/external/history", authApiKey, async (req: Request, res: Response) => {
+router.get("/external/history", requireApiKeyScope('orders:read'), async (req: Request, res: Response) => {
   try {
     const [orders]: any = await db.query(
       `SELECT * FROM orders WHERE source IN ('ngolab', 'smart_tag_qr') ORDER BY created_at DESC LIMIT 100`
@@ -282,7 +338,7 @@ router.get("/external/history", authApiKey, async (req: Request, res: Response) 
 });
 
 // GET /api/orders/external/incoming — Endpoint Pesanan Masuk untuk Aplikasi Eksternal (contoh: Smart Tag QR)
-router.get("/external/incoming", authApiKey, async (req: Request, res: Response) => {
+router.get("/external/incoming", requireApiKeyScope('orders:read'), async (req: Request, res: Response) => {
   try {
     const [orders]: any = await db.query(
       `SELECT * FROM orders WHERE status IN ('menunggu', 'sedang_diproses', 'siap') ORDER BY created_at DESC`
@@ -338,19 +394,12 @@ router.post("/:id/verify", requireOrderStaff, async (req: Request, res: Response
       [amountPaid, paymentMethod, id]
     );
 
-    // Koin Cashback Logic (5%)
+    // Koin Cashback Logic terpusat
     let cashback = 0;
     if (order.user_id) {
-      cashback = Math.floor(order.total_price * 0.05);
-      await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [cashback, order.user_id]);
-      
       const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
       const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
-      
-      await connection.query(
-        "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
-        [`ct-${Date.now()}`, order.user_id, userName, cashback, `Cashback 5% dari ${order.invoice_number}`]
-      );
+      cashback = await processLoyaltyPoints(connection, order.user_id, userName, order.invoice_number, order.total_price);
     }
 
     await connection.commit();
@@ -378,26 +427,34 @@ router.post("/:id/verify", requireOrderStaff, async (req: Request, res: Response
 
 // POST /api/orders/:id/reject
 router.post("/:id/reject", requireOrderStaff, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
   try {
-    const identity = await getPreorderIdentity(req.params.id);
-    if (identity?.order_type === 'preorder') {
+    await connection.beginTransaction();
+    const [orders]: any = await connection.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [req.params.id]);
+    if (!orders.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan tidak ditemukan' }); }
+    if (orders[0].order_type === 'preorder') {
+      await connection.rollback();
       return res.status(409).json({ message: 'Pembatalan PO harus melalui aksi Batalkan PO agar deadline dan kuota tervalidasi' });
     }
-    await db.query("UPDATE orders SET payment_status = 'ditolak', status = 'dibatalkan' WHERE id = ?", [req.params.id]);
-    const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
-    
-    // Log to security audit
     const actor = getVerifiedActor(req);
+    const inventoryChanges = await restoreInventoryForOrder(connection, req.params.id, actor);
+    await connection.query("UPDATE orders SET payment_status = 'ditolak', status = 'dibatalkan' WHERE id = ?", [req.params.id]);
+    await connection.commit();
+    const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
     await addAuditLog(actor, "Tolak Pesanan", `${updatedOrder[0].invoice_number} (Dibatalkan)`, "warning");
 
     const io = req.app.get('io');
     if (io) {
       io.emit("order_updated", updatedOrder[0]);
       io.emit("stats_updated");
+      emitInventoryChanges(io, inventoryChanges);
     }
-    res.json({ message: "Pesanan telah ditolak", order: updatedOrder[0] });
+    res.json({ message: "Pesanan telah ditolak dan stok dikembalikan", order: updatedOrder[0] });
   } catch (err: any) {
+    await connection.rollback();
     res.status(500).json({ message: "Gagal menolak pesanan", error: err.message });
+  } finally {
+    connection.release();
   }
 });
 
@@ -435,17 +492,10 @@ router.patch("/:id/payment-status", requireOrderStaff, async (req: Request, res:
     );
 
     let cashback = 0;
-    if (payment_status === 'lunas' && order.user_id) {
-      cashback = Math.floor(order.total_price * 0.05);
-      await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [cashback, order.user_id]);
-      
+    if (payment_status === 'lunas' && order.payment_status !== 'lunas' && order.user_id) {
       const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
       const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
-      
-      await connection.query(
-        "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
-        [`ct-${Date.now()}`, order.user_id, userName, cashback, `Cashback 5% dari ${order.invoice_number}`]
-      );
+      cashback = await processLoyaltyPoints(connection, order.user_id, userName, order.invoice_number, order.total_price);
     }
 
     await connection.commit();
@@ -473,40 +523,48 @@ router.patch("/:id/payment-status", requireOrderStaff, async (req: Request, res:
 
 // PATCH /api/orders/:id/status — Ubah Status Pesanan (menunggu, sedang_diproses, ready, selesai, dibatalkan)
 router.patch("/:id/status", requireOrderStaff, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
   try {
     const { status } = req.body;
     if (!['menunggu', 'sedang_diproses', 'siap', 'selesai', 'dibatalkan'].includes(status)) {
       return res.status(400).json({ message: 'Status pesanan tidak valid' });
     }
-    const identity = await getPreorderIdentity(req.params.id);
-    if (identity && !canUseGenericOrderStatus(identity, status)) {
+    await connection.beginTransaction();
+    const [orders]: any = await connection.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [req.params.id]);
+    if (!orders.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan tidak ditemukan' }); }
+    const identity = orders[0];
+    if (!canUseGenericOrderStatus(identity, status)) {
+      await connection.rollback();
       return res.status(409).json({ message: 'Status PO terminal atau pembatalan hanya dapat diubah melalui halaman Pesanan Pre-order' });
     }
-    if (identity?.order_type === 'preorder') {
-      const [result]: any = await db.query(
+    let inventoryChanges: any[] = [];
+    if (identity.order_type === 'preorder') {
+      const [result]: any = await connection.query(
         "UPDATE orders SET status = ? WHERE id = ? AND preorder_status = 'reserved'",
         [status, req.params.id]
       );
-      if (!result.affectedRows) return res.status(409).json({ message: 'Status PO berubah; muat ulang sebelum mencoba lagi' });
+      if (!result.affectedRows) { await connection.rollback(); return res.status(409).json({ message: 'Status PO berubah; muat ulang sebelum mencoba lagi' }); }
     } else {
-      await db.query("UPDATE orders SET status = ? WHERE id = ?", [status, req.params.id]);
+      if (status === 'dibatalkan') inventoryChanges = await restoreInventoryForOrder(connection, req.params.id, getVerifiedActor(req));
+      await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, req.params.id]);
     }
+    await connection.commit();
     const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
-    
-    // Log to security audit
     const actor = getVerifiedActor(req);
-    if (updatedOrder.length > 0) {
-      await addAuditLog(actor, "Update Status Pesanan", `${updatedOrder[0].invoice_number} (${status})`);
-    }
+    await addAuditLog(actor, "Update Status Pesanan", `${updatedOrder[0].invoice_number} (${status})`);
 
     const io = req.app.get('io');
-    if (io && updatedOrder.length > 0) {
+    if (io) {
       io.emit("order_updated", updatedOrder[0]);
       io.emit("stats_updated");
+      emitInventoryChanges(io, inventoryChanges);
     }
     res.json(updatedOrder[0]);
   } catch (err: any) {
+    await connection.rollback();
     res.status(500).json({ message: "Gagal merubah status pesanan", error: err.message });
+  } finally {
+    connection.release();
   }
 });
 
@@ -515,29 +573,34 @@ router.patch("/:id/status", requireOrderStaff, async (req: Request, res: Respons
 
 // DELETE /api/orders/:id — Hapus Pesanan
 router.delete("/:id", requireOrderStaff, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
   try {
     const { id } = req.params;
-    const identity = await getPreorderIdentity(id);
-    if (identity?.order_type === 'preorder') {
+    await connection.beginTransaction();
+    const [orders]: any = await connection.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]);
+    if (!orders.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan tidak ditemukan' }); }
+    if (orders[0].order_type === 'preorder') {
+      await connection.rollback();
       return res.status(409).json({ message: 'Transaksi PO tidak boleh dihapus melalui endpoint pesanan umum' });
     }
     const actor = getVerifiedActor(req);
-    const [orderData]: any = await db.query("SELECT invoice_number FROM orders WHERE id = ?", [id]);
-    const inv = orderData.length ? orderData[0].invoice_number : id;
-
-    // Delete items first
-    await db.query("DELETE FROM order_items WHERE order_id = ?", [id]);
-    await db.query("DELETE FROM orders WHERE id = ?", [id]);
-    
-    await addAuditLog(actor, "Hapus Pesanan", `${inv}`, "warning");
+    const inventoryChanges = await restoreInventoryForOrder(connection, id, actor);
+    await connection.query("DELETE FROM order_items WHERE order_id = ?", [id]);
+    await connection.query("DELETE FROM orders WHERE id = ?", [id]);
+    await connection.commit();
+    await addAuditLog(actor, "Hapus Pesanan", `${orders[0].invoice_number}`, "warning");
 
     const io = req.app.get('io');
     if (io) {
       io.emit("stats_updated");
+      emitInventoryChanges(io, inventoryChanges);
     }
-    res.json({ message: "Pesanan dihapus" });
+    res.json({ message: "Pesanan dihapus dan stok dikembalikan" });
   } catch (err: any) {
+    await connection.rollback();
     res.status(500).json({ message: "Gagal menghapus pesanan", error: err.message });
+  } finally {
+    connection.release();
   }
 });
 

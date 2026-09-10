@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Coins, Plus, Trash2, ToggleLeft, ToggleRight, Gift, Users, TrendingUp, Tag, Clock, Percent, X, CheckCircle2, ArrowDown, ArrowUp, Pencil } from 'lucide-react';
+import { authFetch } from '../lib/authFetch';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 
@@ -179,10 +180,10 @@ export default function ProductPromoManagement() {
 
   const fetchAll = async () => {
     const [p, u, t, prod] = await Promise.all([
-      fetch('/api/coin-promos').then(r=>r.json()).catch(() => []),
-      fetch('/api/users').then(r=>r.json()).catch(() => []),
-      fetch('/api/users/transactions').then(r=>r.json()).catch(() => []), // updated endpoint to users/transactions based on usersRouter
-      fetch('/api/admin/catalog/products').then(r=>r.json()).catch(() => []),
+      authFetch('/api/coin-promos').then(r=>r.json()).catch(() => []),
+      authFetch('/api/users').then(r=>r.json()).catch(() => []),
+      authFetch('/api/users/transactions').then(r=>r.json()).catch(() => []), // updated endpoint to users/transactions based on usersRouter
+      authFetch('/api/admin/catalog/products').then(r=>r.json()).catch(() => []),
     ]);
     setPromos(p);
     setUsers(u);
@@ -193,7 +194,7 @@ export default function ProductPromoManagement() {
 
   useEffect(() => {
     if (!selectedUser) { setRecs([]); return; }
-    fetch(`/api/users/${selectedUser}/recommendations`)
+    authFetch(`/api/users/${selectedUser}/recommendations`)
       .then(r=>r.json())
       .then(d => {
         const allRecs = d.recommendations || [];
@@ -216,7 +217,7 @@ export default function ProductPromoManagement() {
       const formData = new FormData();
       formData.append("file", selectedFile);
       try {
-        const uploadRes = await fetch('/api/coin-promos/upload', { method: 'POST', body: formData });
+        const uploadRes = await authFetch('/api/coin-promos/upload', { method: 'POST', body: formData });
         if (uploadRes.ok) {
           const data = await uploadRes.json();
           finalImageUrl = data.file_url;
@@ -238,7 +239,7 @@ export default function ProductPromoManagement() {
 
     let res;
     if (editingPromo) {
-      res = await fetch(`/api/coin-promos/${editingPromo.id}`, {
+      res = await authFetch(`/api/coin-promos/${editingPromo.id}`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -247,7 +248,7 @@ export default function ProductPromoManagement() {
         body: JSON.stringify(payload)
       });
     } else {
-      res = await fetch('/api/coin-promos', {
+      res = await authFetch('/api/coin-promos', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -266,7 +267,7 @@ export default function ProductPromoManagement() {
   };
 
   const handleToggle = async (id: string) => {
-    await fetch(`/api/coin-promos/${id}/toggle`, { 
+    await authFetch(`/api/coin-promos/${id}/toggle`, { 
       method: 'PATCH',
       headers: {
         'x-user-name': user?.name || 'Super Admin'
@@ -277,7 +278,7 @@ export default function ProductPromoManagement() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Hapus promo ini?')) return;
-    await fetch(`/api/coin-promos/${id}`, { 
+    await authFetch(`/api/coin-promos/${id}`, { 
       method: 'DELETE',
       headers: {
         'x-user-name': user?.name || 'Super Admin'
@@ -288,7 +289,7 @@ export default function ProductPromoManagement() {
 
   const handleRedeem = async (promoId: string) => {
     if (!selectedUser) return;
-    const res = await fetch(`/api/coin-promos/${promoId}/redeem`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ user_id: selectedUser }) });
+    const res = await authFetch(`/api/coin-promos/${promoId}/redeem`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ user_id: selectedUser }) });
     const data = await res.json();
     if (res.ok) { showToast(data.message); fetchAll(); }
     else showToast(data.message || 'Gagal');

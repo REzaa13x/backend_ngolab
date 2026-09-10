@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   LayoutDashboard, 
   ShoppingBag, 
@@ -15,13 +15,13 @@ import {
   Package,
   Coins,
   PhoneCall,
-  Coffee,
   UtensilsCrossed,
   TrendingUp,
   Tag,
   Gift,
   CalendarClock,
   CalendarCheck,
+  CheckCircle2,
   Webhook
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
@@ -29,6 +29,8 @@ import { motion } from 'motion/react';
 
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { authFetch } from '../lib/authFetch';
+import socket from '../lib/socket';
 
 interface SidebarProps {
   activeTab: string;
@@ -43,8 +45,8 @@ const navItems = [
   { id: 'manual-order', label: 'Pesanan Manual', icon: PhoneCall, section: 'Utama', roles: ['Super Admin', 'Kasir'] },
   { id: 'reports', label: 'Analisis & Laporan', icon: History, section: 'Utama', roles: ['Super Admin'] },
   { id: 'sales-history', label: 'Riwayat Transaksi', icon: TrendingUp, section: 'Utama', roles: ['Super Admin', 'Kasir'] },
-  { id: 'stock', label: 'Katalog Ngolab', icon: Package, section: 'Utama', roles: ['Super Admin', 'Koki', 'Kasir'] },
-  { id: 'coworking-menu', label: 'Katalog Coworking', icon: Coffee, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki'] },
+  { id: 'menu-availability', label: 'Ketersediaan Menu', icon: CheckCircle2, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki'] },
+  { id: 'stock', label: 'Inventori', icon: Package, section: 'Utama', roles: ['Super Admin', 'Koki', 'Kasir'] },
   { id: 'kds', label: 'Tampilan Dapur', icon: ChefHat, section: 'Utama', roles: ['Super Admin', 'Koki', 'Kasir'] },
   { id: 'promotions', label: 'Papan Digital', icon: Monitor, section: 'Pemasaran', roles: ['Super Admin'] },
   { id: 'product-promos', label: 'Promo Produk', icon: Tag, section: 'Pemasaran', roles: ['Super Admin', 'Kasir'] },
@@ -56,13 +58,55 @@ const navItems = [
   { id: 'preorder-orders', label: 'Pesanan Pre-order', icon: CalendarCheck, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki'] },
   { id: 'logs', label: 'Log Audit', icon: History, section: 'Sistem', roles: ['Super Admin', 'Kasir', 'Koki'] },
   { id: 'api-docs', label: 'API & Integrasi', icon: Webhook, section: 'Sistem', roles: ['Super Admin'] },
-  { id: 'settings', label: 'Pengaturan Admin', icon: Settings, section: 'Sistem', roles: ['Super Admin', 'Kasir', 'Koki'] },
+  { id: 'settings', label: 'Pengaturan Admin', icon: Settings, section: 'Sistem', roles: ['Super Admin'] },
 ];
 
 export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { user, activeRole, setActiveRole, logout } = useAuth();
   const { settings } = useSettings();
+  const [stockAlertCount, setStockAlertCount] = useState(0);
+  const [kdsPendingCount, setKdsPendingCount] = useState(0);
+
+  useEffect(() => {
+    const refreshStockAlerts = async () => {
+      try {
+        const response = await authFetch('/api/ingredients/summary?outlet=ngolab');
+        if (!response.ok) return;
+        const data = await response.json();
+        setStockAlertCount(Number(data.counts?.low || 0) + Number(data.counts?.critical || 0) + Number(data.counts?.out || 0));
+      } catch { /* badge akan dicoba kembali saat event berikutnya */ }
+    };
+    refreshStockAlerts();
+    socket.on('inventory_updated', refreshStockAlerts);
+    socket.on('low_stock_alert', refreshStockAlerts);
+    return () => {
+      socket.off('inventory_updated', refreshStockAlerts);
+      socket.off('low_stock_alert', refreshStockAlerts);
+    };
+  }, []);
+
+  useEffect(() => {
+    const refreshKdsPending = async () => {
+      try {
+        const response = await authFetch('/api/orders/kds/pending-count');
+        if (!response.ok) return;
+        const data = await response.json();
+        setKdsPendingCount(Number(data.total || 0));
+      } catch { /* sinkronisasi berikutnya akan mencoba kembali */ }
+    };
+    refreshKdsPending();
+    const interval = window.setInterval(refreshKdsPending, 30000);
+    socket.on('new_order', refreshKdsPending);
+    socket.on('order_updated', refreshKdsPending);
+    socket.on('preorder_due', refreshKdsPending);
+    return () => {
+      window.clearInterval(interval);
+      socket.off('new_order', refreshKdsPending);
+      socket.off('order_updated', refreshKdsPending);
+      socket.off('preorder_due', refreshKdsPending);
+    };
+  }, []);
   
   const currentRole = activeRole || user?.role || 'Kasir';
 
@@ -173,6 +217,20 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                     )} />
                     {!isCollapsed && (
                       <span className="whitespace-nowrap">{item.label}</span>
+                    )}
+                    {item.id === 'kds' && kdsPendingCount > 0 && (
+                      <span className={cn(
+                        'ml-auto min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center animate-pulse',
+                        activeTab === item.id && 'bg-white text-rose-600',
+                        isCollapsed && 'absolute -top-1 -right-1'
+                      )}>{kdsPendingCount > 99 ? '99+' : kdsPendingCount}</span>
+                    )}
+                    {item.id === 'stock' && stockAlertCount > 0 && (
+                      <span className={cn(
+                        'ml-auto min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center',
+                        activeTab === item.id && 'bg-white text-rose-600',
+                        isCollapsed && 'absolute -top-1 -right-1'
+                      )}>{stockAlertCount > 99 ? '99+' : stockAlertCount}</span>
                     )}
                     {activeTab === item.id && (
                       <motion.div

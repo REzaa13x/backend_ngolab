@@ -22,6 +22,7 @@ import { authFetch } from '../lib/authFetch';
 export default function ManualOrder() {
   const { user } = useAuth();
   const [manualCustomerName, setManualCustomerName] = useState('');
+  const [manualCustomerPhone, setManualCustomerPhone] = useState('');
   const [selectedItems, setSelectedItems] = useState<{ id: string | number, quantity: number }[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [searchMenu, setSearchMenu] = useState('');
@@ -149,6 +150,7 @@ export default function ManualOrder() {
       const endpoint = isPreorder ? `/api/preorders/${selectedCampaignId}/orders` : '/api/orders/manual';
       const payload = isPreorder ? {
         customer_name: manualCustomerName,
+        customer_phone: manualCustomerPhone,
         items: selectedItems,
         payment_timing: paymentTiming,
         payment_method: paymentMethod
@@ -172,6 +174,7 @@ export default function ManualOrder() {
 
       if (res.ok) {
         setManualCustomerName('');
+        setManualCustomerPhone('');
         setSelectedItems([]);
         setPaymentMethod('Tunai');
         setPaymentStatus('belum_bayar');
@@ -384,6 +387,7 @@ export default function ManualOrder() {
                 />
               </div>
             </label>
+            {orderMode === 'preorder' && <label className="block"><span className="text-xs font-medium text-slate-600 mb-1.5 block">Nomor WhatsApp pelanggan</span><input type="tel" placeholder="08xxxxxxxxxx" value={manualCustomerPhone} onChange={event => setManualCustomerPhone(event.target.value)} className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" /></label>}
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">

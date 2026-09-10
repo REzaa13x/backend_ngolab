@@ -3,8 +3,10 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { db } from "../db/db.js";
+import { requireRoles } from '../middleware/authSession.js';
 
 const router = Router();
+const requireDigitalBoardAdmin = requireRoles('Super Admin');
 
 // ─── Upload Directory ────────────────────────────────────────────────────────
 const uploadDir = path.join(process.cwd(), "public", "uploads", "digital-board");
@@ -60,7 +62,7 @@ router.get("/media", async (req: Request, res: Response) => {
 });
 
 // PATCH /api/digital-board/media/:id/toggle — Toggle aktif/nonaktif
-router.patch("/media/:id/toggle", async (req: Request, res: Response) => {
+router.patch("/media/:id/toggle", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const [rows]: any = await db.query("SELECT * FROM media_files WHERE id = ?", [req.params.id]);
     if (!rows.length) return res.status(404).json({ message: "Media tidak ditemukan" });
@@ -92,7 +94,7 @@ router.get("/media/:id", async (req: Request, res: Response) => {
 });
 
 // POST /api/digital-board/media/upload — Upload file baru
-router.post("/media/upload", upload.single("file"), async (req: Request, res: Response) => {
+router.post("/media/upload", requireDigitalBoardAdmin, upload.single("file"), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ message: "Tidak ada file yang diunggah" });
 
@@ -130,7 +132,7 @@ router.post("/media/upload", upload.single("file"), async (req: Request, res: Re
 });
 
 // PUT /api/digital-board/media/:id — Update info media
-router.put("/media/:id", async (req: Request, res: Response) => {
+router.put("/media/:id", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { title, description, duration } = req.body;
     await db.query(
@@ -146,7 +148,7 @@ router.put("/media/:id", async (req: Request, res: Response) => {
 });
 
 // DELETE /api/digital-board/media/:id — Hapus media (soft delete)
-router.delete("/media/:id", async (req: Request, res: Response) => {
+router.delete("/media/:id", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const [rows]: any = await db.query("SELECT * FROM media_files WHERE id = ?", [req.params.id]);
     if (!rows.length) return res.status(404).json({ message: "Media tidak ditemukan" });
@@ -190,7 +192,7 @@ router.get("/playlists", async (_req: Request, res: Response) => {
 });
 
 // POST /api/digital-board/playlists — Buat playlist baru
-router.post("/playlists", async (req: Request, res: Response) => {
+router.post("/playlists", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { name, description, is_default, loop_mode } = req.body;
     if (!name) return res.status(400).json({ message: "Nama playlist wajib diisi" });
@@ -237,7 +239,7 @@ router.get("/playlists/:id", async (req: Request, res: Response) => {
 });
 
 // PUT /api/digital-board/playlists/:id — Update playlist
-router.put("/playlists/:id", async (req: Request, res: Response) => {
+router.put("/playlists/:id", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { name, description, is_default, loop_mode } = req.body;
     if (is_default) {
@@ -255,7 +257,7 @@ router.put("/playlists/:id", async (req: Request, res: Response) => {
 });
 
 // DELETE /api/digital-board/playlists/:id — Hapus playlist
-router.delete("/playlists/:id", async (req: Request, res: Response) => {
+router.delete("/playlists/:id", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     await db.query("UPDATE playlists SET is_active = 0 WHERE id = ?", [req.params.id]);
     res.json({ message: "Playlist dihapus" });
@@ -265,7 +267,7 @@ router.delete("/playlists/:id", async (req: Request, res: Response) => {
 });
 
 // POST /api/digital-board/playlists/:id/items — Tambah media ke playlist
-router.post("/playlists/:id/items", async (req: Request, res: Response) => {
+router.post("/playlists/:id/items", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { media_id, duration_override, transition } = req.body;
     if (!media_id) return res.status(400).json({ message: "media_id wajib diisi" });
@@ -297,7 +299,7 @@ router.post("/playlists/:id/items", async (req: Request, res: Response) => {
 });
 
 // PUT /api/digital-board/playlists/:id/items/reorder — Atur ulang urutan
-router.put("/playlists/:id/items/reorder", async (req: Request, res: Response) => {
+router.put("/playlists/:id/items/reorder", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { order } = req.body; // Array of { id, order_index }
     if (!Array.isArray(order)) return res.status(400).json({ message: "Format order tidak valid" });
@@ -316,7 +318,7 @@ router.put("/playlists/:id/items/reorder", async (req: Request, res: Response) =
 });
 
 // DELETE /api/digital-board/playlists/:id/items/:itemId — Hapus item dari playlist
-router.delete("/playlists/:id/items/:itemId", async (req: Request, res: Response) => {
+router.delete("/playlists/:id/items/:itemId", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     await db.query("DELETE FROM playlist_items WHERE id = ? AND playlist_id = ?", [
       req.params.itemId,
@@ -362,7 +364,7 @@ router.get("/schedules", async (_req: Request, res: Response) => {
 });
 
 // POST /api/digital-board/schedules — Buat jadwal baru
-router.post("/schedules", async (req: Request, res: Response) => {
+router.post("/schedules", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { name, playlist_id, start_time, end_time, days_of_week, start_date, end_date, priority } = req.body;
     if (!name || !playlist_id || !start_time || !end_time) {
@@ -386,7 +388,7 @@ router.post("/schedules", async (req: Request, res: Response) => {
 });
 
 // PUT /api/digital-board/schedules/:id — Update jadwal
-router.put("/schedules/:id", async (req: Request, res: Response) => {
+router.put("/schedules/:id", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { name, playlist_id, start_time, end_time, days_of_week, start_date, end_date, priority, is_active } = req.body;
     await db.query(
@@ -407,7 +409,7 @@ router.put("/schedules/:id", async (req: Request, res: Response) => {
 });
 
 // DELETE /api/digital-board/schedules/:id — Hapus jadwal
-router.delete("/schedules/:id", async (req: Request, res: Response) => {
+router.delete("/schedules/:id", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     await db.query("UPDATE schedules SET is_active = 0 WHERE id = ?", [req.params.id]);
     res.json({ message: "Jadwal dihapus" });
@@ -431,7 +433,7 @@ router.get("/screens", async (_req: Request, res: Response) => {
 });
 
 // POST /api/digital-board/screens — Daftarkan layar baru
-router.post("/screens", async (req: Request, res: Response) => {
+router.post("/screens", requireDigitalBoardAdmin, async (req: Request, res: Response) => {
   try {
     const { name, location } = req.body;
     if (!name) return res.status(400).json({ message: "Nama layar wajib diisi" });
