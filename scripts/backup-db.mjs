@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { execFile } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { promisify } from 'node:util';
