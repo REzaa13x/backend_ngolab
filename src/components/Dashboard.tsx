@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import socket from '../lib/socket';
+import { authFetch } from '../lib/authFetch';
 import { 
   TrendingUp, 
   Users, 
@@ -124,12 +125,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchData = () => {
-      fetch('/api/stats')
+      authFetch('/api/stats')
         .then(res => res.json())
         .then(data => setStats(data))
         .catch(err => console.error("Failed to fetch stats:", err));
 
-      fetch('/api/sales-data')
+      authFetch('/api/sales-data')
         .then(res => res.json())
         .then(data => setSalesData(data))
         .catch(err => console.error("Failed to fetch sales data:", err));
@@ -292,7 +293,7 @@ export default function Dashboard() {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => {
-              fetch('/api/orders/simulate', { method: 'POST' });
+              authFetch('/api/orders/simulate', { method: 'POST' });
               alert('Pesanan baru telah disimulasikan! Cek di Kasir atau Dapur.');
             }}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-100 transition-all shadow-sm"
@@ -419,7 +420,7 @@ export default function Dashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
-                <tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-bold">
+                <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  dark: text-[10px] uppercase tracking-widest  font-bold">
                   <th className="px-6 py-4">Faktur</th>
                   <th className="px-6 py-4">Pelanggan</th>
                   <th className="px-6 py-4">Metode</th>
@@ -430,7 +431,7 @@ export default function Dashboard() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {transactions.slice(0, 4).map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <tr key={row.id} className="hover:bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800 transition-colors group">
                     <td className="px-6 py-4 text-sm font-bold text-slate-900">{row.id}</td>
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
@@ -489,7 +490,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="bg-indigo-600 p-6 rounded-2xl text-white shadow-lg shadow-indigo-200 relative overflow-hidden group">
+          <div className="bg-indigo-600 p-6 rounded-2xl text-white shadow-lg shadow-indigo-200 dark:shadow-none relative overflow-hidden group">
             <div className="relative z-10">
               <h4 className="font-bold mb-2">Dukungan Premium</h4>
               <p className="text-xs text-indigo-100 mb-4 font-medium">Butuh bantuan dengan sistem manajemen kantin Anda?</p>

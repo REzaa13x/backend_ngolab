@@ -6,8 +6,10 @@ import os from 'os';
 import crypto from 'crypto';
 import { db } from '../db/db.js';
 import { detectMediaFile } from '../lib/mediaFile.js';
+import { requireRoles } from '../middleware/authSession.js';
 
 const router = Router();
+router.use(requireRoles('Super Admin'));
 const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'promotions');
 fs.mkdirSync(uploadDir, { recursive: true });
 

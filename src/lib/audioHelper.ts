@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { normalizeKdsSoundSettings } from './kdsSound.js';
+
 let persistentAudioCtx: AudioContext | null = null;
 
 function getOrCreateAudioCtx(): AudioContext | null {
@@ -18,7 +20,7 @@ function getOrCreateAudioCtx(): AudioContext | null {
   }
 }
 
-export async function playBellWithResume(type: 'new_order' | 'ready') {
+export async function playBellWithResume(type: 'new_order' | 'ready', volume = 1) {
   try {
     const ctx = getOrCreateAudioCtx();
     if (!ctx) return;
@@ -28,6 +30,9 @@ export async function playBellWithResume(type: 'new_order' | 'ready') {
     }
 
     const now = ctx.currentTime;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(Math.min(1, Math.max(0, volume)), now);
+    master.connect(ctx.destination);
 
     if (type === 'new_order') {
       // 🔔🔔🔔 Triple DING kencang metalik — Pesanan Masuk!
@@ -46,7 +51,7 @@ export async function playBellWithResume(type: 'new_order' | 'ready') {
           curve[i] = (Math.PI + 200) * x / (Math.PI + 200 * Math.abs(x));
         }
         distort.curve = curve;
-        osc.connect(distort); distort.connect(gain); gain.connect(ctx.destination);
+        osc.connect(distort); distort.connect(gain); gain.connect(master);
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, now + time);
         osc.frequency.exponentialRampToValueAtTime(freq * 0.5, now + time + 0.6);
@@ -59,7 +64,7 @@ export async function playBellWithResume(type: 'new_order' | 'ready') {
       // Harmonic overtone metalik
       const oscH = ctx.createOscillator();
       const gainH = ctx.createGain();
-      oscH.connect(gainH); gainH.connect(ctx.destination);
+      oscH.connect(gainH); gainH.connect(master);
       oscH.type = 'sine';
       oscH.frequency.setValueAtTime(2637, now);
       gainH.gain.setValueAtTime(0, now);
@@ -77,7 +82,7 @@ export async function playBellWithResume(type: 'new_order' | 'ready') {
       notes.forEach(({ time, freq, vol }) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.connect(gain); gain.connect(ctx.destination);
+        osc.connect(gain); gain.connect(master);
         osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, now + time);
         osc.frequency.exponentialRampToValueAtTime(freq * 0.98, now + time + 1.2);
@@ -89,7 +94,7 @@ export async function playBellWithResume(type: 'new_order' | 'ready') {
         // Overtone
         const oscOv = ctx.createOscillator();
         const gainOv = ctx.createGain();
-        oscOv.connect(gainOv); gainOv.connect(ctx.destination);
+        oscOv.connect(gainOv); gainOv.connect(master);
         oscOv.type = 'sine';
         oscOv.frequency.setValueAtTime(freq * 2, now + time);
         gainOv.gain.setValueAtTime(0, now + time);
@@ -101,6 +106,37 @@ export async function playBellWithResume(type: 'new_order' | 'ready') {
   } catch (e) {
     console.warn('Bell playback failed:', e);
   }
+}
+
+export async function playConfiguredKdsSound(
+  type: 'new_order' | 'ready',
+  rawSettings: Record<string, unknown>
+) {
+  const settings = normalizeKdsSoundSettings(rawSettings);
+  if (!settings.enabled) return false;
+  const customUrl = type === 'new_order' ? settings.newOrderUrl : settings.readyUrl;
+  if (customUrl) {
+    try {
+      const ctx = getOrCreateAudioCtx();
+      if (!ctx) throw new Error('AudioContext tidak tersedia');
+      if (ctx.state === 'suspended') await ctx.resume();
+      const response = await fetch(customUrl, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Audio HTTP ${response.status}`);
+      const buffer = await ctx.decodeAudioData(await response.arrayBuffer());
+      const source = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(settings.volume, ctx.currentTime);
+      source.buffer = buffer;
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.start();
+      return true;
+    } catch (error) {
+      console.warn('Custom KDS sound failed, using built-in bell:', error);
+    }
+  }
+  await playBellWithResume(type, settings.volume);
+  return true;
 }
 
 export async function unlockAudioContext() {

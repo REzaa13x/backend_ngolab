@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import socket from '../lib/socket';
+import { authFetch } from '../lib/authFetch';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -62,7 +63,7 @@ export default function OrderManagement() {
 
   const fetchOrders = () => {
     setLoading(true);
-    fetch('/api/orders')
+    authFetch('/api/orders')
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -81,7 +82,7 @@ export default function OrderManagement() {
   };
 
   const fetchSummary = () => {
-    fetch('/api/reports/summary')
+    authFetch('/api/reports/summary')
       .then(res => res.json())
       .then(data => setSummary(data))
       .catch(err => console.error("Summary fetch failed:", err));
@@ -156,7 +157,7 @@ export default function OrderManagement() {
 
   const verifyPayment = async (id: string, paymentDetails?: { method: string, amount: number }) => {
     try {
-      const res = await fetch(`/api/orders/${id}/verify`, { 
+      const res = await authFetch(`/api/orders/${id}/verify`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -183,7 +184,7 @@ export default function OrderManagement() {
 
   const updatePaymentStatus = async (id: string, paymentStatus: 'belum_bayar' | 'lunas') => {
     try {
-      const res = await fetch(`/api/orders/${id}/payment-status`, { 
+      const res = await authFetch(`/api/orders/${id}/payment-status`, {
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
@@ -210,7 +211,7 @@ export default function OrderManagement() {
   const rejectOrder = async (id: string) => {
     if (!window.confirm("Apakah Anda yakin ingin menolak pembayaran ini? Pesanan akan dibatalkan.")) return;
     try {
-      const res = await fetch(`/api/orders/${id}/reject`, { 
+      const res = await authFetch(`/api/orders/${id}/reject`, {
         method: 'POST',
         headers: {
           'x-user-name': user?.name || 'Kasir'
@@ -233,7 +234,7 @@ export default function OrderManagement() {
   const deleteOrder = async (id: string) => {
     if (!confirm("Hapus pesanan ini?")) return;
     try {
-      const res = await fetch(`/api/orders/${id}`, { 
+      const res = await authFetch(`/api/orders/${id}`, {
         method: 'DELETE',
         headers: {
           'x-user-name': user?.name || 'Super Admin'
@@ -253,7 +254,7 @@ export default function OrderManagement() {
 
   const updateStatus = async (id: string, status: string) => {
     try {
-      const res = await fetch(`/api/orders/${id}/status`, { 
+      const res = await authFetch(`/api/orders/${id}/status`, {
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
@@ -335,7 +336,7 @@ export default function OrderManagement() {
           <button 
             onClick={exportToPDF}
             disabled={isExporting || filteredOrders.length === 0}
-            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-slate-200 disabled:opacity-50 disabled:shadow-none"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-slate-200 dark:shadow-none disabled:opacity-50 disabled:shadow-none"
           >
             {isExporting ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
             Cetak PDF
@@ -385,11 +386,11 @@ export default function OrderManagement() {
                        "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
                        sourceFilter === s.id 
                          ? s.id === 'ngolab' 
-                           ? "bg-orange-600 text-white shadow-md shadow-orange-200"
+                           ? "bg-orange-600 text-white shadow-md shadow-orange-200 dark:shadow-none"
                            : s.id === 'coworking'
-                             ? "bg-blue-600 text-white shadow-md shadow-blue-200"
+                             ? "bg-blue-600 text-white shadow-md shadow-blue-200 dark:shadow-none"
                              : s.id === 'smart_tag_qr'
-                               ? "bg-purple-600 text-white shadow-md shadow-purple-200"
+                               ? "bg-purple-600 text-white shadow-md shadow-purple-200 dark:shadow-none"
                                : "bg-slate-900 text-white shadow-md"
                          : "text-slate-500 hover:bg-slate-50"
                      )}
@@ -427,7 +428,7 @@ export default function OrderManagement() {
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="bg-slate-50/50 text-[10px] uppercase tracking-widest text-slate-400 font-black border-b border-slate-50">
+              <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  dark: text-[10px] uppercase tracking-widest  font-black border-b border-slate-50">
                 <th className="px-6 py-5">Pesanan</th>
                 <th className="px-6 py-5">Info Bayar</th>
                 <th className="px-6 py-5 text-right">Total</th>
@@ -650,7 +651,7 @@ export default function OrderManagement() {
                   <div className="flex gap-2">
                     <button 
                       onClick={() => verifyPayment(selectedOrder.id)}
-                      className="flex-1 bg-emerald-600 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100"
+                      className="flex-1 bg-emerald-600 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 dark:shadow-none"
                     >
                       Terima & Proses
                     </button>

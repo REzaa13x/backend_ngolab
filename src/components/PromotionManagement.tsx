@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 
 interface MediaFile {
   id: number;
@@ -94,7 +95,7 @@ function UploadForm({ onSuccess }: { onSuccess: () => void }) {
     formData.append('uploaded_by', 'Admin');
 
     try {
-      const res = await fetch('/api/digital-board/media/upload', {
+      const res = await authFetch('/api/digital-board/media/upload', {
         method: 'POST',
         body: formData,
       });
@@ -220,7 +221,7 @@ function UploadForm({ onSuccess }: { onSuccess: () => void }) {
         <button
           type="submit"
           disabled={!selectedFile || isUploading}
-          className="w-full py-3.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="w-full py-3.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {isUploading
             ? <><Loader2 className="animate-spin" size={16} /> Mengupload ke Database...</>
@@ -616,7 +617,7 @@ export default function PromotionManagement() {
   const fetchMedia = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await fetch('/api/digital-board/media');
+      const res = await authFetch('/api/digital-board/media');
       if (!res.ok) throw new Error('Gagal fetch');
       const data = await res.json();
       setMediaList(data);
@@ -647,7 +648,7 @@ export default function PromotionManagement() {
 
   const handleToggle = async (id: number) => {
     try {
-      const res = await fetch(`/api/digital-board/media/${id}/toggle`, { method: 'PATCH' });
+      const res = await authFetch(`/api/digital-board/media/${id}/toggle`, { method: 'PATCH' });
       const data = await res.json();
       if (res.ok) {
         setMediaList(prev => prev.map(m =>
@@ -662,7 +663,7 @@ export default function PromotionManagement() {
   const handleDelete = async (id: number) => {
     if (!confirm('Hapus media ini? File akan dihapus dari server dan database.')) return;
     try {
-      const res = await fetch(`/api/digital-board/media/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/digital-board/media/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setMediaList(prev => prev.filter(m => m.id !== id));
       }
@@ -704,7 +705,7 @@ export default function PromotionManagement() {
           {mediaList.length > 0 && (
             <button
               onClick={() => openPreview(0)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none"
             >
               <Eye size={13} />
               Pratinjau Layar
@@ -726,7 +727,7 @@ export default function PromotionManagement() {
             <div className="flex items-center gap-3">
               <div className={cn(
                 'w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow',
-                isIdle ? 'bg-indigo-600 shadow-indigo-200' : 'bg-emerald-500 shadow-emerald-200'
+                isIdle ? 'bg-indigo-600 shadow-indigo-200 dark:shadow-none' : 'bg-emerald-500 shadow-emerald-200 dark:shadow-none'
               )}>
                 <Monitor className="text-white" size={18} />
               </div>

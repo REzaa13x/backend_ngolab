@@ -1,7 +1,9 @@
 import { Router, Request, Response } from "express";
 import { db, addAuditLog } from "../db/db.js";
+import { requireRoles, getVerifiedActor } from "../middleware/authSession.js";
 
 const router = Router();
+router.use(requireRoles('Super Admin'));
 
 // GET /api/shifts
 router.get("/", async (req: Request, res: Response) => {
@@ -22,7 +24,7 @@ router.get("/", async (req: Request, res: Response) => {
 router.post("/", async (req: Request, res: Response) => {
   try {
     const { staff_id, shift_type, time } = req.body;
-    const actor = (req.headers["x-user-name"] as string) || "Sistem";
+    const actor = getVerifiedActor(req);
 
     if (!staff_id || !shift_type || !time) {
       return res.status(400).json({ message: "Data shift tidak lengkap" });

@@ -4,8 +4,10 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { db, addAuditLog } from "../db/db.js";
+import { requireAuthenticated, requireRoles, getVerifiedActor } from '../middleware/authSession.js';
 
 const router = Router();
+const requireCoinAdmin = requireRoles('Super Admin');
 
 // ─── Upload Directory ────────────────────────────────────────────────────────
 const uploadDir = path.join(process.cwd(), "public", "uploads", "promos");
@@ -43,7 +45,7 @@ router.get("/", async (_req: Request, res: Response) => {
 });
 
 // POST /api/coin-promos
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", requireCoinAdmin, async (req: Request, res: Response) => {
   try {
     const { title, description, coin_cost, discount_type, discount_value, free_item_name, required_item_name, min_order, max_usage, valid_until, image_url, category, product_id, category_id, promo_code, limit_per_user } = req.body;
     
@@ -69,7 +71,7 @@ router.post("/", async (req: Request, res: Response) => {
     );
 
     const [newPromo]: any = await db.query("SELECT * FROM coin_promos WHERE id = ?", [id]);
-    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Buat Promo Koin", `${title} (${coin_cost} koin)`);
     res.status(201).json(newPromo[0]);
   } catch (err: any) {
@@ -78,7 +80,7 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 // POST /api/coin-promos/upload
-router.post("/upload", upload.single("file"), async (req: Request, res: Response) => {
+router.post("/upload", requireCoinAdmin, upload.single("file"), async (req: Request, res: Response) => {
   try {
     if (!req.file) return res.status(400).json({ message: "Tidak ada file yang diunggah" });
     const fileUrl = `/uploads/promos/${req.file.filename}`;
@@ -89,7 +91,7 @@ router.post("/upload", upload.single("file"), async (req: Request, res: Response
 });
 
 // PUT /api/coin-promos/:id
-router.put("/:id", async (req: Request, res: Response) => {
+router.put("/:id", requireCoinAdmin, async (req: Request, res: Response) => {
   try {
     const { title, description, coin_cost, discount_type, discount_value, free_item_name, required_item_name, min_order, max_usage, valid_until, is_active, image_url, category, product_id, category_id, promo_code, limit_per_user } = req.body;
     const { id } = req.params;
@@ -131,9 +133,9 @@ router.put("/:id", async (req: Request, res: Response) => {
 });
 
 // DELETE /api/coin-promos/:id
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", requireCoinAdmin, async (req: Request, res: Response) => {
   try {
-    const actor = (req.headers["x-user-name"] as string) || "Admin";
+    const actor = getVerifiedActor(req);
     const [promos]: any = await db.query("SELECT title FROM coin_promos WHERE id = ?", [req.params.id]);
     const title = promos.length ? promos[0].title : req.params.id;
     await db.query("DELETE FROM coin_promos WHERE id = ?", [req.params.id]);
@@ -145,7 +147,7 @@ router.delete("/:id", async (req: Request, res: Response) => {
 });
 
 // PATCH /api/coin-promos/:id/toggle
-router.patch("/:id/toggle", async (req: Request, res: Response) => {
+router.patch("/:id/toggle", requireCoinAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const [promos]: any = await db.query("SELECT is_active FROM coin_promos WHERE id = ?", [id]);
@@ -162,12 +164,21 @@ router.patch("/:id/toggle", async (req: Request, res: Response) => {
 });
 
 // POST /api/coin-promos/:id/redeem
-router.post("/:id/redeem", async (req: Request, res: Response) => {
+router.post("/:id/redeem", requireAuthenticated, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const { id } = req.params;
     const { user_id } = req.body;
+    const currentAuth = (req as any).auth;
+    if (!user_id) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'user_id wajib diisi' });
+    }
+    if (currentAuth?.role === 'Pelanggan' && String(currentAuth.id) !== String(user_id)) {
+      await connection.rollback();
+      return res.status(403).json({ message: 'Anda hanya dapat menukarkan poin akun sendiri' });
+    }
 
     const [promos]: any = await connection.query("SELECT * FROM coin_promos WHERE id = ? FOR UPDATE", [id]);
     if (!promos.length) return res.status(404).json({ message: "Promo tidak ditemukan" });

@@ -1,4 +1,6 @@
 async function run() {
+  const apiKey = process.env.EXTERNAL_API_KEY;
+  if (!apiKey) throw new Error('Atur EXTERNAL_API_KEY sebelum menjalankan skrip ini.');
   const payload = {
     customer_name: "Tamu Eksternal",
     items: [
@@ -17,7 +19,7 @@ async function run() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": "tangolab-secret-key-2026"
+        "x-api-key": apiKey
       },
       body: JSON.stringify(payload)
     });

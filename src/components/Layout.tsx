@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
 import Dashboard from './Dashboard';
 import OrderManagement from './OrderManagement';
@@ -11,20 +11,29 @@ import StaffManagement from './StaffManagement';
 import AuditLogs from './AuditLogs';
 import ProductPromoManagement from './ProductPromoManagement';
 import VoucherManagement from './VoucherManagement';
-import CoworkingMenu from './CoworkingMenu';
+import MenuAvailability from './MenuAvailability';
 import SalesReport from './SalesReport';
 import MenuManagement from './MenuManagement';
 import SalesHistory from './SalesHistory';
 import IoTConfig from './IoTConfig';
+import PreorderManagement from './PreorderManagement';
+import PreorderOrders from './PreorderOrders';
+import ApiDocumentation from './ApiDocumentation';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, Search, Settings, User, HelpCircle, Volume2, VolumeX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useSettings } from '../contexts/SettingsContext';
 import socket from '../lib/socket';
-import { playBellWithResume, unlockAudioContext } from '../lib/audioHelper';
+import { playBellWithResume, playConfiguredKdsSound, unlockAudioContext } from '../lib/audioHelper';
+import { createOrderBellDeduper, getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
 
 export default function Layout() {
   const { user, activeRole } = useAuth();
+  const { settings } = useSettings();
+  const bellDeduper = useRef(createOrderBellDeduper());
+  // Ref agar handler socket selalu baca nilai soundEnabled terbaru (no stale closure)
+  const soundEnabledRef = useRef(localStorage.getItem('tangolab_sound_enabled') !== 'false');
   
   // Define default tab based on role
   const getDefaultTab = () => {
@@ -64,6 +73,7 @@ export default function Layout() {
   useEffect(() => {
     localStorage.setItem('tangolab_sound_enabled', String(soundEnabled));
     window.dispatchEvent(new Event('sound_enabled_change'));
+    soundEnabledRef.current = soundEnabled; // always up-to-date in socket handlers
   }, [soundEnabled]);
 
   // Auto-unlock AudioContext on first user interaction anywhere on the document
@@ -88,51 +98,55 @@ export default function Layout() {
     };
   }, []);
 
-const rungNewOrders = new Set<string>();
-const rungReadyOrders = new Set<string>();
+  // ─── GLOBAL KITCHEN BELL ───────────────────────────────────────────────────
+  // Subscribe ke socket events SEKALI di level Layout agar suara berbunyi
+  // untuk SEMUA jenis pesanan (manual, online, preorder) tanpa perlu
+  // setiap komponen mendaftarkan listener sendiri-sendiri.
+  // soundEnabledRef & settingsRef memastikan handler selalu baca nilai terbaru
+  // tanpa harus unsubscribe/re-subscribe setiap state berubah.
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
 
-  // Global socket listener for new order bell sounds
   useEffect(() => {
-    const handleNewOrder = (newOrder: any) => {
-      console.log("🔔 [Global Layout] Socket new_order received:", newOrder);
-      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
-      if (isSoundOn && newOrder.payment_status === 'lunas') {
-        if (!rungNewOrders.has(newOrder.id)) {
-          rungNewOrders.add(newOrder.id);
-          console.log("🔔 [Global Layout] Playing sound: new_order");
-          playBellWithResume('new_order');
-        }
+    const ringBell = async (type: 'new_order' | 'ready', orderId: string | number) => {
+      if (!soundEnabledRef.current) return;
+      if (!bellDeduper.current.shouldRing(type, orderId)) return;
+      console.log(`🔔 [Layout] Bell "${type}" untuk order #${orderId}`);
+      try {
+        await playConfiguredKdsSound(type, settingsRef.current as Record<string, unknown>);
+      } catch (e) {
+        console.warn('[Layout] Bell gagal diputar:', e);
       }
     };
 
-    const handleOrderUpdated = (updatedOrder: any) => {
-      console.log("🔄 [Global Layout] Socket order_updated received:", updatedOrder);
-      const isSoundOn = localStorage.getItem('tangolab_sound_enabled') !== 'false';
-      if (isSoundOn) {
-        if (updatedOrder.payment_status === 'lunas' && updatedOrder.status === 'menunggu') {
-          if (!rungNewOrders.has(updatedOrder.id)) {
-            rungNewOrders.add(updatedOrder.id);
-            console.log("🔔 [Global Layout] Playing sound: new_order (payment lunas)");
-            playBellWithResume('new_order');
-          }
-        } else if (updatedOrder.status === 'siap') {
-          if (!rungReadyOrders.has(updatedOrder.id)) {
-            rungReadyOrders.add(updatedOrder.id);
-            console.log("🔔 [Global Layout] Playing sound: ready");
-            playBellWithResume('ready');
-          }
-        }
-      }
+    const onPreorderDue = (campaign: any) => {
+      const releaseId = `preorder:${campaign?.id ?? 'unknown'}`;
+      if (campaign?.id != null) ringBell('new_order', releaseId);
     };
 
-    socket.on("new_order", handleNewOrder);
-    socket.on("order_updated", handleOrderUpdated);
+    const unsubscribe = subscribeToOrderEvents(socket, {
+      onNewOrder: (payload: any) => {
+        const bellType = getOrderBellType('new_order', payload);
+        if (bellType && payload?.id != null) ringBell(bellType, payload.id);
+      },
+      onOrderUpdated: (payload: any) => {
+        const bellType = getOrderBellType('order_updated', payload);
+        if (bellType && payload?.id != null) ringBell(bellType, payload.id);
+      },
+    });
+    socket.on('preorder_due', onPreorderDue);
+
+    // Pastikan socket terhubung
+    if (!socket.connected) socket.connect();
 
     return () => {
-      socket.off("new_order", handleNewOrder);
-      socket.off("order_updated", handleOrderUpdated);
+      unsubscribe();
+      socket.off('preorder_due', onPreorderDue);
     };
+  // Mount once — soundEnabledRef & settingsRef selalu up-to-date via effect above
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   const toggleSound = async () => {
     const newSoundEnabled = !soundEnabled;
@@ -155,15 +169,18 @@ const rungReadyOrders = new Set<string>();
     'users': 'Database Pengguna',
     'kds': 'Sistem Tampilan Dapur',
     'promotions': 'Manajer Papan Digital',
-    'stock': 'Katalog Menu Ngolab',
+    'stock': 'Inventori Ngolab',
     'staff': 'Tim & Manajemen Shift',
     'logs': 'Pusat Log & Audit Sistem',
     'product-promos': 'Manajemen Promo Produk',
     'vouchers': 'Manajemen Voucher Koin',
-    'coworking-menu': 'Katalog Menu Coworking',
+    'menu-availability': 'Ketersediaan Menu',
     'menu-management': 'Manajemen Menu',
+    'preorders': 'Menu Pre-order',
+    'preorder-orders': 'Pesanan Pre-order',
     'sales-history': 'Riwayat Transaksi',
-    'settings': 'Hardware & IoT Configuration'
+    'settings': 'Hardware & IoT Configuration',
+    'api-docs': 'Dokumentasi & API'
   };
 
   const renderContent = () => {
@@ -180,10 +197,13 @@ const rungReadyOrders = new Set<string>();
       case 'logs': return <AuditLogs />;
       case 'product-promos': return <ProductPromoManagement />;
       case 'vouchers': return <VoucherManagement />;
-      case 'coworking-menu': return <CoworkingMenu />;
+      case 'menu-availability': return <MenuAvailability onNavigate={setActiveTab} />;
       case 'menu-management': return <MenuManagement onNavigate={setActiveTab} />;
+      case 'preorders': return <PreorderManagement />;
+      case 'preorder-orders': return <PreorderOrders />;
       case 'sales-history': return <SalesHistory />;
       case 'settings': return <IoTConfig />;
+      case 'api-docs': return <ApiDocumentation />;
       default: return <Dashboard />;
     }
   };
@@ -194,7 +214,7 @@ const rungReadyOrders = new Set<string>();
       
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Header */}
-        <header className="h-16 border-b border-slate-100 bg-white/80 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-10">
+        <header className="h-16 border-b border-slate-100 bg-white/80 dark:bg-[#0f172a]/80 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-10">
           <div className="flex items-center gap-4 flex-1">
             <h1 className="text-base font-bold text-slate-900">
               {tabTitles[activeTab] || activeTab}
@@ -207,7 +227,7 @@ const rungReadyOrders = new Set<string>();
               <input 
                 type="text" 
                 placeholder="Cari data..."
-                className="w-64 bg-slate-50 border border-slate-100 rounded-lg pl-10 pr-4 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                className="w-64 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 rounded-lg pl-10 pr-4 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
               />
             </div>
             
@@ -223,8 +243,8 @@ const rungReadyOrders = new Set<string>();
                 className={cn(
                   "p-2 rounded-lg transition-colors flex items-center justify-center relative",
                   soundEnabled
-                    ? "text-slate-400 hover:text-indigo-600 hover:bg-slate-50"
-                    : "text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-100/80"
+                    ? "text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                    : "text-rose-500 hover:text-rose-600 bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100/80 dark:hover:bg-rose-500/20"
                 )}
               >
                 {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
@@ -246,7 +266,7 @@ const rungReadyOrders = new Set<string>();
                 <p className="text-xs font-bold text-slate-900">{user?.name || 'Guest'}</p>
                 <p className="text-[10px] text-slate-500 font-medium">Tangolab Geasture-East</p>
               </div>
-              <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
+              <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
                 {(user?.name?.charAt(0) || 'U').toUpperCase()}
               </div>
             </div>

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { authFetch } from '../lib/authFetch';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface OrderItem {
@@ -75,7 +76,7 @@ export default function SalesHistory() {
   // ── Fetch our orders ─────────────────────────────────────────────────────
   const fetchOurOrders = async () => {
     try {
-      const res = await fetch('/api/orders');
+      const res = await authFetch('/api/orders');
       if (!res.ok) throw new Error('API error');
       const data: Order[] = await res.json();
       setOurOrders(data.map(o => ({ ...o, source: o.source || 'ngolab' })));
@@ -200,7 +201,7 @@ export default function SalesHistory() {
           <button
             onClick={() => loadAll(true)}
             disabled={refreshing}
-            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-xl text-xs font-bold hover:bg-violet-700 transition-all disabled:opacity-50 shadow-lg shadow-violet-200"
+            className="flex items-center gap-2 px-4 py-2.5 bg-violet-600 text-white rounded-xl text-xs font-bold hover:bg-violet-700 transition-all disabled:opacity-50 shadow-lg shadow-violet-200 dark:shadow-none"
           >
             <RefreshCcw size={14} className={cn(refreshing && 'animate-spin')} />
             Refresh
@@ -212,7 +213,7 @@ export default function SalesHistory() {
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
 
         {/* Combined Revenue */}
-        <div className="lg:col-span-1 bg-gradient-to-br from-violet-600 to-violet-800 rounded-[2rem] p-6 text-white shadow-xl shadow-violet-200 relative overflow-hidden">
+        <div className="lg:col-span-1 bg-gradient-to-br from-violet-600 to-violet-800 rounded-[2rem] p-6 text-white shadow-xl shadow-violet-200 dark:shadow-none relative overflow-hidden">
           <div className="absolute -top-6 -right-6 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
           <div className="relative z-10">
             <p className="text-[10px] font-black uppercase tracking-widest text-violet-200 mb-2">Total Pendapatan</p>
@@ -329,7 +330,7 @@ export default function SalesHistory() {
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-100">
+                <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  border-b border-slate-100">
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Invoice</th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Sumber</th>
                   <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Pelanggan</th>

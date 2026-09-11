@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/db.js';
+import { requireRoles } from '../middleware/authSession.js';
 
 const router = Router();
 
-router.post('/simulate', async (req: Request, res: Response) => {
+router.post('/simulate', requireRoles('Super Admin', 'Kasir'), async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     const [users]: any = await db.query('SELECT id, nama FROM users ORDER BY RAND() LIMIT 1');

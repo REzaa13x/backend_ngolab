@@ -1,14 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/db.js';
+import { requireRoles } from '../middleware/authSession.js';
 
 const router = Router();
-const SMART_TAG_API = process.env.SMART_TAG_API_URL || 'http://192.168.1.11:5000';
+router.use(requireRoles('Super Admin', 'Kasir', 'Koki'));
+const SMART_TAG_API = (process.env.SMART_TAG_API_URL || 'https://smarttag.ngolab.online').replace(/\/$/, '');
+const SMART_TAG_HEADERS = { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 Tangolab-Ngolab-Integration' };
 
 async function fetchExternalMenus() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1500);
   try {
-    const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal });
+    const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal, headers: SMART_TAG_HEADERS });
     if (!response.ok) return [];
     const data: any = await response.json();
     return Array.isArray(data) ? data : [];

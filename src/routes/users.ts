@@ -3,11 +3,13 @@ import { db } from "../db/db.js";
 import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
 import { normalizeEmail } from "../lib/auth.js";
 import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
+import { requireAuthenticated, requireRoles } from '../middleware/authSession.js';
 
 const router = Router();
+const requireUserAdmin = requireRoles('Super Admin', 'Kasir', 'Support');
 
 // GET /api/users
-router.get("/", async (_req: Request, res: Response) => {
+router.get("/", requireUserAdmin, async (_req: Request, res: Response) => {
   try {
     const query = `
       SELECT 
@@ -40,9 +42,13 @@ router.get("/", async (_req: Request, res: Response) => {
 });
 
 // GET /api/users/:id/recommendations
-router.get("/:id/recommendations", async (req: Request, res: Response) => {
+router.get("/:id/recommendations", requireAuthenticated, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const currentAuth = (req as any).auth;
+    if (currentAuth?.role === 'Pelanggan' && String(currentAuth.id) !== String(id)) {
+      return res.status(403).json({ message: 'Anda hanya dapat melihat data akun sendiri' });
+    }
     
     // 1. Get user
     const [users]: any = await db.query("SELECT * FROM users WHERE id = ?", [id]);
@@ -99,7 +105,7 @@ router.get("/:id/recommendations", async (req: Request, res: Response) => {
 });
 
 // GET /api/coin-transactions
-router.get("/transactions", async (req: Request, res: Response) => {
+router.get("/transactions", requireUserAdmin, async (req: Request, res: Response) => {
   try {
     const { user_id } = req.query;
     let sql = "SELECT * FROM coin_transactions";
@@ -119,7 +125,7 @@ router.get("/transactions", async (req: Request, res: Response) => {
 // POST /api/users/register — Registrasi User / Pelanggan Baru
 router.post("/register", async (req: Request, res: Response) => {
   try {
-    const { id, nama, nim, avatar_url, email, phone, role, password } = req.body;
+    const { id, nama, nim, avatar_url, email, phone, password } = req.body;
     const normalizedEmail = normalizeEmail(email);
 
     if (!id || !nama) {
@@ -130,6 +136,10 @@ router.post("/register", async (req: Request, res: Response) => {
     const [existing]: any = await db.query("SELECT id FROM users WHERE id = ?", [id]);
     if (existing.length > 0) {
       return res.status(400).json({ message: "User ID / NIM sudah terdaftar" });
+    }
+    const [staffIdOwner]: any = await db.query("SELECT id FROM staff WHERE id = ?", [id]);
+    if (staffIdOwner.length > 0) {
+      return res.status(400).json({ message: "User ID tidak dapat menggunakan ID staf" });
     }
     if (normalizedEmail) {
       const [emailOwner]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
@@ -144,7 +154,7 @@ router.post("/register", async (req: Request, res: Response) => {
 
     const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
     const avatar = avatar_url || `https://picsum.photos/seed/${id}/100/100`;
-    const userRole = role || 'Pelanggan';
+    const userRole = 'Pelanggan';
     const hashedPassword = password ? await hashPassword(password) : null;
 
     await db.query(
@@ -217,7 +227,7 @@ router.post("/login", async (req: Request, res: Response) => {
 });
 
 // POST /api/users/:id/earn-coins — Tambah Koin (dari game atau aktivitas Kiosk)
-router.post("/:id/earn-coins", async (req: Request, res: Response) => {
+router.post("/:id/earn-coins", requireUserAdmin, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -273,9 +283,13 @@ router.post("/:id/earn-coins", async (req: Request, res: Response) => {
 });
 
 // GET /api/users/:user_id/study-sessions — Ambil riwayat belajar mahasiswa
-router.get("/:user_id/study-sessions", async (req: Request, res: Response) => {
+router.get("/:user_id/study-sessions", requireAuthenticated, async (req: Request, res: Response) => {
   try {
     const { user_id } = req.params;
+    const currentAuth = (req as any).auth;
+    if (currentAuth?.role === 'Pelanggan' && String(currentAuth.id) !== String(user_id)) {
+      return res.status(403).json({ message: 'Anda hanya dapat melihat data akun sendiri' });
+    }
     const [rows]: any = await db.query(
       "SELECT * FROM study_sessions WHERE user_id = ? ORDER BY created_at DESC",
       [user_id]
@@ -287,11 +301,16 @@ router.get("/:user_id/study-sessions", async (req: Request, res: Response) => {
 });
 
 // POST /api/users/:user_id/study-sessions — Simpan sesi belajar baru & tambah koin
-router.post("/:user_id/study-sessions", async (req: Request, res: Response) => {
+router.post("/:user_id/study-sessions", requireAuthenticated, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const { user_id } = req.params;
+    const currentAuth = (req as any).auth;
+    if (currentAuth?.role === 'Pelanggan' && String(currentAuth.id) !== String(user_id)) {
+      await connection.rollback();
+      return res.status(403).json({ message: 'Anda hanya dapat menambah aktivitas akun sendiri' });
+    }
     const { subject, duration_minutes, points_earned } = req.body;
 
     if (!subject || duration_minutes === undefined || points_earned === undefined) {
@@ -347,7 +366,7 @@ router.post("/:user_id/study-sessions", async (req: Request, res: Response) => {
 });
 
 // PUT /api/users/:id — Update Profile User (Nama & Avatar secara permanen)
-router.put("/:id", async (req: Request, res: Response) => {
+router.put("/:id", requireUserAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { nama, avatar_url, nim, email, phone } = req.body;

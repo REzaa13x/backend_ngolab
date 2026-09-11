@@ -17,13 +17,17 @@ import {
   Square,
   Activity,
   Sun,
-  Moon
+  Moon,
+  BellRing,
+  Trash2
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSettings } from '../contexts/SettingsContext';
+import { authFetch } from '../lib/authFetch';
+import { playConfiguredKdsSound, unlockAudioContext } from '../lib/audioHelper';
 
-type ActiveTabSettings = 'brand' | 'sensor' | 'system';
+type ActiveTabSettings = 'brand' | 'sensor' | 'system' | 'sound' | 'loyalty';
 
 export default function IoTConfig() {
   const { settings, updateSettings, refreshSettings } = useSettings();
@@ -32,7 +36,6 @@ export default function IoTConfig() {
   // Local state initialized from SettingsContext
   const [brandName, setBrandName] = useState(settings.brand_name);
   const [brandSubtitle, setBrandSubtitle] = useState(settings.brand_subtitle);
-  const [themeColor, setThemeColor] = useState(settings.theme_color);
   const [themeMode, setThemeMode] = useState(settings.theme_mode || 'light');
   const [receiptFooter, setReceiptFooter] = useState(settings.receipt_footer);
   
@@ -42,23 +45,12 @@ export default function IoTConfig() {
   const [kioskIdleTimeout, setKioskIdleTimeout] = useState(settings.kiosk_idle_timeout);
   const [kioskMode, setKioskMode] = useState(settings.kiosk_mode);
   const [maintenanceMode, setMaintenanceMode] = useState(settings.maintenance_mode === '1');
+  const [kdsSoundEnabled, setKdsSoundEnabled] = useState(settings.kds_sound_enabled !== '0');
+  const [kdsSoundVolume, setKdsSoundVolume] = useState([Number(settings.kds_sound_volume || 100)]);
+  const [uploadingSound, setUploadingSound] = useState<'new_order' | 'ready' | null>(null);
+  const [coinRewardRate, setCoinRewardRate] = useState(settings.coin_reward_rate || '0.001');
 
-  // Sidebar Customizer local states
-  const [sidebarBgColor, setSidebarBgColor] = useState(settings.sidebar_bg_color || '#ffffff');
-  const [sidebarTextColor, setSidebarTextColor] = useState(settings.sidebar_text_color || '#64748b');
-  const [sidebarActiveBgColor, setSidebarActiveBgColor] = useState(settings.sidebar_active_bg_color || '#f0f2fe');
-  const [sidebarActiveTextColor, setSidebarActiveTextColor] = useState(settings.sidebar_active_text_color || '#4f46e5');
-  const [sidebarBorderColor, setSidebarBorderColor] = useState(settings.sidebar_border_color || '#f1f5f9');
-  const [sidebarHoverBgColor, setSidebarHoverBgColor] = useState(settings.sidebar_hover_bg_color || '#f8fafc');
-  const [sidebarHoverTextColor, setSidebarHoverTextColor] = useState(settings.sidebar_hover_text_color || '#0f172a');
-  const [sidebarLogoTextColor, setSidebarLogoTextColor] = useState(settings.sidebar_logo_text_color || '#0f172a');
-  const [sidebarSectionTextColor, setSidebarSectionTextColor] = useState(settings.sidebar_section_text_color || '#94a3b8');
 
-  // File Upload State
-  const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [logoPreview, setLogoPreview] = useState(settings.brand_logo_url || '');
-  const [isUploading, setIsUploading] = useState(false);
-  
   // Saving Status
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
@@ -72,7 +64,6 @@ export default function IoTConfig() {
   useEffect(() => {
     setBrandName(settings.brand_name);
     setBrandSubtitle(settings.brand_subtitle);
-    setThemeColor(settings.theme_color);
     setThemeMode(settings.theme_mode || 'light');
     setReceiptFooter(settings.receipt_footer);
     setActiveZone([parseInt(settings.active_zone) || 60]);
@@ -80,27 +71,12 @@ export default function IoTConfig() {
     setKioskIdleTimeout(settings.kiosk_idle_timeout);
     setKioskMode(settings.kiosk_mode);
     setMaintenanceMode(settings.maintenance_mode === '1');
-    setLogoPreview(settings.brand_logo_url || '');
-
-    setSidebarBgColor(settings.sidebar_bg_color || '#ffffff');
-    setSidebarTextColor(settings.sidebar_text_color || '#64748b');
-    setSidebarActiveBgColor(settings.sidebar_active_bg_color || '#f0f2fe');
-    setSidebarActiveTextColor(settings.sidebar_active_text_color || '#4f46e5');
-    setSidebarBorderColor(settings.sidebar_border_color || '#f1f5f9');
-    setSidebarHoverBgColor(settings.sidebar_hover_bg_color || '#f8fafc');
-    setSidebarHoverTextColor(settings.sidebar_hover_text_color || '#0f172a');
-    setSidebarLogoTextColor(settings.sidebar_logo_text_color || '#0f172a');
-    setSidebarSectionTextColor(settings.sidebar_section_text_color || '#94a3b8');
+    setKdsSoundEnabled(settings.kds_sound_enabled !== '0');
+    setKdsSoundVolume([Number(settings.kds_sound_volume || 100)]);
+    setCoinRewardRate(settings.coin_reward_rate || '0.001');
   }, [settings]);
 
-  // Color options
-  const colors = [
-    { name: 'Indigo', value: '#4f46e5', bg: 'bg-indigo-600' },
-    { name: 'Orange', value: '#f97316', bg: 'bg-orange-500' },
-    { name: 'Emerald', value: '#10b981', bg: 'bg-emerald-500' },
-    { name: 'Blue', value: '#3b82f6', bg: 'bg-blue-600' },
-    { name: 'Rose', value: '#f43f5e', bg: 'bg-rose-500' },
-  ];
+
 
   // Sensor testing simulation loop
   useEffect(() => {
@@ -159,183 +135,7 @@ export default function IoTConfig() {
     };
   }, [isSimulating, activeZone, dwellTime]);
 
-  // Live Preview Theme Colors
-  const applyThemePreview = (colorHex: string) => {
-    const hexToHsl = (hexStr: string) => {
-      let hex = hexStr.replace(/^#/, '');
-      if (hex.length === 3) {
-        hex = hex.split('').map(char => char + char).join('');
-      }
-      let r = parseInt(hex.substring(0, 2), 16) / 255;
-      let g = parseInt(hex.substring(2, 4), 16) / 255;
-      let b = parseInt(hex.substring(4, 6), 16) / 255;
 
-      let max = Math.max(r, g, b);
-      let min = Math.min(r, g, b);
-      let h = 0;
-      let s = 0;
-      let l = (max + min) / 2;
-
-      if (max !== min) {
-        let d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        switch (max) {
-          case r:
-            h = (g - b) / d + (g < b ? 6 : 0);
-            break;
-          case g:
-            h = (b - r) / d + 2;
-            break;
-          case b:
-            h = (r - g) / d + 4;
-            break;
-        }
-        h /= 6;
-      }
-
-      return {
-        h: Math.round(h * 360),
-        s: Math.round(s * 100),
-        l: Math.round(l * 100),
-      };
-    };
-
-    const hslToHex = (h: number, s: number, l: number) => {
-      s /= 100;
-      l /= 100;
-      let c = (1 - Math.abs(2 * l - 1)) * s;
-      let x = c * (1 - Math.abs(((h / 60) % 2) - 1));
-      let m = l - c / 2;
-      let r = 0, g = 0, b = 0;
-
-      if (h >= 0 && h < 60) {
-        r = c; g = x; b = 0;
-      } else if (h >= 60 && h < 120) {
-        r = x; g = c; b = 0;
-      } else if (h >= 120 && h < 180) {
-        r = 0; g = c; b = x;
-      } else if (h >= 180 && h < 240) {
-        r = 0; g = x; b = c;
-      } else if (h >= 240 && h < 300) {
-        r = x; g = 0; b = c;
-      } else if (h >= 300 && h < 360) {
-        r = c; g = 0; b = x;
-      }
-
-      let rHex = Math.round((r + m) * 255).toString(16).padStart(2, '0');
-      let gHex = Math.round((g + m) * 255).toString(16).padStart(2, '0');
-      let bHex = Math.round((b + m) * 255).toString(16).padStart(2, '0');
-
-      return `#${rHex}${gHex}${bHex}`;
-    };
-
-    const generateShades = (hex: string) => {
-      const { h, s, l } = hexToHsl(hex);
-      return {
-        'primary': hex,
-        'ring': hex,
-        'indigo-50': hslToHex(h, s, Math.min(99, l + (100 - l) * 0.9)),
-        'indigo-100': hslToHex(h, s, Math.min(97, l + (100 - l) * 0.8)),
-        'indigo-200': hslToHex(h, s, Math.min(93, l + (100 - l) * 0.6)),
-        'indigo-300': hslToHex(h, s, Math.min(88, l + (100 - l) * 0.4)),
-        'indigo-400': hslToHex(h, s, Math.min(80, l + (100 - l) * 0.2)),
-        'indigo-500': hex,
-        'indigo-600': hslToHex(h, s, Math.max(5, l * 0.85)),
-        'indigo-700': hslToHex(h, s, Math.max(4, l * 0.7)),
-        'indigo-800': hslToHex(h, s, Math.max(3, l * 0.55)),
-        'indigo-900': hslToHex(h, s, Math.max(2, l * 0.4)),
-        'indigo-950': hslToHex(h, s, Math.max(1, l * 0.25)),
-      };
-    };
-
-    const colorShades: Record<string, Record<string, string>> = {
-      '#4f46e5': {
-        'primary': '#4f46e5',
-        'ring': '#4f46e5',
-        'indigo-50': '#eef2ff',
-        'indigo-100': '#e0e7ff',
-        'indigo-200': '#c7d2fe',
-        'indigo-300': '#a5b4fc',
-        'indigo-400': '#818cf8',
-        'indigo-500': '#6366f1',
-        'indigo-600': '#4f46e5',
-        'indigo-700': '#4338ca',
-        'indigo-800': '#3730a3',
-        'indigo-900': '#312e81',
-        'indigo-950': '#1e1b4b',
-      },
-      '#f97316': {
-        'primary': '#f97316',
-        'ring': '#f97316',
-        'indigo-50': '#fff7ed',
-        'indigo-100': '#ffedd5',
-        'indigo-200': '#fed7aa',
-        'indigo-300': '#fdba74',
-        'indigo-400': '#fb923c',
-        'indigo-500': '#f97316',
-        'indigo-600': '#ea580c',
-        'indigo-700': '#c2410c',
-        'indigo-800': '#9a3412',
-        'indigo-900': '#7c2d12',
-        'indigo-950': '#431407',
-      },
-      '#10b981': {
-        'primary': '#10b981',
-        'ring': '#10b981',
-        'indigo-50': '#ecfdf5',
-        'indigo-100': '#d1fae5',
-        'indigo-200': '#a7f3d0',
-        'indigo-300': '#6ee7b7',
-        'indigo-400': '#34d399',
-        'indigo-500': '#10b981',
-        'indigo-600': '#059669',
-        'indigo-700': '#047857',
-        'indigo-800': '#065f46',
-        'indigo-900': '#064e3b',
-        'indigo-950': '#022c22',
-      },
-      '#3b82f6': {
-        'primary': '#3b82f6',
-        'ring': '#3b82f6',
-        'indigo-50': '#eff6ff',
-        'indigo-100': '#dbeafe',
-        'indigo-200': '#bfdbfe',
-        'indigo-300': '#93c5fd',
-        'indigo-400': '#60a5fa',
-        'indigo-500': '#3b82f6',
-        'indigo-600': '#2563eb',
-        'indigo-700': '#1d4ed8',
-        'indigo-800': '#1e40af',
-        'indigo-900': '#1e3a8a',
-        'indigo-950': '#172554',
-      },
-      '#f43f5e': {
-        'primary': '#f43f5e',
-        'ring': '#f43f5e',
-        'indigo-50': '#fff1f2',
-        'indigo-100': '#ffe4e6',
-        'indigo-200': '#fecdd3',
-        'indigo-300': '#fda4af',
-        'indigo-400': '#fb7185',
-        'indigo-500': '#f43f5e',
-        'indigo-600': '#e11d48',
-        'indigo-700': '#be123c',
-        'indigo-800': '#9f1239',
-        'indigo-900': '#881337',
-        'indigo-950': '#4c0519',
-      }
-    };
-
-    const selectedShades = colorShades[colorHex] || generateShades(colorHex);
-
-    Object.entries(selectedShades).forEach(([key, val]) => {
-      document.documentElement.style.setProperty(`--color-${key}`, val);
-    });
-  };
-
-  const applySidebarPreview = (key: string, val: string) => {
-    document.documentElement.style.setProperty(`--${key}`, val);
-  };
 
   const applyThemeModePreview = (mode: string) => {
     if (mode === 'dark') {
@@ -345,15 +145,46 @@ export default function IoTConfig() {
     }
   };
 
-  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setLogoFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLogoPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+
+  const handleSoundUpload = async (type: 'new_order' | 'ready', file?: File) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('Ukuran suara maksimal 5 MB.'); return; }
+    setUploadingSound(type);
+    try {
+      const formData = new FormData();
+      formData.append('sound', file);
+      formData.append('type', type);
+      const response = await authFetch('/api/settings/upload-kds-sound', { method: 'POST', body: formData });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'Upload suara gagal.');
+      await refreshSettings();
+      setSaveMessage(type === 'new_order' ? 'Suara pesanan masuk berhasil diunggah!' : 'Suara pesanan siap berhasil diunggah!');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error: any) {
+      alert(error.message || 'Upload suara gagal.');
+    } finally {
+      setUploadingSound(null);
+    }
+  };
+
+  const testKdsSound = async (type: 'new_order' | 'ready') => {
+    await unlockAudioContext();
+    await playConfiguredKdsSound(type, {
+      ...settings,
+      kds_sound_enabled: kdsSoundEnabled ? '1' : '0',
+      kds_sound_volume: String(kdsSoundVolume[0])
+    });
+  };
+
+  const resetKdsSound = async (type: 'new_order' | 'ready') => {
+    const response = await authFetch(`/api/settings/kds-sound/${type}`, { method: 'DELETE' });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      await refreshSettings();
+      setSaveMessage(data.message || 'Suara dikembalikan ke bell bawaan.');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } else {
+      alert(data.message || 'Gagal mereset suara.');
     }
   };
 
@@ -362,39 +193,12 @@ export default function IoTConfig() {
     setSaveMessage('');
 
     try {
-      // 1. Upload Logo if changed
-      let finalLogoUrl = settings.brand_logo_url;
-      if (logoFile) {
-        setIsUploading(true);
-        const formData = new FormData();
-        formData.append('logo', logoFile);
-
-        const uploadRes = await fetch('/api/settings/upload-logo', {
-          method: 'POST',
-          headers: {
-            'x-user-name': localStorage.getItem('tangolab_admin_user') 
-              ? JSON.parse(localStorage.getItem('tangolab_admin_user')!).name 
-              : 'Admin'
-          },
-          body: formData
-        });
-        
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          finalLogoUrl = uploadData.brand_logo_url;
-          setLogoFile(null);
-        } else {
-          console.error("Gagal mengunggah logo");
-        }
-        setIsUploading(false);
-      }
-
-      // 2. Save all other settings
+      // Save all settings
       const newSettings = {
         brand_name: brandName,
         brand_subtitle: brandSubtitle,
-        brand_logo_url: finalLogoUrl,
-        theme_color: themeColor,
+        brand_logo_url: settings.brand_logo_url,
+        theme_color: settings.theme_color,
         theme_mode: themeMode,
         receipt_footer: receiptFooter,
         active_zone: activeZone[0].toString(),
@@ -402,15 +206,20 @@ export default function IoTConfig() {
         kiosk_idle_timeout: kioskIdleTimeout,
         kiosk_mode: kioskMode,
         maintenance_mode: maintenanceMode ? '1' : '0',
-        sidebar_bg_color: sidebarBgColor,
-        sidebar_text_color: sidebarTextColor,
-        sidebar_active_bg_color: sidebarActiveBgColor,
-        sidebar_active_text_color: sidebarActiveTextColor,
-        sidebar_border_color: sidebarBorderColor,
-        sidebar_hover_bg_color: sidebarHoverBgColor,
-        sidebar_hover_text_color: sidebarHoverTextColor,
-        sidebar_logo_text_color: sidebarLogoTextColor,
-        sidebar_section_text_color: sidebarSectionTextColor
+        kds_sound_enabled: kdsSoundEnabled ? '1' : '0',
+        kds_sound_volume: String(kdsSoundVolume[0]),
+        kds_new_order_sound_url: settings.kds_new_order_sound_url,
+        kds_ready_sound_url: settings.kds_ready_sound_url,
+        sidebar_bg_color: settings.sidebar_bg_color,
+        sidebar_text_color: settings.sidebar_text_color,
+        sidebar_active_bg_color: settings.sidebar_active_bg_color,
+        sidebar_active_text_color: settings.sidebar_active_text_color,
+        sidebar_border_color: settings.sidebar_border_color,
+        sidebar_hover_bg_color: settings.sidebar_hover_bg_color,
+        sidebar_hover_text_color: settings.sidebar_hover_text_color,
+        sidebar_logo_text_color: settings.sidebar_logo_text_color,
+        sidebar_section_text_color: settings.sidebar_section_text_color,
+        coin_reward_rate: coinRewardRate
       };
 
       const success = await updateSettings(newSettings);
@@ -442,24 +251,18 @@ export default function IoTConfig() {
         kiosk_mode: 'gesture',
         receipt_footer: 'Terima kasih atas kunjungan Anda!',
         maintenance_mode: '0',
-        theme_color: '#4f46e5',
         theme_mode: 'light',
-        sidebar_bg_color: '#ffffff',
-        sidebar_text_color: '#64748b',
-        sidebar_active_bg_color: '#f0f2fe',
-        sidebar_active_text_color: '#4f46e5',
-        sidebar_border_color: '#f1f5f9',
-        sidebar_hover_bg_color: '#f8fafc',
-        sidebar_hover_text_color: '#0f172a',
-        sidebar_logo_text_color: '#0f172a',
-        sidebar_section_text_color: '#94a3b8'
+        kds_sound_enabled: '1',
+        kds_sound_volume: '100',
+        kds_new_order_sound_url: '',
+        kds_ready_sound_url: '',
+        coin_reward_rate: '0.001'
       };
 
       const success = await updateSettings(defaults);
       if (success) {
         setBrandName(defaults.brand_name);
         setBrandSubtitle(defaults.brand_subtitle);
-        setThemeColor(defaults.theme_color);
         setThemeMode(defaults.theme_mode);
         setReceiptFooter(defaults.receipt_footer);
         setActiveZone([60]);
@@ -467,17 +270,8 @@ export default function IoTConfig() {
         setKioskIdleTimeout(defaults.kiosk_idle_timeout);
         setKioskMode(defaults.kiosk_mode);
         setMaintenanceMode(false);
-        setLogoPreview('');
-        setLogoFile(null);
-        setSidebarBgColor(defaults.sidebar_bg_color);
-        setSidebarTextColor(defaults.sidebar_text_color);
-        setSidebarActiveBgColor(defaults.sidebar_active_bg_color);
-        setSidebarActiveTextColor(defaults.sidebar_active_text_color);
-        setSidebarBorderColor(defaults.sidebar_border_color);
-        setSidebarHoverBgColor(defaults.sidebar_hover_bg_color);
-        setSidebarHoverTextColor(defaults.sidebar_hover_text_color);
-        setSidebarLogoTextColor(defaults.sidebar_logo_text_color);
-        setSidebarSectionTextColor(defaults.sidebar_section_text_color);
+        setKdsSoundEnabled(true);
+        setKdsSoundVolume([100]);
         setSaveMessage('Pengaturan di-reset ke default pabrik!');
         refreshSettings();
         setTimeout(() => setSaveMessage(''), 3000);
@@ -531,7 +325,7 @@ export default function IoTConfig() {
         </div>
 
         {/* Dashboard Tabs */}
-        <div className="flex border-b border-slate-100 gap-1 p-1 bg-slate-50 rounded-2xl w-fit border">
+        <div className="flex flex-wrap border-b border-slate-100 gap-1 p-1 bg-slate-50 rounded-2xl w-fit border">
           <button
             onClick={() => setActiveTab('brand')}
             className={cn(
@@ -567,6 +361,30 @@ export default function IoTConfig() {
           >
             <Laptop size={16} />
             Sistem Kiosk
+          </button>
+          <button
+            onClick={() => setActiveTab('sound')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all",
+              activeTab === 'sound'
+                ? "bg-white text-indigo-600 shadow-sm border border-slate-100"
+                : "text-slate-400 hover:text-slate-700"
+            )}
+          >
+            <BellRing size={16} />
+            Suara KDS
+          </button>
+          <button
+            onClick={() => setActiveTab('loyalty')}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all",
+              activeTab === 'loyalty'
+                ? "bg-white text-indigo-600 shadow-sm border border-slate-100"
+                : "text-slate-400 hover:text-slate-700"
+            )}
+          >
+            <Target size={16} />
+            Loyalty Program
           </button>
         </div>
 
@@ -611,89 +429,6 @@ export default function IoTConfig() {
                   </div>
                 </div>
 
-                {/* Logo Upload Dropzone */}
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Logo Kustom Aplikasi</label>
-                  <div className="flex flex-col md:flex-row gap-6 items-center p-6 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
-                    <div className="w-20 h-20 rounded-xl bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
-                      {logoPreview ? (
-                        <img src={logoPreview} alt="Preview logo" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="flex flex-col items-center leading-none text-slate-300 font-black text-xs uppercase select-none">
-                          Logo
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex-1 text-center md:text-left">
-                      <p className="text-xs font-bold text-slate-700">Unggah Logo Brand Baru</p>
-                      <p className="text-[10px] text-slate-400 font-medium mt-1 mb-3">Format PNG, JPG, atau WebP (Dimensi disarankan 1:1, Maks 2MB)</p>
-                      <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer hover:bg-indigo-100 transition-colors">
-                        <UploadCloud size={14} />
-                        Pilih File Gambar
-                        <input type="file" accept="image/*" onChange={handleLogoChange} className="hidden" />
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Theme Color Picker */}
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Pilihan Warna Aksen Tema</label>
-                  <div className="flex flex-wrap gap-3 items-center">
-                    {colors.map(color => (
-                      <button
-                        key={color.value}
-                        type="button"
-                        onClick={() => {
-                          setThemeColor(color.value);
-                          applyThemePreview(color.value);
-                        }}
-                        className={cn(
-                          "flex items-center gap-2 px-4 py-3 rounded-xl border transition-all text-xs font-bold shadow-sm",
-                          themeColor === color.value 
-                            ? "border-slate-800 bg-slate-900 text-white" 
-                            : "border-slate-100 bg-white text-slate-600 hover:bg-slate-50"
-                        )}
-                      >
-                        <span className={cn("w-3.5 h-3.5 rounded-full shrink-0", color.bg)} />
-                        {color.name}
-                        {themeColor === color.value && <Check size={12} className="ml-1 text-indigo-400" />}
-                      </button>
-                    ))}
-
-                    {/* Custom Color Input */}
-                    <div className="flex items-center gap-2 border border-slate-200 rounded-xl px-3 py-1.5 bg-white shadow-sm hover:border-slate-300 transition-all">
-                      <div className="relative flex items-center justify-center">
-                        <input
-                          type="color"
-                          value={themeColor}
-                          onChange={e => {
-                            setThemeColor(e.target.value);
-                            applyThemePreview(e.target.value);
-                          }}
-                          className="w-8 h-8 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider leading-none mb-0.5">Warna Kustom</span>
-                        <input
-                          type="text"
-                          value={themeColor}
-                          onChange={e => {
-                            let val = e.target.value;
-                            setThemeColor(val);
-                            if (/^#[0-9A-F]{6}$/i.test(val)) {
-                              applyThemePreview(val);
-                            }
-                          }}
-                          placeholder="#4f46e5"
-                          className="w-20 bg-transparent text-xs font-mono font-bold text-slate-700 focus:outline-none p-0"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
 
                 {/* Mode Tampilan Aplikasi (Light / Dark Mode) */}
                 <div className="border-t border-slate-100 pt-6">
@@ -734,298 +469,7 @@ export default function IoTConfig() {
                   </div>
                 </div>
 
-                {/* Kustomisasi Sidebar */}
-                <div className="border-t border-slate-100 pt-6 space-y-4">
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900">Kustomisasi Warna Sidebar</h4>
-                    <p className="text-xs text-slate-400 font-medium">Ubah skema warna background, teks, dan menu aktif sidebar.</p>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Background Sidebar</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarBgColor}
-                          onChange={e => {
-                            setSidebarBgColor(e.target.value);
-                            applySidebarPreview('sidebar-bg', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarBgColor}
-                          onChange={e => {
-                            setSidebarBgColor(e.target.value);
-                            applySidebarPreview('sidebar-bg', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Teks & Ikon Menu</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarTextColor}
-                          onChange={e => {
-                            setSidebarTextColor(e.target.value);
-                            applySidebarPreview('sidebar-text', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarTextColor}
-                          onChange={e => {
-                            setSidebarTextColor(e.target.value);
-                            applySidebarPreview('sidebar-text', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Warna Section Header</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarSectionTextColor}
-                          onChange={e => {
-                            setSidebarSectionTextColor(e.target.value);
-                            applySidebarPreview('sidebar-section-text', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarSectionTextColor}
-                          onChange={e => {
-                            setSidebarSectionTextColor(e.target.value);
-                            applySidebarPreview('sidebar-section-text', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Background Menu Aktif</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarActiveBgColor}
-                          onChange={e => {
-                            setSidebarActiveBgColor(e.target.value);
-                            applySidebarPreview('sidebar-active-bg', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarActiveBgColor}
-                          onChange={e => {
-                            setSidebarActiveBgColor(e.target.value);
-                            applySidebarPreview('sidebar-active-bg', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Teks Menu Aktif</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarActiveTextColor}
-                          onChange={e => {
-                            setSidebarActiveTextColor(e.target.value);
-                            applySidebarPreview('sidebar-active-text', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarActiveTextColor}
-                          onChange={e => {
-                            setSidebarActiveTextColor(e.target.value);
-                            applySidebarPreview('sidebar-active-text', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Garis Tepi & Pemisah (Borders)</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarBorderColor}
-                          onChange={e => {
-                            setSidebarBorderColor(e.target.value);
-                            applySidebarPreview('sidebar-border', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarBorderColor}
-                          onChange={e => {
-                            setSidebarBorderColor(e.target.value);
-                            applySidebarPreview('sidebar-border', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Teks Judul Brand / Logo</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarLogoTextColor}
-                          onChange={e => {
-                            setSidebarLogoTextColor(e.target.value);
-                            applySidebarPreview('sidebar-logo-text', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarLogoTextColor}
-                          onChange={e => {
-                            setSidebarLogoTextColor(e.target.value);
-                            applySidebarPreview('sidebar-logo-text', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1">
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Background Hover Menu</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarHoverBgColor}
-                          onChange={e => {
-                            setSidebarHoverBgColor(e.target.value);
-                            applySidebarPreview('sidebar-hover-bg', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarHoverBgColor}
-                          onChange={e => {
-                            setSidebarHoverBgColor(e.target.value);
-                            applySidebarPreview('sidebar-hover-bg', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Teks Hover Menu</label>
-                      <div className="flex gap-2 items-center">
-                        <input 
-                          type="color" 
-                          value={sidebarHoverTextColor}
-                          onChange={e => {
-                            setSidebarHoverTextColor(e.target.value);
-                            applySidebarPreview('sidebar-hover-text', e.target.value);
-                          }}
-                          className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer bg-white shrink-0"
-                        />
-                        <input 
-                          type="text" 
-                          value={sidebarHoverTextColor}
-                          onChange={e => {
-                            setSidebarHoverTextColor(e.target.value);
-                            applySidebarPreview('sidebar-hover-text', e.target.value);
-                          }}
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold focus:outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Cepat Atur Preset Sidebar */}
-                  <div className="pt-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Quick Themes: Preset Sidebar</label>
-                    <div className="flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSidebarBgColor('#ffffff');
-                          setSidebarTextColor('#64748b');
-                          setSidebarActiveBgColor('#f0f2fe');
-                          setSidebarActiveTextColor('#4f46e5');
-                          setSidebarBorderColor('#f1f5f9');
-                          setSidebarHoverBgColor('#f8fafc');
-                          setSidebarHoverTextColor('#0f172a');
-                          setSidebarLogoTextColor('#0f172a');
-                          setSidebarSectionTextColor('#94a3b8');
-
-                          applySidebarPreview('sidebar-bg', '#ffffff');
-                          applySidebarPreview('sidebar-text', '#64748b');
-                          applySidebarPreview('sidebar-active-bg', '#f0f2fe');
-                          applySidebarPreview('sidebar-active-text', '#4f46e5');
-                          applySidebarPreview('sidebar-border', '#f1f5f9');
-                          applySidebarPreview('sidebar-hover-bg', '#f8fafc');
-                          applySidebarPreview('sidebar-hover-text', '#0f172a');
-                          applySidebarPreview('sidebar-logo-text', '#0f172a');
-                          applySidebarPreview('sidebar-section-text', '#94a3b8');
-                        }}
-                        className="px-4 py-2 text-xs bg-white text-slate-700 border border-slate-200 rounded-xl font-bold hover:bg-slate-50"
-                      >
-                        Sidebar Terang (Default)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSidebarBgColor('#0f172a');
-                          setSidebarTextColor('#94a3b8');
-                          setSidebarActiveBgColor('#1e293b');
-                          setSidebarActiveTextColor('#ffffff');
-                          setSidebarBorderColor('#1e293b');
-                          setSidebarHoverBgColor('#1e293b');
-                          setSidebarHoverTextColor('#f8fafc');
-                          setSidebarLogoTextColor('#ffffff');
-                          setSidebarSectionTextColor('#64748b');
-
-                          applySidebarPreview('sidebar-bg', '#0f172a');
-                          applySidebarPreview('sidebar-text', '#94a3b8');
-                          applySidebarPreview('sidebar-active-bg', '#1e293b');
-                          applySidebarPreview('sidebar-active-text', '#ffffff');
-                          applySidebarPreview('sidebar-border', '#1e293b');
-                          applySidebarPreview('sidebar-hover-bg', '#1e293b');
-                          applySidebarPreview('sidebar-hover-text', '#f8fafc');
-                          applySidebarPreview('sidebar-logo-text', '#ffffff');
-                          applySidebarPreview('sidebar-section-text', '#64748b');
-                        }}
-                        className="px-4 py-2 text-xs bg-slate-900 text-white border border-slate-800 rounded-xl font-bold hover:bg-slate-800"
-                      >
-                        Sidebar Gelap (Dark Mode)
-                      </button>
-                    </div>
-                  </div>
-                </div>
 
                 {/* Receipt Footer */}
                 <div>
@@ -1331,6 +775,77 @@ export default function IoTConfig() {
                         </span>
                       </div>
                     </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* KDS SOUND CONFIGURATION */}
+            {activeTab === 'sound' && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white border border-slate-100 rounded-3xl p-8 space-y-7 shadow-premium"
+              >
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><BellRing className="text-indigo-600"/> Suara Tampilan Dapur</h3>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Atur suara pesanan masuk dan pesanan siap. Format: MP3, WAV, OGG, M4A, atau WebM; maksimal 5 MB.</p>
+                </div>
+
+                <div className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div><p className="font-bold text-slate-800">Aktifkan suara KDS</p><p className="text-xs text-slate-400">Perangkat dapur masih dapat dimute secara lokal.</p></div>
+                  <button type="button" onClick={() => setKdsSoundEnabled(value => !value)} className={cn('w-14 h-8 rounded-full p-1 transition-colors', kdsSoundEnabled ? 'bg-emerald-500' : 'bg-slate-300')}><span className={cn('block w-6 h-6 rounded-full bg-white shadow transition-transform', kdsSoundEnabled && 'translate-x-6')} /></button>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-2"><span className="text-slate-500">Volume suara</span><span className="text-indigo-600">{kdsSoundVolume[0]}%</span></div>
+                  <input type="range" min="0" max="100" step="5" value={kdsSoundVolume[0]} onChange={event => setKdsSoundVolume([Number(event.target.value)])} className="w-full accent-indigo-600" />
+                </div>
+
+                {([
+                  { type: 'new_order' as const, title: 'Pesanan Masuk', description: 'Diputar ketika pesanan lunas masuk ke antrean dapur.', url: settings.kds_new_order_sound_url },
+                  { type: 'ready' as const, title: 'Pesanan Siap', description: 'Diputar ketika pesanan selesai dimasak dan siap diambil.', url: settings.kds_ready_sound_url }
+                ]).map(sound => (
+                  <div key={sound.type} className="p-5 rounded-2xl border border-slate-200 space-y-4">
+                    <div className="flex items-start justify-between gap-4"><div><p className="font-bold text-slate-900">{sound.title}</p><p className="text-xs text-slate-400 mt-1">{sound.description}</p></div><span className={cn('px-2 py-1 rounded-full text-[10px] font-black', sound.url ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500')}>{sound.url ? 'KUSTOM' : 'BAWAAN'}</span></div>
+                    {sound.url && <audio controls preload="metadata" src={sound.url} className="w-full h-10" />}
+                    <div className="flex flex-wrap gap-2">
+                      <label className="px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold cursor-pointer flex items-center gap-2"><UploadCloud size={15}/>{uploadingSound === sound.type ? 'Mengunggah...' : 'Upload Suara'}<input type="file" accept="audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/webm,.mp3,.wav,.ogg,.m4a,.webm" disabled={uploadingSound !== null} className="hidden" onChange={event => handleSoundUpload(sound.type, event.target.files?.[0])}/></label>
+                      <button type="button" onClick={() => testKdsSound(sound.type)} className="px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold flex items-center gap-2"><Play size={15}/> Tes Suara</button>
+                      {sound.url && <button type="button" onClick={() => resetKdsSound(sound.type)} className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-600 text-xs font-bold flex items-center gap-2"><Trash2 size={15}/> Gunakan Bawaan</button>}
+                    </div>
+                  </div>
+                ))}
+
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-100 text-amber-800 text-xs leading-relaxed"><strong>Catatan browser:</strong> Setelah membuka Tampilan Dapur, klik satu kali tombol suara atau area halaman agar browser mengizinkan pemutaran otomatis.</div>
+              </motion.div>
+            )}
+
+            {/* TAB: LOYALTY CONFIGURATION */}
+            {activeTab === 'loyalty' && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white border border-slate-100 rounded-3xl p-8 space-y-7 shadow-premium"
+              >
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Target className="text-indigo-600"/> Program Loyalty & Poin</h3>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Konfigurasi pemberian poin koin otomatis setiap pelanggan bertransaksi di aplikasi.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">Rate Poin (poin per Rp 1)</label>
+                    <input 
+                      type="number" 
+                      step="0.001"
+                      min="0"
+                      max="0.1"
+                      value={coinRewardRate}
+                      onChange={e => setCoinRewardRate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-bold"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-2">Rekomendasi: 0.001 = 1 poin setiap Rp 1.000. Contoh 0.005 = 5 poin setiap Rp 1.000 (0,5% nilai transaksi). Maksimal 0.1 untuk mencegah pemberian poin tidak sengaja terlalu besar.</p>
                   </div>
                 </div>
               </motion.div>

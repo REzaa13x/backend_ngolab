@@ -1,9 +1,11 @@
 async function run() {
+  const apiKey = process.env.EXTERNAL_API_KEY;
+  if (!apiKey) throw new Error('Atur EXTERNAL_API_KEY sebelum menjalankan skrip ini.');
   try {
     const res = await fetch("http://localhost:3000/api/orders/external/history", {
       method: "GET",
       headers: {
-        "x-api-key": "tangolab-secret-key-2026"
+        "x-api-key": apiKey
       }
     });
     

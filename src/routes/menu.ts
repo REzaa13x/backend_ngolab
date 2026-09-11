@@ -2,6 +2,8 @@ import { Router, Request, Response } from "express";
 import { db, addAuditLog } from "../db/db.js";
 import fs from "fs";
 import path from "path";
+import { requireApiKeyScope } from "../middleware/authApiKey.js";
+import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 
 // Helper function to save base64 image string as a physical file on the server
 function saveBase64Image(base64Str: string): string {
@@ -36,24 +38,100 @@ function saveBase64Image(base64Str: string): string {
 }
 
 const router = Router();
+const requireMenuAdmin = requireRoles('Super Admin', 'Koki');
+const requireMenuStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
+const smartTagHeaders = () => {
+  const key = process.env.SMART_TAG_API_KEY || '';
+  const token = process.env.SMART_TAG_ACCESS_TOKEN || '';
+  return {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'User-Agent': 'Mozilla/5.0 Tangolab-Ngolab-Integration',
+    ...(key ? { 'x-api-key': key } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+};
+
+function serializeMenu(menu: any) {
+  const isActive = menu.is_active === undefined ? true : Boolean(menu.is_active);
+  const inventoryAvailable = menu.inventory_available === undefined ? Boolean(menu.in_stock) : Boolean(menu.inventory_available);
+  const override = menu.availability_override || 'auto';
+  const inStock = isActive && override === 'auto' && inventoryAvailable;
+  const unavailableReason = !isActive ? 'archived' : override === 'force_off' ? 'manual' : !inventoryAvailable ? 'inventory' : 'available';
+  return {
+    id: menu.id,
+    name: menu.name,
+    category: menu.category,
+    price: Number(menu.price),
+    inStock,
+    displayed: inStock ? 1 : 0,
+    stock: Number(menu.stock || 0),
+    outlet: menu.outlet,
+    image: menu.image_url,
+    description: menu.description || '',
+    isActive,
+    inventoryAvailable,
+    availabilityOverride: override,
+    availabilityReason: menu.availability_reason || '',
+    availabilityUpdatedBy: menu.availability_updated_by || '',
+    availabilityUpdatedAt: menu.availability_updated_at,
+    unavailableReason
+  };
+}
+
+// GET /api/menu/external — menu lokal untuk integrasi server-to-server.
+router.get("/external", requireApiKeyScope('menu:read'), async (req: Request, res: Response) => {
+  try {
+    const { category, outlet } = req.query;
+    let query = "SELECT id, name, category, price, in_stock, inventory_available, availability_override, availability_reason, stock, outlet, image_url, description FROM menus WHERE is_active = 1";
+    const params: any[] = [];
+    if (outlet) {
+      query += " AND outlet = ?";
+      params.push(outlet);
+    }
+    if (category && category !== 'Semua') {
+      query += " AND category = ?";
+      params.push(category);
+    }
+    query += " ORDER BY created_at DESC";
+    const [rows]: any = await db.query(query, params);
+    res.json(rows.map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      category: item.category,
+      price: Number(item.price),
+      in_stock: Boolean(item.in_stock),
+      inventory_available: Boolean(item.inventory_available),
+      availability_override: item.availability_override,
+      availability_reason: item.availability_reason || '',
+      stock: Number(item.stock),
+      outlet: item.outlet,
+      image_url: item.image_url,
+      description: item.description || ''
+    })));
+  } catch (error: any) {
+    res.status(500).json({ message: 'Gagal mengambil menu integrasi', error: error.message });
+  }
+});
 
 // GET /api/menu — Ambil daftar menu dengan filter opsional (category, outlet)
 router.get("/", async (req: Request, res: Response) => {
   const { category, outlet } = req.query;
+  const includeArchived = req.query.includeArchived === '1';
   
-  const SMART_TAG_API = "http://192.168.1.11:5000";
+  const SMART_TAG_API = (process.env.SMART_TAG_API_URL || 'https://smarttag.ngolab.online').replace(/\/$/, '');
   let fetchedFromExternal = false;
   let formattedMenus: any[] = [];
 
-  // Check if request is an external API call from your friend's app using the API Key
-  const isExternalRequest = req.header('x-api-key') === (process.env.EXTERNAL_API_KEY || 'tangolab-secret-key-2026');
+  // Admin lokal dapat melewati sinkronisasi Smart Tag tanpa membocorkan API key ke browser.
+  const forceLocal = req.query.source === 'local';
 
-  if (outlet === "ngolab" && !isExternalRequest) {
+  if (outlet === "ngolab" && !forceLocal) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2500); // 2.5 seconds timeout
 
-      const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal });
+      const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal, headers: smartTagHeaders() });
       clearTimeout(timeoutId);
 
       if (response.ok) {
@@ -107,25 +185,13 @@ router.get("/", async (req: Request, res: Response) => {
         query += " AND category = ?";
         params.push(category);
       }
+      if (!includeArchived) query += " AND is_active = 1";
 
       query += " ORDER BY created_at DESC";
 
       const [menus]: any = await db.query(query, params);
       
-      formattedMenus = menus.map((m: any) => ({
-        id: m.id,
-        name: m.name,
-        category: m.category,
-        price: m.price,
-        inStock: Boolean(m.in_stock),
-        displayed: m.in_stock ? 1 : 0,
-        status: m.in_stock ? "Tersedia" : "Habis",
-        stock: m.stock,
-        outlet: m.outlet,
-        image: m.image_url,
-        description: m.description || "",
-        deskripsi: m.description || ""
-      }));
+      formattedMenus = menus.map(serializeMenu);
     } catch (error: any) {
       return res.status(500).json({ message: "Gagal mengambil data menu", error: error.message });
     }
@@ -135,7 +201,7 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 // POST /api/menu — Tambah menu baru
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", requireMenuAdmin, async (req: Request, res: Response) => {
   const { name, category, price, stock, image, outlet, description } = req.body;
   
   if (!name || !category || !price) {
@@ -150,12 +216,12 @@ router.post("/", async (req: Request, res: Response) => {
     const imageVal = saveBase64Image(image) || `https://picsum.photos/seed/${name.replace(/\s+/g, '')}/400/300`;
 
     await db.query(
-      "INSERT INTO menus (id, name, category, price, in_stock, stock, outlet, image_url, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [newId, name, category, parseInt(price), isStock, stockVal, outletVal, imageVal, description || ""]
+      "INSERT INTO menus (id, name, category, price, in_stock, is_active, inventory_available, availability_override, stock, outlet, image_url, description) VALUES (?, ?, ?, ?, ?, 1, ?, 'auto', ?, ?, ?, ?)",
+      [newId, name, category, parseInt(price), isStock, isStock, stockVal, outletVal, imageVal, description || ""]
     );
 
     // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Koki";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Tambah Menu Baru", `${name} (${outletVal})`);
 
     res.status(201).json({
@@ -176,7 +242,7 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 // PUT /api/menu/:id — Update menu
-router.put("/:id", async (req: Request, res: Response) => {
+router.put("/:id", requireMenuAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { name, category, price, stock, image, description } = req.body;
 
@@ -191,17 +257,18 @@ router.put("/:id", async (req: Request, res: Response) => {
     const newCategory = category || current.category;
     const newPrice = price !== undefined ? parseInt(price) : current.price;
     const newStock = stock !== undefined ? parseInt(stock) : current.stock;
-    const newInStock = newStock > 0 ? 1 : (stock !== undefined ? 0 : current.in_stock);
+    const newInventoryAvailable = stock !== undefined ? newStock > 0 : Boolean(current.inventory_available);
+    const newInStock = Boolean(current.is_active) && current.availability_override === 'auto' && newInventoryAvailable;
     const newImage = image ? saveBase64Image(image) : current.image_url;
     const newDescription = description !== undefined ? description : current.description;
 
     await db.query(
-      "UPDATE menus SET name=?, category=?, price=?, in_stock=?, stock=?, image_url=?, description=? WHERE id=?",
-      [newName, newCategory, newPrice, newInStock, newStock, newImage, newDescription, id]
+      "UPDATE menus SET name=?, category=?, price=?, in_stock=?, inventory_available=?, stock=?, image_url=?, description=? WHERE id=?",
+      [newName, newCategory, newPrice, newInStock ? 1 : 0, newInventoryAvailable ? 1 : 0, newStock, newImage, newDescription, id]
     );
 
     // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Koki";
+    const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Update Menu", `${newName}`);
 
     res.json({
@@ -221,11 +288,58 @@ router.put("/:id", async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/menu/:id/availability — Nonaktifkan sementara atau kembali mengikuti inventori.
+router.patch('/:id/availability', requireMenuStaff, async (req: Request, res: Response) => {
+  try {
+    const override = req.body.override;
+    const reason = String(req.body.reason || '').trim();
+    if (override !== 'auto' && override !== 'force_off') return res.status(400).json({ message: 'Status ketersediaan tidak valid.' });
+    if (override === 'force_off' && reason.length < 3) return res.status(400).json({ message: 'Alasan menonaktifkan menu wajib diisi.' });
+    const [rows]: any = await db.query('SELECT * FROM menus WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ message: 'Menu tidak ditemukan.' });
+    const actor = getVerifiedActor(req);
+    await db.query(
+      `UPDATE menus SET availability_override = ?, availability_reason = ?, availability_updated_by = ?,
+       availability_updated_at = NOW(), in_stock = IF(is_active = 1 AND inventory_available = 1 AND ? = 'auto', 1, 0)
+       WHERE id = ?`,
+      [override, override === 'force_off' ? reason : null, actor, override, req.params.id]
+    );
+    const [updated]: any = await db.query('SELECT * FROM menus WHERE id = ?', [req.params.id]);
+    const item = serializeMenu(updated[0]);
+    await addAuditLog(actor, override === 'force_off' ? 'Nonaktifkan Menu Sementara' : 'Aktifkan Mode Otomatis Menu', `${item.name}${reason ? ` (${reason})` : ''}`, override === 'force_off' ? 'warning' : 'success');
+    req.app.get('io')?.emit('menu_availability_updated', item);
+    res.json({ message: override === 'force_off' ? 'Menu dinonaktifkan sementara.' : 'Menu kembali mengikuti stok inventori.', item });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Gagal mengubah ketersediaan menu', error: error.message });
+  }
+});
+
+// PATCH /api/menu/:id/archive — Arsipkan atau pulihkan master menu.
+router.patch('/:id/archive', requireMenuAdmin, async (req: Request, res: Response) => {
+  try {
+    const isActive = req.body.isActive === true;
+    const [rows]: any = await db.query('SELECT * FROM menus WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ message: 'Menu tidak ditemukan.' });
+    await db.query(
+      `UPDATE menus SET is_active = ?, in_stock = IF(? = 1 AND inventory_available = 1 AND availability_override = 'auto', 1, 0) WHERE id = ?`,
+      [isActive ? 1 : 0, isActive ? 1 : 0, req.params.id]
+    );
+    const [updated]: any = await db.query('SELECT * FROM menus WHERE id = ?', [req.params.id]);
+    const item = serializeMenu(updated[0]);
+    const actor = getVerifiedActor(req);
+    await addAuditLog(actor, isActive ? 'Pulihkan Menu' : 'Arsipkan Menu', item.name, isActive ? 'success' : 'warning');
+    req.app.get('io')?.emit('menu_availability_updated', item);
+    res.json({ message: isActive ? 'Menu berhasil dipulihkan.' : 'Menu berhasil diarsipkan.', item });
+  } catch (error: any) {
+    res.status(500).json({ message: 'Gagal mengubah status arsip menu', error: error.message });
+  }
+});
+
 // DELETE /api/menu/:id — Hapus menu
-router.delete("/:id", async (req: Request, res: Response) => {
+router.delete("/:id", requireMenuAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const actor = (req.headers["x-user-name"] as string) || "Koki";
+    const actor = getVerifiedActor(req);
     const [menuData]: any = await db.query("SELECT name FROM menus WHERE id = ?", [id]);
     const nameVal = menuData.length ? menuData[0].name : id;
 
@@ -242,14 +356,14 @@ router.delete("/:id", async (req: Request, res: Response) => {
 });
 
 // PATCH /api/menu/:id/toggle-stock — Toggle in_stock
-router.patch("/:id/toggle-stock", async (req: Request, res: Response) => {
+router.patch("/:id/toggle-stock", requireMenuStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const [existing]: any = await db.query("SELECT * FROM menus WHERE id = ?", [id]);
     
     // Jika tidak ditemukan di database lokal, berarti menu eksternal dari teman kita!
     if (existing.length === 0) {
-      const SMART_TAG_API = "http://192.168.1.11:5000";
+      const SMART_TAG_API = (process.env.SMART_TAG_API_URL || 'https://smarttag.ngolab.online').replace(/\/$/, '');
       try {
         console.log(`⚡ Meneruskan toggle-stock ke server teman untuk Menu ID: ${id}`);
         
@@ -257,7 +371,7 @@ router.patch("/:id/toggle-stock", async (req: Request, res: Response) => {
         let displayedVal = 0; // default to disable
         let targetMenu: any = null;
         try {
-          const getRes = await fetch(`${SMART_TAG_API}/api/menu`);
+          const getRes = await fetch(`${SMART_TAG_API}/api/menu`, { headers: smartTagHeaders() });
           if (getRes.ok) {
             const externalMenus: any = await getRes.json();
             targetMenu = externalMenus.find((m: any) => m.id.toString() === id.toString());
@@ -274,7 +388,7 @@ router.patch("/:id/toggle-stock", async (req: Request, res: Response) => {
         // 2. Kirim PUT request ke API spesifik teman Anda
         const response = await fetch(`${SMART_TAG_API}/api/menu/${id}/display`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: smartTagHeaders(),
           body: JSON.stringify({ displayed: displayedVal })
         });
         
@@ -309,45 +423,32 @@ router.patch("/:id/toggle-stock", async (req: Request, res: Response) => {
     }
 
     const current = existing[0];
-    const newInStock = current.in_stock ? 0 : 1;
-    const newStock = newInStock ? 20 : 0; // Default refill to 20 if marked as in stock
-
+    const override = current.availability_override === 'force_off' ? 'auto' : 'force_off';
+    const actor = getVerifiedActor(req);
     await db.query(
-      "UPDATE menus SET in_stock=?, stock=? WHERE id=?",
-      [newInStock, newStock, id]
+      `UPDATE menus SET availability_override = ?, availability_reason = ?, availability_updated_by = ?,
+       availability_updated_at = NOW(), in_stock = IF(is_active = 1 AND inventory_available = 1 AND ? = 'auto', 1, 0)
+       WHERE id = ?`,
+      [override, override === 'force_off' ? 'Dinonaktifkan melalui tombol cepat' : null, actor, override, id]
     );
-
-    // Log to security audit
-    const actor = (req.headers["x-user-name"] as string) || "Koki";
-    await addAuditLog(actor, "Toggle Stok Menu", `${current.name} (${newInStock ? 'Tersedia' : 'Habis'})`);
-
-    res.json({
-      item: {
-        id: current.id,
-        name: current.name,
-        category: current.category,
-        price: current.price,
-        inStock: Boolean(newInStock),
-        displayed: newInStock ? 1 : 0,
-        stock: newStock,
-        outlet: current.outlet,
-        image: current.image_url,
-        description: current.description || ""
-      }
-    });
+    const [updated]: any = await db.query('SELECT * FROM menus WHERE id = ?', [id]);
+    const item = serializeMenu(updated[0]);
+    await addAuditLog(actor, override === 'force_off' ? 'Nonaktifkan Menu Sementara' : 'Aktifkan Mode Otomatis Menu', item.name, override === 'force_off' ? 'warning' : 'success');
+    req.app.get('io')?.emit('menu_availability_updated', item);
+    res.json({ item });
   } catch (error: any) {
     res.status(500).json({ message: "Gagal update stok menu", error: error.message });
   }
 });
 
 // POST /api/menu/sync-smart-tag — Tes konektivitas ke Smart Tag API
-router.post("/sync-smart-tag", async (req: Request, res: Response) => {
+router.post("/sync-smart-tag", requireMenuAdmin, async (req: Request, res: Response) => {
   try {
-    const SMART_TAG_API = "http://192.168.1.11:5000";
+    const SMART_TAG_API = (process.env.SMART_TAG_API_URL || 'https://smarttag.ngolab.online').replace(/\/$/, '');
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 seconds timeout
 
-    const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal });
+    const response = await fetch(`${SMART_TAG_API}/api/menu`, { signal: controller.signal, headers: smartTagHeaders() });
     clearTimeout(timeoutId);
 
     if (!response.ok) {

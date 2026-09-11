@@ -14,6 +14,7 @@ import {
   Ticket
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { authFetch } from '../lib/authFetch';
 
 interface User {
   id: string;
@@ -62,7 +63,7 @@ export default function UserManagement() {
   const [toast, setToast] = useState('');
 
   const fetchUsers = () => {
-    fetch('/api/users')
+    authFetch('/api/users')
       .then(res => res.json())
       .then(data => setUsers(Array.isArray(data) ? data : []))
       .catch(err => console.error("Gagal mengambil data user:", err));
@@ -83,7 +84,7 @@ export default function UserManagement() {
     setIsSaving(true);
 
     try {
-      const res = await fetch('/api/users/register', {
+      const res = await authFetch('/api/users/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -111,7 +112,7 @@ export default function UserManagement() {
     setIsSavingCoins(true);
 
     try {
-      const res = await fetch(`/api/users/${selectedUserForCoins.id}/earn-coins`, {
+      const res = await authFetch(`/api/users/${selectedUserForCoins.id}/earn-coins`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: parseInt(coinAmount), description: coinDescription })
@@ -167,7 +168,7 @@ export default function UserManagement() {
         </div>
         <button 
           onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-200"
+          className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-200 dark:shadow-none"
         >
           <UserPlus size={16} />
           Tambah Pengguna Baru
@@ -418,7 +419,7 @@ export default function UserManagement() {
                   <button 
                     type="submit" 
                     disabled={isSaving}
-                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 transition-all disabled:opacity-60"
+                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-60"
                   >
                     {isSaving ? 'Mendaftarkan...' : 'Daftarkan'}
                   </button>
@@ -494,7 +495,7 @@ export default function UserManagement() {
                   <button 
                     type="submit" 
                     disabled={isSavingCoins}
-                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 transition-all disabled:opacity-60"
+                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg hover:shadow-indigo-200 dark:shadow-none transition-all disabled:opacity-60"
                   >
                     {isSavingCoins ? 'Menambahkan...' : 'Tambah Koin'}
                   </button>

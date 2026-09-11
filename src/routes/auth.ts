@@ -3,8 +3,17 @@ import { db } from "../db/db.js";
 import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
 import { normalizeEmail } from "../lib/auth.js";
 import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
+import { getAuthTokenSecret, issueAuthToken } from "../lib/authToken.js";
 
 const router = Router();
+
+function authenticatedUser(user: any) {
+  const token = issueAuthToken(
+    { id: String(user.id), name: String(user.name || user.nama || 'Pengguna'), role: String(user.role) },
+    { secret: getAuthTokenSecret() }
+  );
+  return { user, token };
+}
 
 
 // POST /api/auth/login
@@ -39,18 +48,16 @@ router.post("/login", async (req: Request, res: Response) => {
         }
       }
 
-      return res.json({
-        message: "Login berhasil",
-        user: {
-          id: customer.id,
-          nama: customer.nama,
-          nim: customer.nim,
-          coin_balance: customer.coin_balance,
-          avatar_url: customer.avatar_url,
-          phone: customer.phone,
-          role: customer.role
-        }
-      });
+      const user = {
+        id: customer.id,
+        nama: customer.nama,
+        nim: customer.nim,
+        coin_balance: customer.coin_balance,
+        avatar_url: customer.avatar_url,
+        phone: customer.phone,
+        role: customer.role
+      };
+      return res.json({ message: "Login berhasil", ...authenticatedUser(user) });
     }
 
     if (!email || !password) {
@@ -78,15 +85,13 @@ router.post("/login", async (req: Request, res: Response) => {
         await upgradeLegacyPassword('staff', user.id, password);
       }
 
-      return res.json({
-        message: "Login berhasil",
-        user: {
-          id: user.id,
-          name: user.name,
-          role: user.role,
-          email: user.email
-        }
-      });
+      const authenticatedStaff = {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        email: user.email
+      };
+      return res.json({ message: "Login berhasil", ...authenticatedUser(authenticatedStaff) });
     }
 
     // Cek di tabel users (Pelanggan) jika tidak ditemukan di staff
@@ -103,19 +108,17 @@ router.post("/login", async (req: Request, res: Response) => {
       if (needsPasswordUpgrade(customer.password_hash)) {
         await upgradeLegacyPassword('users', customer.id, password);
       }
-      return res.json({
-        message: "Login berhasil",
-        user: {
-          id: customer.id,
-          nama: customer.nama,
-          nim: customer.nim,
-          coin_balance: customer.coin_balance,
-          avatar_url: customer.avatar_url,
-          phone: customer.phone,
-          role: customer.role,
-          email: customer.email
-        }
-      });
+      const authenticatedCustomer = {
+        id: customer.id,
+        nama: customer.nama,
+        nim: customer.nim,
+        coin_balance: customer.coin_balance,
+        avatar_url: customer.avatar_url,
+        phone: customer.phone,
+        role: customer.role,
+        email: customer.email
+      };
+      return res.json({ message: "Login berhasil", ...authenticatedUser(authenticatedCustomer) });
     }
 
     return res.status(401).json({ message: "Email atau password salah" });
@@ -166,18 +169,16 @@ router.post("/register", async (req: Request, res: Response) => {
         [txId, newId, name, initialCoin]
       );
 
-      return res.status(201).json({
-        message: "Registrasi berhasil",
-        user: {
-          id: newId,
-          nama: name,
-          nim: phone_number,
-          coin_balance: initialCoin,
-          avatar_url: avatar,
-          phone: phone_number,
-          role: "Pelanggan"
-        }
-      });
+      const registeredCustomer = {
+        id: newId,
+        nama: name,
+        nim: phone_number,
+        coin_balance: initialCoin,
+        avatar_url: avatar,
+        phone: phone_number,
+        role: "Pelanggan"
+      };
+      return res.status(201).json({ message: "Registrasi berhasil", ...authenticatedUser(registeredCustomer) });
     }
 
     if (!name || !normalizedEmail || !password) {
@@ -198,17 +199,19 @@ router.post("/register", async (req: Request, res: Response) => {
 
     const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}-${Date.now().toString().slice(-4)}`;
     const hashedPassword = await hashPassword(password);
-    // Registrasi publik tidak boleh memilih role istimewa (mencegah self-escalation).
-    const assignedRole = 'Kasir';
+    // Registrasi publik selalu mendapat role Support yang tidak memiliki akses operasional.
+    // Super Admin dapat mengubah role melalui halaman Tim & Shift yang terlindungi.
+    const assignedRole = 'Support';
 
     await db.query(
       "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
       [newId, name, assignedRole, normalizedEmail, phone || null, hashedPassword]
     );
 
+    const registeredStaff = { id: newId, name, role: assignedRole, email: normalizedEmail };
     res.status(201).json({
       message: "Registrasi berhasil",
-      user: { id: newId, name, role: assignedRole, email: normalizedEmail }
+      ...authenticatedUser(registeredStaff)
     });
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mendaftar akun", error: err.message });

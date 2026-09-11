@@ -1,8 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/db.js';
 import { buildMonthlyData, calculateReportSummary } from '../lib/reporting.js';
+import { requireRoles } from '../middleware/authSession.js';
 
 const router = Router();
+const requireAnalyticsStaff = requireRoles('Super Admin', 'Kasir', 'Support', 'Koki');
+router.use(requireAnalyticsStaff);
 
 router.get('/stats', async (req: Request, res: Response) => {
   try {
