@@ -156,6 +156,13 @@ export async function testDbConnection() {
 
       const [orderColumns]: any = await connection.query("SHOW COLUMNS FROM orders");
       const orderFields = new Set(orderColumns.map((column: any) => column.Field));
+      const statusColumn = orderColumns.find((column: any) => column.Field === 'status');
+      if (String(statusColumn?.Type || '').toLowerCase().startsWith('enum(')) {
+        // Legacy schema contains case-insensitive duplicate ENUM values such as
+        // 'Menunggu' and 'menunggu'. MySQL rejects every later ALTER TABLE until
+        // the status column is normalized to a regular string column.
+        await connection.query("ALTER TABLE orders MODIFY COLUMN status VARCHAR(30) NOT NULL DEFAULT 'Menunggu'");
+      }
       if (!orderFields.has('outlet')) await connection.query("ALTER TABLE orders ADD COLUMN outlet VARCHAR(50) NOT NULL DEFAULT 'ngolab' AFTER source");
       if (!orderFields.has('order_type')) {
         await connection.query("ALTER TABLE orders ADD COLUMN order_type VARCHAR(30) NOT NULL DEFAULT 'regular' AFTER outlet");
