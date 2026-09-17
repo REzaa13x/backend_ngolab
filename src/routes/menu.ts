@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { requireApiKeyScope } from "../middleware/authApiKey.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
+import { desiredSmartTagDisplayed, parseMenuMutationTarget, serializeSmartTagMenu, smartTagMenuPathId } from "../lib/smartTagMenu.js";
 
 // Helper function to save base64 image string as a physical file on the server
 function saveBase64Image(base64Str: string): string {
@@ -48,9 +49,31 @@ const smartTagHeaders = () => {
     Accept: 'application/json',
     'User-Agent': 'Mozilla/5.0 Tangolab-Ngolab-Integration',
     ...(key ? { 'x-api-key': key } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
+    ...(token ? { Authorization: 'Bearer ' + token } : {})
   };
 };
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 3000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchJsonWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 3000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const data: any = await response.json();
+    return { response, data };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function serializeMenu(menu: any) {
   const isActive = menu.is_active === undefined ? true : Boolean(menu.is_active);
@@ -75,7 +98,8 @@ function serializeMenu(menu: any) {
     availabilityReason: menu.availability_reason || '',
     availabilityUpdatedBy: menu.availability_updated_by || '',
     availabilityUpdatedAt: menu.availability_updated_at,
-    unavailableReason
+    unavailableReason,
+    source: 'local'
   };
 }
 
@@ -136,28 +160,7 @@ router.get("/", async (req: Request, res: Response) => {
 
       if (response.ok) {
         const externalData: any = await response.json();
-        formattedMenus = externalData.map((item: any) => {
-          let imageUrl = item.image_url;
-          if (imageUrl && imageUrl.startsWith('/')) {
-            imageUrl = `${SMART_TAG_API}${imageUrl}`;
-          } else if (!imageUrl) {
-            imageUrl = `https://picsum.photos/seed/${item.name.replace(/\s+/g, '')}/400/300`;
-          }
-
-          return {
-            id: item.id,
-            name: item.name,
-            category: item.category || "Main Course",
-            price: parseFloat(item.price) || 0,
-            inStock: item.status === "Tersedia",
-            displayed: item.status === "Tersedia" ? 1 : 0,
-            stock: item.stock || 0,
-            outlet: "ngolab",
-            image: imageUrl,
-            description: item.description || item.deskripsi || "",
-            deskripsi: item.description || item.deskripsi || ""
-          };
-        });
+        formattedMenus = externalData.map((item: any) => serializeSmartTagMenu(item, SMART_TAG_API));
 
         // Apply category filter if requested
         if (category && category !== "Semua") {
@@ -295,22 +298,87 @@ router.patch('/:id/availability', requireMenuStaff, async (req: Request, res: Re
     const reason = String(req.body.reason || '').trim();
     if (override !== 'auto' && override !== 'force_off') return res.status(400).json({ message: 'Status ketersediaan tidak valid.' });
     if (override === 'force_off' && reason.length < 3) return res.status(400).json({ message: 'Alasan menonaktifkan menu wajib diisi.' });
-    const [rows]: any = await db.query('SELECT * FROM menus WHERE id = ? LIMIT 1', [req.params.id]);
-    if (!rows.length) return res.status(404).json({ message: 'Menu tidak ditemukan.' });
+    let target: ReturnType<typeof parseMenuMutationTarget>;
+    try {
+      target = parseMenuMutationTarget(req.body.source, req.body.outlet);
+    } catch (validationError: any) {
+      return res.status(400).json({ message: validationError.message });
+    }
+    const { source, outlet } = target;
+    if (source === 'smart-tag') {
+      if (outlet !== 'ngolab') return res.status(400).json({ message: 'Smart Tag hanya berlaku untuk outlet Ngolab.' });
+      let externalId: string;
+      try {
+        externalId = smartTagMenuPathId(req.params.id);
+      } catch {
+        return res.status(400).json({ message: 'ID menu Smart Tag tidak valid.' });
+      }
+      const smartTagBaseUrl = (process.env.SMART_TAG_API_URL || 'https://smarttag.ngolab.online').replace(/\/$/, '');
+      const { response: listResponse, data: externalMenus } = await fetchJsonWithTimeout(
+        `${smartTagBaseUrl}/api/menu`,
+        { headers: smartTagHeaders() }
+      );
+      if (!listResponse.ok) return res.status(503).json({ message: 'Menu Smart Tag sedang tidak dapat diakses.' });
+      const current = Array.isArray(externalMenus)
+        ? externalMenus.find((menu: any) => String(menu.id) === String(req.params.id))
+        : null;
+      if (!current) return res.status(404).json({ message: 'Menu Smart Tag tidak ditemukan.' });
+
+      const displayResponse = await fetchWithTimeout(`${smartTagBaseUrl}/api/menu/${externalId}/display`, {
+        method: 'PUT',
+        headers: smartTagHeaders(),
+        body: JSON.stringify({ displayed: desiredSmartTagDisplayed(override) })
+      });
+      if (!displayResponse.ok) {
+        return res.status(displayResponse.status === 401 || displayResponse.status === 403 ? 502 : displayResponse.status)
+          .json({ message: 'Smart Tag menolak perubahan status menu. Periksa kredensial integrasi.' });
+      }
+
+      let refreshed: any = null;
+      try {
+        const { response: refreshedResponse, data: refreshedMenus } = await fetchJsonWithTimeout(
+          `${smartTagBaseUrl}/api/menu`,
+          { headers: smartTagHeaders() }
+        );
+        refreshed = refreshedResponse.ok && Array.isArray(refreshedMenus)
+          ? refreshedMenus.find((menu: any) => String(menu.id) === String(req.params.id))
+          : null;
+      } catch (refreshError) {
+        // PUT sudah berhasil. Gunakan snapshot deterministik agar audit dan event tetap tercatat.
+        console.warn('Smart Tag refresh after successful mutation failed', refreshError);
+      }
+      const fallback = {
+        ...current,
+        displayed: desiredSmartTagDisplayed(override),
+        status: override === 'auto' && Number(current.stock || 0) > 0 ? 'Tersedia' : 'Tidak Tersedia'
+      };
+      const item = serializeSmartTagMenu(refreshed || fallback, smartTagBaseUrl);
+      const actor = getVerifiedActor(req);
+      await addAuditLog(actor, override === 'force_off' ? 'Nonaktifkan Menu Smart Tag' : 'Aktifkan Menu Smart Tag', `${item.name}${reason ? ` (${reason})` : ''}`, override === 'force_off' ? 'warning' : 'success');
+      req.app.get('io')?.emit('menu_availability_updated', item);
+      return res.json({ message: override === 'force_off' ? 'Menu Smart Tag dinonaktifkan.' : 'Menu Smart Tag diaktifkan kembali.', item });
+    }
+
+    const [rows]: any = await db.query('SELECT * FROM menus WHERE id = ? AND outlet = ? LIMIT 1', [req.params.id, outlet]);
+    if (!rows.length) return res.status(404).json({ message: 'Menu lokal tidak ditemukan.' });
     const actor = getVerifiedActor(req);
     await db.query(
       `UPDATE menus SET availability_override = ?, availability_reason = ?, availability_updated_by = ?,
        availability_updated_at = NOW(), in_stock = IF(is_active = 1 AND inventory_available = 1 AND ? = 'auto', 1, 0)
-       WHERE id = ?`,
-      [override, override === 'force_off' ? reason : null, actor, override, req.params.id]
+       WHERE id = ? AND outlet = ?`,
+      [override, override === 'force_off' ? reason : null, actor, override, req.params.id, outlet]
     );
-    const [updated]: any = await db.query('SELECT * FROM menus WHERE id = ?', [req.params.id]);
+    const [updated]: any = await db.query('SELECT * FROM menus WHERE id = ? AND outlet = ?', [req.params.id, outlet]);
     const item = serializeMenu(updated[0]);
     await addAuditLog(actor, override === 'force_off' ? 'Nonaktifkan Menu Sementara' : 'Aktifkan Mode Otomatis Menu', `${item.name}${reason ? ` (${reason})` : ''}`, override === 'force_off' ? 'warning' : 'success');
     req.app.get('io')?.emit('menu_availability_updated', item);
     res.json({ message: override === 'force_off' ? 'Menu dinonaktifkan sementara.' : 'Menu kembali mengikuti stok inventori.', item });
   } catch (error: any) {
-    res.status(500).json({ message: 'Gagal mengubah ketersediaan menu', error: error.message });
+    const timedOut = error?.name === 'AbortError';
+    console.error('Menu availability update failed', error);
+    res.status(timedOut ? 503 : 500).json({
+      message: timedOut ? 'Smart Tag tidak merespons dalam batas waktu.' : 'Gagal mengubah ketersediaan menu'
+    });
   }
 });
 

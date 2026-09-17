@@ -9,6 +9,7 @@ type MenuItem = {
   inStock: boolean; isActive: boolean; inventoryAvailable: boolean; availabilityOverride: 'auto' | 'force_off';
   availabilityReason: string; availabilityUpdatedBy: string; availabilityUpdatedAt: string | null;
   unavailableReason: 'available' | 'manual' | 'inventory' | 'archived';
+  source?: 'smart-tag' | 'local';
 };
 
 const reasons = ['Persiapan belum selesai', 'Alat dapur bermasalah', 'Bahan tidak layak', 'Menu dihentikan hari ini', 'Permintaan terlalu tinggi', 'Lainnya'];
@@ -28,7 +29,8 @@ export default function MenuAvailability({ onNavigate }: { onNavigate?: (tab: st
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const response = await authFetch(`/api/menu?outlet=${outlet}&source=local`);
+      const source = outlet === 'ngolab' ? '' : '&source=local';
+      const response = await authFetch(`/api/menu?outlet=${outlet}${source}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Gagal mengambil menu.');
       setItems(Array.isArray(data) ? data.filter((item: MenuItem) => item.isActive !== false) : []);
@@ -47,9 +49,9 @@ export default function MenuAvailability({ onNavigate }: { onNavigate?: (tab: st
   const setAvailability = async (item: MenuItem, override: 'auto' | 'force_off', selectedReason = '') => {
     setError(''); setMessage('');
     try {
-      const response = await authFetch(`/api/menu/${item.id}/availability`, {
+      const response = await authFetch(`/api/menu/${encodeURIComponent(item.id)}/availability`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ override, reason: selectedReason })
+        body: JSON.stringify({ override, reason: selectedReason, source: item.source || 'local', outlet: item.outlet })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Gagal mengubah ketersediaan.');
@@ -72,7 +74,7 @@ export default function MenuAvailability({ onNavigate }: { onNavigate?: (tab: st
 
   return <div className="space-y-6 pb-20">
     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-      <div><h2 className="text-2xl font-bold text-slate-900 dark:text-white">Ketersediaan Menu</h2><p className="text-sm text-slate-500">Nonaktifkan sementara tanpa mengubah stok atau data master menu.</p></div>
+      <div><h2 className="text-2xl font-bold text-slate-900 dark:text-white">Ketersediaan Menu</h2><p className="text-sm text-slate-500">{outlet === 'ngolab' ? 'Menu Ngolab tersinkron langsung dari Smart Tag.' : 'Nonaktifkan sementara tanpa mengubah stok atau data master menu.'}</p></div>
       <button onClick={load} className="self-start px-4 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center gap-2 text-sm font-bold"><RefreshCw size={16}/> Muat Ulang</button>
     </div>
 
