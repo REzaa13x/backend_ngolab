@@ -172,6 +172,8 @@ export async function testDbConnection() {
       if (!orderFields.has('preorder_status')) await connection.query("ALTER TABLE orders ADD COLUMN preorder_status VARCHAR(30) DEFAULT NULL AFTER fulfillment_at");
       if (!orderFields.has('picked_up_at')) await connection.query("ALTER TABLE orders ADD COLUMN picked_up_at DATETIME DEFAULT NULL AFTER preorder_status");
       if (!orderFields.has('customer_phone')) await connection.query("ALTER TABLE orders ADD COLUMN customer_phone VARCHAR(50) DEFAULT NULL AFTER customer_name");
+      if (!orderFields.has('payment_proof_url')) await connection.query("ALTER TABLE orders ADD COLUMN payment_proof_url VARCHAR(500) DEFAULT NULL AFTER payment_method");
+      if (!orderFields.has('payment_proof_uploaded_at')) await connection.query("ALTER TABLE orders ADD COLUMN payment_proof_uploaded_at DATETIME DEFAULT NULL AFTER payment_proof_url");
       await connection.query("UPDATE orders SET preorder_status = 'reserved' WHERE order_type = 'preorder' AND preorder_status IS NULL");
       await connection.query("UPDATE orders SET outlet = 'coworking' WHERE source = 'coworking'");
 

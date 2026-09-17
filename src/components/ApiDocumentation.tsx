@@ -39,7 +39,8 @@ const endpointDocs = [
   { method: 'GET', path: '/api/menu/external', scope: 'menu:read', description: 'Mengambil menu lokal Ngolab/Coworking.' },
   { method: 'GET', path: '/api/orders/external/history', scope: 'orders:read', description: 'Mengambil maksimal 100 riwayat pesanan.' },
   { method: 'GET', path: '/api/orders/external/incoming', scope: 'orders:read', description: 'Mengambil pesanan aktif untuk integrasi.' },
-  { method: 'POST', path: '/api/orders/external', scope: 'orders:write', description: 'Mengirim pesanan baru ke Ngolab.' }
+  { method: 'POST', path: '/api/orders/external', scope: 'orders:write', description: 'Mengirim pesanan baru ke Ngolab.' },
+  { method: 'POST', path: '/api/orders/external/:id/payment-proof', scope: 'orders:write', description: "Upload JPG/PNG/GIF/WEBP maksimal 5 MB sebagai multipart field 'payment_proof'." }
 ];
 
 export default function ApiDocumentation() {

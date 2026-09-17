@@ -1,13 +1,28 @@
 import { Router, Request, Response } from "express";
+import { randomUUID } from "crypto";
+import fs from "fs/promises";
+import path from "path";
+import multer from "multer";
 import { db, addAuditLog } from "../db/db.js";
 import { requireApiKeyScope } from "../middleware/authApiKey.js";
 import { canUseGenericOrderStatus } from "../lib/preorderRules.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 import { consumeInventoryForOrder, emitInventoryChanges, restoreInventoryForOrder } from "../lib/inventoryDb.js";
 import { processLoyaltyPoints } from "../lib/loyaltyHelper.js";
+import {
+  buildPaymentProofFile,
+  buildPaymentProofSuccessResponse,
+  paymentProofErrorResponse,
+  paymentProofPathFromUrl,
+  persistPaymentProofReplacement,
+} from "../lib/paymentProof.js";
 
 const router = Router();
 const requireOrderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
+const paymentProofUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 }
+});
 
 // ==========================================
 // 1. ORDERS API
@@ -312,6 +327,83 @@ router.post("/external", requireApiKeyScope('orders:write'), async (req: Request
     connection.release();
   }
 });
+
+// POST /api/orders/external/:id/payment-proof — Unggah bukti pembayaran dari aplikasi mitra.
+router.post(
+  "/external/:id/payment-proof",
+  requireApiKeyScope('orders:write'),
+  (req: Request, res: Response, next) => {
+    paymentProofUpload.single('payment_proof')(req, res, error => {
+      if (error instanceof multer.MulterError) {
+        const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+        const message = error.code === 'LIMIT_FILE_SIZE'
+          ? 'Ukuran bukti pembayaran maksimal 5 MB.'
+          : 'Upload bukti pembayaran tidak valid.';
+        return res.status(status).json({ message });
+      }
+      if (error) {
+        console.error('Payment proof upload middleware failed', error);
+        return res.status(500).json({ message: 'Gagal mengunggah bukti pembayaran.' });
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "File wajib dikirim pada field 'payment_proof'." });
+      }
+
+      const [orders]: any = await db.query(
+        'SELECT id, invoice_number, payment_proof_url FROM orders WHERE id = ? LIMIT 1',
+        [req.params.id]
+      );
+      if (!orders.length) return res.status(404).json({ message: 'Pesanan tidak ditemukan.' });
+
+      const proof = await buildPaymentProofFile(req.file.buffer, randomUUID());
+      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'payment-proofs');
+      await fs.mkdir(uploadDir, { recursive: true });
+      const savedPath = path.join(uploadDir, proof.filename);
+      const previousUrl = typeof orders[0].payment_proof_url === 'string'
+        ? orders[0].payment_proof_url
+        : null;
+
+      await persistPaymentProofReplacement({
+        orderId: req.params.id,
+        previousUrl,
+        nextUrl: proof.publicUrl,
+        nextPath: savedPath,
+        previousPath: paymentProofPathFromUrl(previousUrl),
+        buffer: req.file.buffer,
+        writeFile: fs.writeFile,
+        compareAndSwap: async (orderId, expectedUrl, nextUrl) => {
+          const [result]: any = await db.query(
+            `UPDATE orders
+             SET payment_proof_url = ?, payment_proof_uploaded_at = NOW()
+             WHERE id = ? AND payment_proof_url <=> ?`,
+            [nextUrl, orderId, expectedUrl]
+          );
+          return result.affectedRows === 1;
+        },
+        deleteFile: fs.unlink,
+        log: (message, error) => console.error(message, error),
+      });
+
+      const [updatedOrders]: any = await db.query('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+      const updatedOrder = updatedOrders[0];
+      const io = req.app.get('io');
+      if (io) io.emit('order_updated', updatedOrder);
+
+      res.json(buildPaymentProofSuccessResponse(updatedOrder));
+    } catch (error: unknown) {
+      const response = paymentProofErrorResponse(error);
+      if (response.status === 500) {
+        console.error(`Payment proof upload failed for order ${req.params.id}`, error);
+      }
+      res.status(response.status).json(response.body);
+    }
+  }
+);
 
 // GET /api/orders/external/history — Endpoint Riwayat untuk Aplikasi Eksternal (contoh: Smart Tag QR)
 router.get("/external/history", requireApiKeyScope('orders:read'), async (req: Request, res: Response) => {
