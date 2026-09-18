@@ -10,7 +10,6 @@ import {
   XCircle,
   ShoppingBag,
   ArrowUpDown,
-  ExternalLink,
   Zap,
   Download,
   Trash2,
@@ -23,6 +22,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import socket from '../lib/socket';
+import { PaymentProofPreview } from './PaymentProofPreview';
 import { authFetch } from '../lib/authFetch';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -45,13 +45,19 @@ interface Order {
   amount_paid?: number;
   external_id?: string;
   payment_proof?: string;
+  payment_proof_url?: string;
   source: string;
   created_at: string;
   items: OrderItem[];
 }
 
+function normalizePaymentProof(order: Order): Order {
+  return { ...order, payment_proof: order.payment_proof_url || order.payment_proof };
+}
+
 export default function OrderManagement() {
   const { user } = useAuth();
+  const canManagePayments = user?.role === 'Super Admin' || user?.role === 'Kasir';
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -67,7 +73,7 @@ export default function OrderManagement() {
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
-          setOrders(data);
+          setOrders(data.map(normalizePaymentProof));
         } else {
           console.error("API did not return an array:", data);
           setOrders([]);
@@ -94,11 +100,11 @@ export default function OrderManagement() {
 
     // Listen for real-time updates
     socket.on("new_order", (newOrder: Order) => {
-      setOrders(prev => [newOrder, ...prev]);
+      setOrders(prev => [normalizePaymentProof(newOrder), ...prev]);
     });
 
     socket.on("order_updated", (updatedOrder: Order) => {
-      setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      setOrders(prev => prev.map(o => o.id === updatedOrder.id ? normalizePaymentProof(updatedOrder) : o));
     });
 
     return () => {
@@ -507,19 +513,21 @@ export default function OrderManagement() {
                   <td className="px-6 py-5 text-center">
                     <span className={cn(
                       "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest inline-flex items-center gap-1.5",
-                      order.payment_status === 'lunas' 
-                        ? "bg-emerald-50 text-emerald-600 border border-emerald-200" 
-                        : "bg-rose-50 text-rose-600 border border-rose-200"
+                      order.payment_status === 'lunas'
+                        ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                        : order.payment_status === 'pending_verifikasi'
+                          ? "bg-amber-50 text-amber-700 border border-amber-200"
+                          : "bg-rose-50 text-rose-600 border border-rose-200"
                     )}>
                       {order.payment_status === 'lunas' ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
-                      {order.payment_status === 'lunas' ? 'Lunas' : 'Belum Bayar'}
+                      {order.payment_status === 'lunas' ? 'Lunas' : order.payment_status === 'pending_verifikasi' ? 'Menunggu Verifikasi' : 'Belum Bayar'}
                     </span>
                   </td>
 
                   {/* KOLOM VALIDASI */}
                   <td className="px-6 py-5">
                     <div className="flex items-center justify-center">
-                      {order.payment_status === 'lunas' ? (
+                      {canManagePayments ? (order.payment_status === 'lunas' ? (
                         <button
                           onClick={() => updatePaymentStatus(order.id, 'belum_bayar')}
                           className="px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all shadow-sm flex items-center gap-1.5"
@@ -533,7 +541,7 @@ export default function OrderManagement() {
                         >
                           <Check size={12} /> Set Lunas
                         </button>
-                      )}
+                      )) : <span className="text-xs text-slate-300">—</span>}
                     </div>
                   </td>
                   
@@ -545,12 +553,14 @@ export default function OrderManagement() {
                        >
                          Lihat Struk
                        </button>
-                       <button 
-                        onClick={() => deleteOrder(order.id)}
-                        className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                       >
-                         <Trash2 size={14} />
-                       </button>
+                       {canManagePayments && (
+                         <button
+                          onClick={() => deleteOrder(order.id)}
+                          className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                         >
+                           <Trash2 size={14} />
+                         </button>
+                       )}
                     </div>
                   </td>
                 </tr>
@@ -623,31 +633,16 @@ export default function OrderManagement() {
                  </div>
 
                  {/* Bukti Bayar Image Preview */}
-                 {selectedOrder.payment_proof && (
+                 {canManagePayments && selectedOrder.payment_proof && (
                     <div className="pt-4 animate-in slide-in-from-bottom-2 duration-500">
                        <span className="text-[10px] font-black text-slate-400 uppercase block mb-2">Lampiran Bukti:</span>
-                       <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-inner group relative">
-                          <img 
-                            src={selectedOrder.payment_proof} 
-                            alt="Bukti Transfer" 
-                            className="w-full h-32 object-cover transition-all group-hover:scale-105"
-                            referrerPolicy="no-referrer"
-                          />
-                          <a 
-                            href={selectedOrder.payment_proof} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                             <ExternalLink className="text-white" size={24} />
-                          </a>
-                       </div>
+                       <PaymentProofPreview url={selectedOrder.payment_proof} />
                     </div>
                  )}
               </div>
 
               <div className="p-8 pt-6 flex flex-col gap-2">
-                {selectedOrder.payment_status === 'pending_verifikasi' ? (
+                {canManagePayments && selectedOrder.payment_status === 'pending_verifikasi' ? (
                   <div className="flex gap-2">
                     <button 
                       onClick={() => verifyPayment(selectedOrder.id)}
@@ -667,7 +662,7 @@ export default function OrderManagement() {
                     disabled
                     className="w-full bg-slate-100 text-slate-400 py-3 rounded-xl text-xs font-black uppercase tracking-widest italic"
                   >
-                    Sudah Terverifikasi
+                    {canManagePayments ? 'Sudah Terverifikasi' : 'Hanya Kasir/Admin yang dapat memverifikasi'}
                   </button>
                 )}
                 <button 
