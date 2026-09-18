@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/db.js';
 import { requireRoles } from '../middleware/authSession.js';
+import { buildOrderItemInsert, orderItemColumnNames } from '../lib/orderItems.js';
 
 const router = Router();
 
@@ -25,11 +26,17 @@ router.post('/simulate', requireRoles('Super Admin', 'Kasir'), async (req: Reque
        VALUES (?, ?, ?, ?, ?, 'menunggu', ?, ?, 0, ?, 'ngolab')`,
       [orderId, users[0].id, users[0].nama, invoiceNumber, totalPrice, paymentStatus, paymentMethod, paymentMethod === 'Tunai' ? '-' : `SIM-${Date.now()}`]
     );
+    const [orderItemColumns]: any = await connection.query('SHOW COLUMNS FROM order_items');
+    const orderItemColumnSet = orderItemColumnNames(orderItemColumns);
     for (const item of selectedItems) {
-      await connection.query(
-        'INSERT INTO order_items (order_id, menu_id, item_name, quantity, price) VALUES (?, ?, ?, 1, ?)',
-        [orderId, item.id, item.name, item.price]
-      );
+      const insert = buildOrderItemInsert(orderItemColumnSet, {
+        orderId,
+        menuId: String(item.id),
+        name: String(item.name),
+        quantity: 1,
+        price: Number(item.price),
+      });
+      await connection.query(insert.sql, insert.params);
     }
     await connection.commit();
 

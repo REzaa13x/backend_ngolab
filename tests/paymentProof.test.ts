@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import {
   buildPaymentProofFile,
   buildPaymentProofSuccessResponse,
+  paymentProofDisplayUrl,
+  assertPaymentProofUploadAllowed,
+  assertPaymentVerificationAllowed,
+  apiClientOwnsOrder,
   PaymentProofConflictError,
   paymentProofErrorResponse,
   paymentProofPublicUrl,
@@ -157,12 +162,50 @@ test('respons sukses mengambil seluruh field bukti dari snapshot order yang sama
   });
 });
 
-test('path bukti lama hanya dapat dibuat dari URL upload payment-proofs yang aman', () => {
-  assert.equal(
-    paymentProofPathFromUrl('/uploads/payment-proofs/payment-proof-old.png', 'C:/app'),
-    'C:/app/public/uploads/payment-proofs/payment-proof-old.png',
-  );
-  assert.equal(paymentProofPathFromUrl('/uploads/preorders/other.png', 'C:/app'), null);
-  assert.equal(paymentProofPathFromUrl('/uploads/payment-proofs/../secret.env', 'C:/app'), null);
-  assert.equal(paymentProofPublicUrl('payment-proof-new.webp'), '/uploads/payment-proofs/payment-proof-new.webp');
+test('upload dari kiosk hanya menerima pesanan reguler aktif yang belum diverifikasi', () => {
+  assert.equal(assertPaymentProofUploadAllowed({ payment_status: 'belum_bayar', status: 'menunggu', order_type: 'regular' }), 'pending_verifikasi');
+  assert.equal(assertPaymentProofUploadAllowed({ payment_status: 'pending_verifikasi', status: 'menunggu', order_type: 'regular' }), 'pending_verifikasi');
+  assert.throws(() => assertPaymentProofUploadAllowed({ payment_status: 'lunas', status: 'menunggu', order_type: 'regular' }), /sudah lunas/i);
+  assert.throws(() => assertPaymentProofUploadAllowed({ payment_status: 'ditolak', status: 'dibatalkan', order_type: 'regular' }), /tidak menerima bukti/i);
+  assert.throws(() => assertPaymentProofUploadAllowed({ payment_status: 'belum_bayar', status: 'dibatalkan', order_type: 'regular' }), /dibatalkan/i);
+  assert.throws(() => assertPaymentProofUploadAllowed({ payment_status: 'belum_bayar', status: 'menunggu', order_type: 'preorder' }), /reguler/i);
+});
+
+test('API key hanya boleh mengunggah bukti untuk order yang dibuat credential yang sama', () => {
+  assert.equal(apiClientOwnsOrder(7, '7'), true);
+  assert.equal(apiClientOwnsOrder('legacy', 'legacy'), true);
+  assert.equal(apiClientOwnsOrder(8, '7'), false);
+  assert.equal(apiClientOwnsOrder(7, null), false);
+});
+
+test('verifikasi pembayaran hanya menerima pesanan reguler aktif yang belum lunas', () => {
+  assert.doesNotThrow(() => assertPaymentVerificationAllowed({ payment_status: 'pending_verifikasi', status: 'menunggu', order_type: 'regular' }));
+  assert.doesNotThrow(() => assertPaymentVerificationAllowed({ payment_status: 'belum_bayar', status: 'menunggu', order_type: 'regular' }));
+  assert.throws(() => assertPaymentVerificationAllowed({ payment_status: 'lunas', status: 'menunggu', order_type: 'regular' }), /sudah lunas/i);
+  assert.throws(() => assertPaymentVerificationAllowed({ payment_status: 'ditolak', status: 'dibatalkan', order_type: 'regular' }), /ditolak/i);
+  assert.throws(() => assertPaymentVerificationAllowed({ payment_status: 'belum_bayar', status: 'dibatalkan', order_type: 'regular' }), /dibatalkan/i);
+  assert.throws(() => assertPaymentVerificationAllowed({ payment_status: 'pending_verifikasi', status: 'menunggu', order_type: 'preorder' }), /pre-order/i);
+});
+
+test('admin menggunakan URL bukti baru dengan fallback kolom legacy', () => {
+  assert.equal(paymentProofDisplayUrl({ payment_proof_url: '/uploads/new.png', payment_proof: '/uploads/old.png' }), '/uploads/new.png');
+  assert.equal(paymentProofDisplayUrl({ payment_proof_url: null, payment_proof: '/uploads/old.png' }), '/uploads/old.png');
+  assert.equal(paymentProofDisplayUrl({}), null);
+});
+
+test('path bukti hanya dibuat dari URL payment-proofs yang aman, mengikuti folder penyimpanan terkonfigurasi', () => {
+  const previous = process.env.PAYMENT_PROOF_PATH;
+  try {
+    process.env.PAYMENT_PROOF_PATH = 'C:/proofs';
+    assert.equal(
+      paymentProofPathFromUrl('/uploads/payment-proofs/payment-proof-old.png', 'C:/app'),
+      path.join('C:/proofs', 'payment-proof-old.png').replace(/\\/g, '/'),
+    );
+    assert.equal(paymentProofPathFromUrl('/uploads/preorders/other.png', 'C:/app'), null);
+    assert.equal(paymentProofPathFromUrl('/uploads/payment-proofs/../secret.env', 'C:/app'), null);
+    assert.equal(paymentProofPublicUrl('payment-proof-new.webp'), '/uploads/payment-proofs/payment-proof-new.webp');
+  } finally {
+    if (previous === undefined) delete process.env.PAYMENT_PROOF_PATH;
+    else process.env.PAYMENT_PROOF_PATH = previous;
+  }
 });

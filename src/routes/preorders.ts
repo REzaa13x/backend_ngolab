@@ -19,6 +19,7 @@ import {
   requireRoles
 } from '../middleware/authSession.js';
 import { detectMediaFile } from '../lib/mediaFile.js';
+import { buildOrderItemInsert, orderItemColumnNames } from '../lib/orderItems.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -284,12 +285,18 @@ router.post('/:campaignId/orders', requireAuthenticated, async (req: Request, re
        VALUES (?, NULL, ?, ?, ?, ?, 'menunggu', 'belum_bayar', ?, 0, ?, 'preorder', ?, 'preorder', ?, ?, ?, 'reserved')`,
       [orderId, customer_name.trim(), customer_phone?.trim() || null, invoice, total, payment_method || null, invoice, campaign.outlet, campaign.id, payment_timing, campaign.service_at]
     );
+    const [orderItemColumns]: any = await connection.query('SHOW COLUMNS FROM order_items');
+    const orderItemColumnSet = orderItemColumnNames(orderItemColumns);
     for (const item of resolved) {
-      await connection.query(
-        `INSERT INTO order_items (order_id, menu_id, preorder_item_id, item_name, quantity, price)
-         VALUES (?, NULL, ?, ?, ?, ?)`,
-        [orderId, item.id, item.name, item.quantity, item.price]
-      );
+      const insert = buildOrderItemInsert(orderItemColumnSet, {
+        orderId,
+        menuId: null,
+        preorderItemId: String(item.id),
+        name: String(item.name),
+        quantity: Number(item.quantity),
+        price: Number(item.price),
+      });
+      await connection.query(insert.sql, insert.params);
       await connection.query('UPDATE preorder_items SET quota_sold = quota_sold + ? WHERE id = ?', [item.quantity, item.id]);
     }
     await connection.commit();

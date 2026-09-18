@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `source`           VARCHAR(50)   NOT NULL DEFAULT 'ngolab' COMMENT 'Sumber pesanan: ngolab, coworking, smart_tag_qr',
   `amount_paid`      INT           NOT NULL DEFAULT 0,
   `payment_proof`    VARCHAR(500)  DEFAULT NULL COMMENT 'Path file bukti transfer',
+  `payment_proof_url` VARCHAR(500) DEFAULT NULL COMMENT 'URL bukti pembayaran untuk aplikasi klien',
+  `payment_proof_uploaded_at` DATETIME DEFAULT NULL COMMENT 'Waktu unggah bukti pembayaran',
+  `external_api_client_id` VARCHAR(100) DEFAULT NULL COMMENT 'Pemilik API Key pembuat pesanan eksternal',
   `created_at`       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -54,7 +57,8 @@ CREATE TABLE IF NOT EXISTS `order_items` (
   `id`          INT           NOT NULL AUTO_INCREMENT,
   `order_id`    VARCHAR(50)   NOT NULL,
   `menu_id`     VARCHAR(50)   DEFAULT NULL COMMENT 'ID menu dari external API teman (opsional)',
-  `item_name`   VARCHAR(200)  NOT NULL COMMENT 'Snapshot nama menu saat dibeli',
+  `item_name`   VARCHAR(200)  DEFAULT NULL COMMENT 'Snapshot nama untuk aplikasi admin/coworking',
+  `menu_name`   VARCHAR(200)  DEFAULT NULL COMMENT 'Snapshot nama kompatibel aplikasi kasir',
   `quantity`    INT           NOT NULL DEFAULT 1,
   `price`       INT           NOT NULL DEFAULT 0 COMMENT 'Snapshot harga satuan saat dibeli',
   `created_at`  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -95,14 +99,16 @@ CREATE TABLE IF NOT EXISTS `coin_promos` (
 -- ----------------------------------------
 CREATE TABLE IF NOT EXISTS `coin_transactions` (
   `id`             VARCHAR(50)   NOT NULL,
+  `order_id`       VARCHAR(50)   DEFAULT NULL COMMENT 'Order sumber reward; unik agar cashback idempotent',
   `user_id`        VARCHAR(50)   NOT NULL,
   `user_name`      VARCHAR(100)  NOT NULL COMMENT 'Snapshot nama user',
   `type`           ENUM('earn', 'redeem') NOT NULL,
   `amount`         INT           NOT NULL,
   `description`    TEXT          DEFAULT NULL,
   `promo_id`       VARCHAR(50)   DEFAULT NULL,
-  `created_at`     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `created_at`      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_coin_transactions_order_reward` (`order_id`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`promo_id`) REFERENCES `coin_promos`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

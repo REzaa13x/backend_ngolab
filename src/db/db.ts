@@ -1,4 +1,6 @@
 import mysql from "mysql2/promise";
+import { loyaltySchemaChanges } from "../lib/loyaltyHelper.js";
+import { orderItemSchemaChanges } from "../lib/orderItems.js";
 
 // MySQL Connection Pool untuk Papan Digital
 export const db = mysql.createPool({
@@ -179,16 +181,40 @@ export async function testDbConnection() {
       if (!orderFields.has('preorder_status')) await connection.query("ALTER TABLE orders ADD COLUMN preorder_status VARCHAR(30) DEFAULT NULL AFTER fulfillment_at");
       if (!orderFields.has('picked_up_at')) await connection.query("ALTER TABLE orders ADD COLUMN picked_up_at DATETIME DEFAULT NULL AFTER preorder_status");
       if (!orderFields.has('customer_phone')) await connection.query("ALTER TABLE orders ADD COLUMN customer_phone VARCHAR(50) DEFAULT NULL AFTER customer_name");
-      if (!orderFields.has('payment_proof_url')) await connection.query("ALTER TABLE orders ADD COLUMN payment_proof_url VARCHAR(500) DEFAULT NULL AFTER payment_method");
+      if (!orderFields.has('external_api_client_id')) await connection.query("ALTER TABLE orders ADD COLUMN external_api_client_id VARCHAR(100) DEFAULT NULL AFTER source");
+      if (!orderFields.has('payment_proof')) await connection.query("ALTER TABLE orders ADD COLUMN payment_proof VARCHAR(500) DEFAULT NULL AFTER payment_method");
+      if (!orderFields.has('payment_proof_url')) await connection.query("ALTER TABLE orders ADD COLUMN payment_proof_url VARCHAR(500) DEFAULT NULL AFTER payment_proof");
       if (!orderFields.has('payment_proof_uploaded_at')) await connection.query("ALTER TABLE orders ADD COLUMN payment_proof_uploaded_at DATETIME DEFAULT NULL AFTER payment_proof_url");
+      // Pencarian referensi bukti pembayaran terjadi pada setiap permintaan gambar; tanpa indeks
+      // kueri dua-kolom selalu memindai seluruh tabel orders.
+      const [orderIndexes]: any = await connection.query("SHOW INDEX FROM orders");
+      const orderIndexNames = new Set(orderIndexes.map((index: any) => String(index.Key_name)));
+      if (!orderIndexNames.has('idx_orders_payment_proof_url')) {
+        await connection.query("ALTER TABLE orders ADD INDEX idx_orders_payment_proof_url (payment_proof_url)");
+      }
+      if (!orderIndexNames.has('idx_orders_payment_proof')) {
+        await connection.query("ALTER TABLE orders ADD INDEX idx_orders_payment_proof (payment_proof)");
+      }
+      if (!orderIndexNames.has('idx_orders_external_api_client')) {
+        await connection.query("ALTER TABLE orders ADD INDEX idx_orders_external_api_client (external_api_client_id)");
+      }
       await connection.query("UPDATE orders SET preorder_status = 'reserved' WHERE order_type = 'preorder' AND preorder_status IS NULL");
       await connection.query("UPDATE orders SET outlet = 'coworking' WHERE source = 'coworking'");
 
       const [itemColumns]: any = await connection.query("SHOW COLUMNS FROM order_items");
+      for (const statement of orderItemSchemaChanges(itemColumns)) {
+        await connection.query(statement);
+      }
       if (!itemColumns.some((column: any) => column.Field === 'preorder_item_id')) {
         await connection.query("ALTER TABLE order_items ADD COLUMN preorder_item_id VARCHAR(50) DEFAULT NULL");
       }
-      console.log("✅ Pre-order schema verified/created");
+
+      const [coinColumns]: any = await connection.query("SHOW COLUMNS FROM coin_transactions");
+      const [coinIndexes]: any = await connection.query("SHOW INDEX FROM coin_transactions");
+      for (const statement of loyaltySchemaChanges(coinColumns, coinIndexes)) {
+        await connection.query(statement);
+      }
+      console.log("✅ Order item compatibility, loyalty idempotency, and pre-order schema verified/created");
     } catch (preorderErr: any) {
       console.warn("⚠️ Pre-order migration failed:", preorderErr.message);
       throw preorderErr;

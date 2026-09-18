@@ -9,16 +9,24 @@ import { canUseGenericOrderStatus } from "../lib/preorderRules.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 import { consumeInventoryForOrder, emitInventoryChanges, restoreInventoryForOrder } from "../lib/inventoryDb.js";
 import { processLoyaltyPoints } from "../lib/loyaltyHelper.js";
+import { buildOrderItemInsert, externalOrderPaymentState, normalizeExternalOrderItems, orderItemColumnNames } from "../lib/orderItems.js";
 import {
   buildPaymentProofFile,
   buildPaymentProofSuccessResponse,
   paymentProofErrorResponse,
   paymentProofPathFromUrl,
+  paymentProofStorageDir,
+  paymentProofUrlCandidates,
+  assertPaymentProofUploadAllowed,
+  assertPaymentVerificationAllowed,
+  apiClientOwnsOrder,
   persistPaymentProofReplacement,
+  removePaymentProofFile,
 } from "../lib/paymentProof.js";
 
 const router = Router();
 const requireOrderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
+const requirePaymentStaff = requireRoles('Super Admin', 'Kasir');
 const paymentProofUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 }
@@ -38,7 +46,7 @@ router.get("/", requireOrderStaff, async (_req: Request, res: Response) => {
       const [items]: any = await db.query("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
       order.items = items.map((i: any) => ({
         id: i.menu_id || i.id,
-        name: i.item_name,
+        name: i.item_name || i.menu_name,
         quantity: i.quantity,
         price: i.price
       }));
@@ -74,7 +82,7 @@ router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
       const [items]: any = await db.query("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
       order.items = items.map((i: any) => ({
         id: i.menu_id || i.id,
-        name: i.item_name,
+        name: i.item_name || i.menu_name,
         quantity: i.quantity,
         price: i.price
       }));
@@ -173,11 +181,17 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
       ]
     );
 
+    const [orderItemColumns]: any = await connection.query('SHOW COLUMNS FROM order_items');
+    const orderItemColumnSet = orderItemColumnNames(orderItemColumns);
     for (const item of orderItems) {
-      await connection.query(
-        "INSERT INTO order_items (order_id, menu_id, item_name, quantity, price) VALUES (?, ?, ?, ?, ?)",
-        [orderId, item.menu_id, item.item_name, item.quantity, item.price]
-      );
+      const insert = buildOrderItemInsert(orderItemColumnSet, {
+        orderId,
+        menuId: item.menu_id,
+        name: item.item_name,
+        quantity: item.quantity,
+        price: item.price,
+      });
+      await connection.query(insert.sql, insert.params);
 
       if (item.menu_id) {
         await connection.query(
@@ -201,7 +215,7 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
     );
     
     if (finalPaymentStatus === 'lunas' && user_id) {
-      await processLoyaltyPoints(connection, user_id, customer_name, invoiceNumber, totalPrice);
+      await processLoyaltyPoints(connection, orderId, user_id, customer_name, invoiceNumber, totalPrice);
     }
     
     await connection.commit();
@@ -237,11 +251,32 @@ router.post("/external", requireApiKeyScope('orders:write'), async (req: Request
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const { user_id, customer_name, items, payment_method, payment_status, total_price, external_id, source } = req.body;
+    const { customer_name, items, payment_method, total_price, external_id, source, payment_status } = req.body;
 
-    if (!customer_name || !items || items.length === 0) {
+    if (!String(customer_name || '').trim()) {
       await connection.rollback();
-      return res.status(400).json({ message: "Data pesanan tidak lengkap" });
+      return res.status(400).json({ message: "Nama pelanggan wajib diisi" });
+    }
+    // Pesanan eksternal tidak boleh mengaku sudah dibayar. Menolak eksplisit lebih jelas bagi mitra
+    // daripada diam-diam mengabaikan nilainya.
+    const claimedPaymentStatus = String(payment_status || '').toLowerCase();
+    if (claimedPaymentStatus && claimedPaymentStatus !== 'belum_bayar') {
+      await connection.rollback();
+      return res.status(400).json({
+        message: "Pesanan eksternal selalu dimulai sebagai belum_bayar. Kirim bukti transfer melalui endpoint payment-proof.",
+      });
+    }
+    let normalizedItems: ReturnType<typeof normalizeExternalOrderItems>;
+    try {
+      normalizedItems = normalizeExternalOrderItems(items);
+    } catch (validationError: any) {
+      await connection.rollback();
+      return res.status(400).json({ message: validationError.message });
+    }
+    const normalizedTotalPrice = Number(total_price);
+    if (!Number.isFinite(normalizedTotalPrice) || normalizedTotalPrice < 0) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Total harga harus berupa angka 0 atau lebih.' });
     }
     if (external_id) {
       const [existing]: any = await connection.query(
@@ -256,38 +291,45 @@ router.post("/external", requireApiKeyScope('orders:write'), async (req: Request
 
     const orderId = Date.now().toString();
     const invoiceNumber = external_id || `EXT-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-    const finalPaymentStatus = payment_status || 'belum_bayar'; // Default ke belum_bayar agar diverifikasi Kasir terlebih dahulu
-    const status = finalPaymentStatus === 'lunas' ? 'sedang_diproses' : 'menunggu';
-    const amountPaid = finalPaymentStatus === 'lunas' ? total_price : 0;
+    const paymentState = externalOrderPaymentState();
+    const finalPaymentStatus = paymentState.paymentStatus;
+    const status = paymentState.orderStatus;
+    const amountPaid = paymentState.amountPaid;
     const finalSource = source || 'ngolab';
     const finalOutlet = source === 'coworking' ? 'coworking' : 'ngolab';
+    const externalApiClientId = String((req as any).apiClient?.id ?? '');
 
     await connection.query(
-      `INSERT INTO orders (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method, amount_paid, external_id, source, outlet)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO orders (id, user_id, customer_name, invoice_number, total_price, status, payment_status, payment_method, amount_paid, external_id, source, external_api_client_id, outlet)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         orderId,
-        user_id || null,
-        customer_name, invoiceNumber, total_price, status, finalPaymentStatus,
-        payment_method || 'QRIS', amountPaid, external_id || "EXTERNAL", finalSource, finalOutlet
+        paymentState.userId,
+        String(customer_name).trim(), invoiceNumber, normalizedTotalPrice, status, finalPaymentStatus,
+        payment_method || 'QRIS', amountPaid, external_id || "EXTERNAL", finalSource, externalApiClientId, finalOutlet
       ]
     );
 
-    for (const item of items) {
-      const menuId = item.id || item.menu_id || null;
-      await connection.query(
-        "INSERT INTO order_items (order_id, menu_id, item_name, quantity, price) VALUES (?, ?, ?, ?, ?)",
-        [orderId, menuId, item.name || item.item_name, item.quantity, item.price]
-      );
+    const [externalOrderItemColumns]: any = await connection.query('SHOW COLUMNS FROM order_items');
+    const externalOrderItemColumnSet = orderItemColumnNames(externalOrderItemColumns);
+    for (const item of normalizedItems) {
+      const insert = buildOrderItemInsert(externalOrderItemColumnSet, {
+        orderId,
+        menuId: item.menuId,
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+      });
+      await connection.query(insert.sql, insert.params);
 
-      if (menuId) {
+      if (item.menuId) {
         await connection.query(
-          "UPDATE menus SET stock = GREATEST(stock - ?, 0) WHERE id = ?",
-          [item.quantity, menuId]
+          "UPDATE menus SET stock = GREATEST(stock - ?, 0) WHERE id = ? AND outlet = ?",
+          [item.quantity, item.menuId, finalOutlet]
         );
         await connection.query(
-          "UPDATE menus SET in_stock = 0 WHERE id = ? AND stock <= 0",
-          [menuId]
+          "UPDATE menus SET in_stock = 0 WHERE id = ? AND outlet = ? AND stock <= 0",
+          [item.menuId, finalOutlet]
         );
       }
     }
@@ -296,25 +338,25 @@ router.post("/external", requireApiKeyScope('orders:write'), async (req: Request
     const inventoryChanges = await consumeInventoryForOrder(
       connection,
       orderId,
-      items.map((item: any) => ({ name: item.name || item.item_name, quantity: Number(item.quantity) })),
+      normalizedItems.map(item => ({ name: item.name, quantity: item.quantity })),
       finalOutlet,
       inventoryActor
     );
-    
-    if (finalPaymentStatus === 'lunas' && user_id) {
-      await processLoyaltyPoints(connection, user_id, customer_name, invoiceNumber, total_price);
-    }
     
     await connection.commit();
 
     // Fetch the inserted order to return
     const [insertedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [orderId]);
-    insertedOrder[0].items = items;
+    insertedOrder[0].items = normalizedItems.map(item => ({
+      id: item.menuId,
+      name: item.name,
+      quantity: item.quantity,
+      price: item.price,
+    }));
 
     const io = req.app.get('io');
     if (io) {
       io.emit("new_order", insertedOrder[0]);
-      if (finalPaymentStatus === 'lunas') io.emit("order_updated", insertedOrder[0]);
       io.emit("stats_updated");
       emitInventoryChanges(io, inventoryChanges);
     }
@@ -322,7 +364,12 @@ router.post("/external", requireApiKeyScope('orders:write'), async (req: Request
     res.status(201).json({ message: "Pesanan berhasil diterima", order: insertedOrder[0] });
   } catch (err: any) {
     await connection.rollback();
-    res.status(err.statusCode || 500).json({ message: err.statusCode ? err.message : "Gagal memproses pesanan eksternal", ...(err.statusCode ? {} : { error: err.message }) });
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
+    const reference = randomUUID();
+    console.error(`External order failed [${reference}]`, err);
+    res.status(500).json({ message: "Gagal memproses pesanan eksternal", reference });
   } finally {
     connection.release();
   }
@@ -355,18 +402,39 @@ router.post(
       }
 
       const [orders]: any = await db.query(
-        'SELECT id, invoice_number, payment_proof_url FROM orders WHERE id = ? LIMIT 1',
+        `SELECT id, invoice_number, payment_status, status, order_type, external_api_client_id,
+                payment_proof_url, payment_proof
+         FROM orders WHERE id = ? LIMIT 1`,
         [req.params.id]
       );
       if (!orders.length) return res.status(404).json({ message: 'Pesanan tidak ditemukan.' });
+      const apiClientId = (req as any).apiClient?.id;
+      if (orders[0].external_api_client_id === null || orders[0].external_api_client_id === undefined) {
+        // Pesanan lama tanpa pencatat pemilik. Menebak pemiliknya akan membuka celah lintas mitra,
+        // jadi permintaan ditolak dengan sebab yang eksplisit, bukan pesan kepemilikan yang menyesatkan.
+        return res.status(409).json({
+          message: 'Pesanan ini tidak memiliki pemilik API Key terdaftar. Bukti pembayaran harus diverifikasi melalui panel staf dengan bukti transfer manual.',
+        });
+      }
+      if (!apiClientOwnsOrder(apiClientId, orders[0].external_api_client_id)) {
+        return res.status(403).json({ message: 'API Key ini tidak memiliki pesanan tersebut.' });
+      }
+      let nextPaymentStatus: 'pending_verifikasi';
+      try {
+        nextPaymentStatus = assertPaymentProofUploadAllowed(orders[0]);
+      } catch (statusError: any) {
+        return res.status(409).json({ message: statusError.message });
+      }
 
       const proof = await buildPaymentProofFile(req.file.buffer, randomUUID());
-      const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'payment-proofs');
+      const uploadDir = paymentProofStorageDir();
       await fs.mkdir(uploadDir, { recursive: true });
       const savedPath = path.join(uploadDir, proof.filename);
-      const previousUrl = typeof orders[0].payment_proof_url === 'string'
+      const previousUrl = typeof orders[0].payment_proof_url === 'string' && orders[0].payment_proof_url
         ? orders[0].payment_proof_url
-        : null;
+        : typeof orders[0].payment_proof === 'string' && orders[0].payment_proof
+          ? orders[0].payment_proof
+          : null;
 
       await persistPaymentProofReplacement({
         orderId: req.params.id,
@@ -379,9 +447,14 @@ router.post(
         compareAndSwap: async (orderId, expectedUrl, nextUrl) => {
           const [result]: any = await db.query(
             `UPDATE orders
-             SET payment_proof_url = ?, payment_proof_uploaded_at = NOW()
-             WHERE id = ? AND payment_proof_url <=> ?`,
-            [nextUrl, orderId, expectedUrl]
+             SET payment_proof_url = ?, payment_proof = ?, payment_proof_uploaded_at = NOW(), payment_status = ?
+             WHERE id = ?
+               AND COALESCE(NULLIF(payment_proof_url, ''), NULLIF(payment_proof, '')) <=> ?
+               AND external_api_client_id = ?
+               AND order_type = 'regular'
+               AND payment_status IN ('belum_bayar', 'pending_verifikasi')
+               AND LOWER(status) <> 'dibatalkan'`,
+            [nextUrl, nextUrl, nextPaymentStatus, orderId, expectedUrl, String(apiClientId)]
           );
           return result.affectedRows === 1;
         },
@@ -417,7 +490,7 @@ router.get("/external/history", requireApiKeyScope('orders:read'), async (req: R
       const [items]: any = await db.query("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
       order.items = items.map((i: any) => ({
         id: i.menu_id || i.id,
-        name: i.item_name,
+        name: i.item_name || i.menu_name,
         quantity: i.quantity,
         price: i.price
       }));
@@ -441,7 +514,7 @@ router.get("/external/incoming", requireApiKeyScope('orders:read'), async (req: 
       const [items]: any = await db.query("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
       order.items = items.map((i: any) => ({
         id: i.menu_id || i.id,
-        name: i.item_name,
+        name: i.item_name || i.menu_name,
         quantity: i.quantity,
         price: i.price
       }));
@@ -454,26 +527,24 @@ router.get("/external/incoming", requireApiKeyScope('orders:read'), async (req: 
 });
 
 // POST /api/orders/:id/verify — Verifikasi Pembayaran & Beri Cashback
-router.post("/:id/verify", requireOrderStaff, async (req: Request, res: Response) => {
+router.post("/:id/verify", requirePaymentStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const { id } = req.params;
 
-    const [orders]: any = await connection.query("SELECT * FROM orders WHERE id = ?", [id]);
+    const [orders]: any = await connection.query("SELECT * FROM orders WHERE id = ? FOR UPDATE", [id]);
     if (!orders.length) {
       await connection.rollback();
       return res.status(404).json({ message: "Pesanan tidak ditemukan" });
     }
-    
+
     const order = orders[0];
-    if (order.order_type === 'preorder') {
+    try {
+      assertPaymentVerificationAllowed(order);
+    } catch (statusError: any) {
       await connection.rollback();
-      return res.status(409).json({ message: 'Pelunasan PO harus melalui aksi Tandai Lunas agar aturan operasional PO tervalidasi' });
-    }
-    if (order.payment_status === 'lunas') {
-      await connection.rollback();
-      return res.status(400).json({ message: "Pesanan sudah lunas" });
+      return res.status(409).json({ message: statusError.message });
     }
 
     const amountPaid = req.body.amount_paid || order.total_price;
@@ -491,7 +562,7 @@ router.post("/:id/verify", requireOrderStaff, async (req: Request, res: Response
     if (order.user_id) {
       const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
       const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
-      cashback = await processLoyaltyPoints(connection, order.user_id, userName, order.invoice_number, order.total_price);
+      cashback = await processLoyaltyPoints(connection, order.id, order.user_id, userName, order.invoice_number, order.total_price);
     }
 
     await connection.commit();
@@ -518,15 +589,17 @@ router.post("/:id/verify", requireOrderStaff, async (req: Request, res: Response
 });
 
 // POST /api/orders/:id/reject
-router.post("/:id/reject", requireOrderStaff, async (req: Request, res: Response) => {
+router.post("/:id/reject", requirePaymentStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const [orders]: any = await connection.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [req.params.id]);
     if (!orders.length) { await connection.rollback(); return res.status(404).json({ message: 'Pesanan tidak ditemukan' }); }
-    if (orders[0].order_type === 'preorder') {
+    try {
+      assertPaymentVerificationAllowed(orders[0]);
+    } catch (statusError: any) {
       await connection.rollback();
-      return res.status(409).json({ message: 'Pembatalan PO harus melalui aksi Batalkan PO agar deadline dan kuota tervalidasi' });
+      return res.status(409).json({ message: statusError.message });
     }
     const actor = getVerifiedActor(req);
     const inventoryChanges = await restoreInventoryForOrder(connection, req.params.id, actor);
@@ -551,7 +624,7 @@ router.post("/:id/reject", requireOrderStaff, async (req: Request, res: Response
 });
 
 // PATCH /api/orders/:id/payment-status — Ubah Status Pembayaran (belum_bayar, lunas)
-router.patch("/:id/payment-status", requireOrderStaff, async (req: Request, res: Response) => {
+router.patch("/:id/payment-status", requirePaymentStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -559,10 +632,11 @@ router.patch("/:id/payment-status", requireOrderStaff, async (req: Request, res:
     const { payment_status } = req.body;
 
     if (payment_status !== 'belum_bayar' && payment_status !== 'lunas') {
+      await connection.rollback();
       return res.status(400).json({ message: "Status pembayaran tidak valid" });
     }
 
-    const [orders]: any = await connection.query("SELECT * FROM orders WHERE id = ?", [id]);
+    const [orders]: any = await connection.query("SELECT * FROM orders WHERE id = ? FOR UPDATE", [id]);
     if (!orders.length) {
       await connection.rollback();
       return res.status(404).json({ message: "Pesanan tidak ditemukan" });
@@ -587,7 +661,7 @@ router.patch("/:id/payment-status", requireOrderStaff, async (req: Request, res:
     if (payment_status === 'lunas' && order.payment_status !== 'lunas' && order.user_id) {
       const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
       const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
-      cashback = await processLoyaltyPoints(connection, order.user_id, userName, order.invoice_number, order.total_price);
+      cashback = await processLoyaltyPoints(connection, order.id, order.user_id, userName, order.invoice_number, order.total_price);
     }
 
     await connection.commit();
@@ -664,7 +738,7 @@ router.patch("/:id/status", requireOrderStaff, async (req: Request, res: Respons
 
 
 // DELETE /api/orders/:id — Hapus Pesanan
-router.delete("/:id", requireOrderStaff, async (req: Request, res: Response) => {
+router.delete("/:id", requirePaymentStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     const { id } = req.params;
@@ -676,10 +750,26 @@ router.delete("/:id", requireOrderStaff, async (req: Request, res: Response) => 
       return res.status(409).json({ message: 'Transaksi PO tidak boleh dihapus melalui endpoint pesanan umum' });
     }
     const actor = getVerifiedActor(req);
+    const proofPaths = [...new Set(
+      paymentProofUrlCandidates(orders[0])
+        .map(url => paymentProofPathFromUrl(url))
+        .filter((value): value is string => Boolean(value)),
+    )];
     const inventoryChanges = await restoreInventoryForOrder(connection, id, actor);
     await connection.query("DELETE FROM order_items WHERE order_id = ?", [id]);
     await connection.query("DELETE FROM orders WHERE id = ?", [id]);
     await connection.commit();
+    // Penghapusan file bersifat ireversibel, jadi dijalankan setelah commit berhasil. Bukti yang
+    // gagal dihapus tetap tidak dapat diunduh karena server hanya menyajikan file yang masih
+    // direferensikan pesanan; kegagalannya dicatat sebagai peringatan audit.
+    const failedProofPaths: string[] = [];
+    for (const proofPath of proofPaths) {
+      const removed = await removePaymentProofFile(proofPath, (message, error) => console.error(message, error));
+      if (!removed) failedProofPaths.push(proofPath);
+    }
+    if (failedProofPaths.length) {
+      await addAuditLog(actor, "Bukti Pembayaran Yatim", `${orders[0].invoice_number} — gagal hapus: ${failedProofPaths.join(', ')}`, "warning");
+    }
     await addAuditLog(actor, "Hapus Pesanan", `${orders[0].invoice_number}`, "warning");
 
     const io = req.app.get('io');

@@ -25,11 +25,11 @@ import {
   RefreshCw,
   CheckCircle2,
   XCircle,
-  ExternalLink,
   FileText
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { authFetch } from '../lib/authFetch';
+import { PaymentProofPreview } from './PaymentProofPreview';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -614,22 +614,7 @@ export default function SalesReport() {
                  {selectedOrder.payment_proof && (
                     <div className="pt-4 animate-in slide-in-from-bottom-2 duration-500">
                        <span className="text-[10px] font-black text-slate-400 uppercase block mb-2">Lampiran Bukti:</span>
-                       <div className="rounded-2xl overflow-hidden border border-slate-100 shadow-inner group relative">
-                          <img 
-                            src={selectedOrder.payment_proof} 
-                            alt="Bukti Transfer" 
-                            className="w-full h-32 object-cover transition-all group-hover:scale-105"
-                            referrerPolicy="no-referrer"
-                          />
-                          <a 
-                            href={selectedOrder.payment_proof} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                             <ExternalLink className="text-white" size={24} />
-                          </a>
-                       </div>
+                       <PaymentProofPreview url={selectedOrder.payment_proof} />
                     </div>
                  )}
               </div>
