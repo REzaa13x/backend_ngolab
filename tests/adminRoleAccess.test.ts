@@ -92,7 +92,7 @@ test('tombol aksi tidak lagi mati di KDS, Database Pengguna, dan Tim & Shift', a
 test('nama aplikasi memakai GeastEats, bukan judul bawaan AI Studio', async () => {
   const html = await read('../index.html');
   const settings = await read('../src/contexts/SettingsContext.tsx');
-  assert.match(html, /<title>GeastEats<\/title>/);
+  assert.match(html, /<title>Admin Geasture Eats<\/title>/);
   assert.doesNotMatch(html, /My Google AI Studio App/);
   assert.match(settings, /brand_name: 'GeastEats'/);
 });
