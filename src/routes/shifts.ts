@@ -38,6 +38,16 @@ router.post("/", async (req: Request, res: Response) => {
 
     const dateStr = new Date().toISOString().split("T")[0];
 
+    // Satu pegawai satu shift per tanggal. Tanpa ini, menekan Simpan dua kali
+    // membuat baris ganda di tabel Jadwal Shift.
+    const [duplicate]: any = await db.query(
+      "SELECT id FROM shifts WHERE staff_id = ? AND date = ? LIMIT 1",
+      [staff_id, dateStr]
+    );
+    if (duplicate.length > 0) {
+      return res.status(409).json({ message: `${staff[0].name} sudah punya shift hari ini` });
+    }
+
     // Masukkan shift baru
     const [result]: any = await db.query(
       "INSERT INTO shifts (staff_id, shift_type, time, date) VALUES (?, ?, ?, ?)",

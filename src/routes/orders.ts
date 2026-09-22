@@ -25,7 +25,9 @@ import {
 } from "../lib/paymentProof.js";
 
 const router = Router();
-const requireOrderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
+// Support = pramusaji/waiters: boleh lihat antrean dapur, buat pesanan manual, ubah status pesanan.
+// Verifikasi pembayaran tetap hanya Super Admin & Kasir.
+const requireOrderStaff = requireRoles('Super Admin', 'Kasir', 'Koki', 'Support');
 const requirePaymentStaff = requireRoles('Super Admin', 'Kasir');
 const paymentProofUpload = multer({
   storage: multer.memoryStorage(),
@@ -58,6 +60,29 @@ router.get("/", requireOrderStaff, async (_req: Request, res: Response) => {
   }
 });
 
+// GET /api/orders/smart-tag — Riwayat pesanan Ngolab dari Smart Tag, diproksikan server-side.
+// ponytail: proxy ini ada supaya browser tidak lagi memanggil IP LAN (192.168.1.11) yang tidak
+// bisa dijangkau dari internet. Tidak ada cache/retry; tambah kalau trafiknya sudah besar.
+router.get('/smart-tag', requireOrderStaff, async (_req: Request, res: Response) => {
+  const base = (process.env.SMART_TAG_API_URL || 'https://smarttag.ngolab.online').replace(/\/$/, '');
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(`${base}/api/orders`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 Tangolab-Ngolab-Integration' }
+    });
+    clearTimeout(timer);
+    if (!response.ok) {
+      return res.status(502).json({ message: 'Smart Tag tidak merespons', upstreamStatus: response.status });
+    }
+    const data: any = await response.json();
+    res.json(Array.isArray(data) ? data : []);
+  } catch (err: any) {
+    res.status(502).json({ message: 'Gagal menghubungi Smart Tag', error: err.message });
+  }
+});
+
 // GET /api/orders/kds — Ambil pesanan untuk Kitchen Display
 router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
   try {
@@ -79,12 +104,19 @@ router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
     );
     
     for (const order of orders) {
-      const [items]: any = await db.query("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
+      const [items]: any = await db.query(
+        `SELECT oi.*, m.image_url AS menu_image
+         FROM order_items oi
+         LEFT JOIN menus m ON m.id = oi.menu_id AND m.outlet = ?
+         WHERE oi.order_id = ?`,
+        [outlet, order.id]
+      );
       order.items = items.map((i: any) => ({
         id: i.menu_id || i.id,
         name: i.item_name || i.menu_name,
         quantity: i.quantity,
-        price: i.price
+        price: i.price,
+        image: i.menu_image || null
       }));
     }
     

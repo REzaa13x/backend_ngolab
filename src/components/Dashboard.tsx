@@ -51,14 +51,9 @@ export default function Dashboard() {
   const [salesData, setSalesData] = useState([]);
   const [chartType, setChartType] = useState<ChartType>('bar');
   const [isExporting, setIsExporting] = useState(false);
-
-  const transactions = [
-    { id: 'INV-001', user: 'Ahmad Fauzi', amount: 25000, status: 'lunas', date: '2026-04-27 16:45', method: 'Koin' },
-    { id: 'INV-002', user: 'Siti Aminah', amount: 32000, status: 'menunggu', date: '2026-04-27 15:20', method: 'Saldo' },
-    { id: 'INV-003', user: 'Budi Santoso', amount: 15000, status: 'lunas', date: '2026-04-27 14:10', method: 'Koin' },
-    { id: 'INV-004', user: 'Dewi Lestari', amount: 50000, status: 'lunas', date: '2026-04-27 12:00', method: 'Top-up' },
-    { id: 'INV-005', user: 'Eko Prasetyo', amount: 12000, status: 'lunas', date: '2026-04-26 18:30', method: 'Koin' },
-  ];
+  const [selectedTx, setSelectedTx] = useState<any | null>(null);
+  // Baris tabel diambil dari pesanan nyata; sebelumnya daftar ini hardcode.
+  const [transactions, setTransactions] = useState<any[]>([]);
 
   const exportToPDF = () => {
     setIsExporting(true);
@@ -134,6 +129,24 @@ export default function Dashboard() {
         .then(res => res.json())
         .then(data => setSalesData(data))
         .catch(err => console.error("Failed to fetch sales data:", err));
+
+      authFetch('/api/orders')
+        .then(res => res.json())
+        .then((rows: any[]) => {
+          if (!Array.isArray(rows)) return;
+          setTransactions(rows.slice(0, 8).map(o => ({
+            id: o.invoice_number || o.id,
+            user: o.customer_name || o.user_id || 'Pelanggan',
+            amount: Number(o.total_price || 0),
+            status: o.payment_status || 'belum_bayar',
+            date: o.created_at ? new Date(o.created_at).toLocaleString('id-ID') : '-',
+            method: o.payment_method || '-',
+            statusPesanan: o.status || '-',
+            outlet: o.outlet || '-',
+            items: o.items || []
+          })));
+        })
+        .catch(err => console.error("Failed to fetch orders:", err));
     };
 
     fetchData();
@@ -430,7 +443,13 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {transactions.slice(0, 4).map((row) => (
+                {transactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-10 text-center text-xs font-bold text-slate-400">
+                      Belum ada transaksi.
+                    </td>
+                  </tr>
+                ) : transactions.slice(0, 4).map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800 transition-colors group">
                     <td className="px-6 py-4 text-sm font-bold text-slate-900">{row.id}</td>
                     <td className="px-6 py-4">
@@ -454,7 +473,11 @@ export default function Dashboard() {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button className="p-1.5 text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-all">
+                      <button
+                        onClick={() => setSelectedTx(row)}
+                        title="Lihat detail transaksi"
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 opacity-0 group-hover:opacity-100 transition-all"
+                      >
                         <MoreHorizontal size={16} />
                       </button>
                     </td>
@@ -464,6 +487,53 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
+
+        {/* Detail transaksi */}
+        {selectedTx && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div onClick={() => setSelectedTx(null)} className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" />
+            <div className="relative w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6">
+              <h3 className="font-bold text-slate-900 mb-1">Detail Transaksi</h3>
+              <p className="text-xs text-slate-500 font-mono mb-5">{selectedTx.id}</p>
+              <div className="space-y-2.5 text-sm">
+                {[
+                  ['Pelanggan', selectedTx.user],
+                  ['Waktu', selectedTx.date],
+                  ['Metode', selectedTx.method],
+                  ['Outlet', selectedTx.outlet],
+                  ['Status Pesanan', selectedTx.statusPesanan],
+                  ['Pembayaran', selectedTx.status],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="flex items-center justify-between gap-4">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</span>
+                    <span className="font-bold text-slate-800 text-right">{String(value || '-')}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total</span>
+                  <span className="font-black text-indigo-600">Rp {Number(selectedTx.amount || 0).toLocaleString()}</span>
+                </div>
+              </div>
+              {selectedTx.items?.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-100 space-y-1.5">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Rincian Item</p>
+                  {selectedTx.items.map((item: any, idx: number) => (
+                    <div key={idx} className="flex justify-between text-xs">
+                      <span className="text-slate-600 font-medium">{item.quantity}x {item.name}</span>
+                      <span className="font-bold text-slate-800">Rp {Number(item.price || 0).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => setSelectedTx(null)}
+                className="w-full mt-5 py-3 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* System Health */}
         <div className="space-y-6">

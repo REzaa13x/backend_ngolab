@@ -12,7 +12,9 @@ import {
   MoreVertical,
   BellRing,
   Volume2,
-  VolumeX
+  VolumeX,
+  Printer,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -51,6 +53,9 @@ export default function KDS() {
   const [selectedOutlet, setSelectedOutlet] = useState<'ngolab' | 'coworking'>('ngolab');
   const [lastOrderVoice, setLastOrderVoice] = useState(false);
   const [bellType, setBellType] = useState<'new_order' | 'ready' | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [queueEstimate, setQueueEstimate] = useState<{ minutes: number; message: string } | null>(null);
+  const [toast, setToast] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('tangolab_sound_enabled');
     return saved !== 'false';
@@ -111,7 +116,8 @@ export default function KDS() {
           id: `i-${o.id}-${idx}`,
           name: item.name,
           quantity: item.quantity,
-          image: `https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80`,
+          // Foto menu asli dari database; gambar contoh hanya dipakai bila menu tidak punya foto.
+          image: item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80',
           completed: false
         })) : [
           { id: `i-${o.id}`, name: 'Pesanan Paket', quantity: 1, image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80', completed: false }
@@ -232,6 +238,60 @@ export default function KDS() {
     }));
   };
 
+  // Estimasi antrean dapur berasal dari API, bukan angka statis.
+  useEffect(() => {
+    const fetchQueue = async () => {
+      try {
+        const res = await authFetch('/api/orders/queue-status');
+        if (!res.ok) return;
+        const data = await res.json();
+        setQueueEstimate({
+          minutes: Number(data.estimated_wait_time_minutes || 0),
+          message: String(data.message || 'Normal')
+        });
+      } catch { /* estimasi berikutnya akan mencoba lagi */ }
+    };
+    fetchQueue();
+    const interval = window.setInterval(fetchQueue, 60000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const printTicket = (order: KDSOrder) => {
+    const win = window.open('', '_blank', 'width=380,height=600');
+    if (!win) {
+      setToast('Popup diblokir browser, izinkan popup untuk mencetak tiket');
+      window.setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    const rows = order.items
+      .map(i => `<tr><td>${i.quantity}x</td><td>${i.name}</td></tr>`)
+      .join('');
+    win.document.write(`<!doctype html><html><head><title>${order.invoice}</title>
+      <style>body{font-family:monospace;padding:12px;font-size:13px}h2{margin:0 0 4px}table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}</style>
+      </head><body>
+      <h2>${order.invoice}</h2>
+      <div>${order.time} &middot; ${order.outlet || selectedOutlet}</div>
+      <div>Pelanggan: ${order.customer}</div>
+      <hr/>
+      <table>${rows}</table>
+      ${order.notes ? `<hr/><div><b>Catatan:</b> ${order.notes}</div>` : ''}
+      <hr/><div>&nbsp;</div>
+      <script>window.onload=function(){window.print();}</script>
+      </body></html>`);
+    win.document.close();
+  };
+
+  const copyInvoice = async (order: KDSOrder) => {
+    try {
+      await navigator.clipboard.writeText(order.invoice);
+      setToast(`Nomor ${order.invoice} disalin`);
+    } catch {
+      setToast('Gagal menyalin nomor pesanan');
+    }
+    setOpenMenuId(null);
+    window.setTimeout(() => setToast(''), 3000);
+  };
+
   const Column = ({ title, status, icon: Icon, color }: { title: string, status: string, icon: any, color: string }) => {
     const count = orders.filter(o => o.status === status).length;
     return (
@@ -298,9 +358,40 @@ export default function KDS() {
                     {order.customer}
                   </h4>
                 </div>
-                <button className="p-1.5 text-slate-300 hover:text-slate-600 transition-colors">
-                  <MoreVertical size={16} />
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setOpenMenuId(openMenuId === order.id ? null : order.id)}
+                    title="Aksi pesanan"
+                    className="p-1.5 text-slate-300 hover:text-slate-600 transition-colors"
+                  >
+                    <MoreVertical size={16} />
+                  </button>
+                  {openMenuId === order.id && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setOpenMenuId(null)} />
+                      <div className="absolute right-0 top-8 z-20 w-44 bg-white border border-slate-100 rounded-xl shadow-xl overflow-hidden">
+                        <button
+                          onClick={() => { printTicket(order); setOpenMenuId(null); }}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                        >
+                          <Printer size={13} /> Cetak Tiket
+                        </button>
+                        <button
+                          onClick={() => copyInvoice(order)}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                        >
+                          <Copy size={13} /> Salin No. Pesanan
+                        </button>
+                        <button
+                          onClick={() => { setOrders(prev => prev.filter(o => o.id !== order.id)); setOpenMenuId(null); }}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-50 border-t border-slate-50"
+                        >
+                          Sembunyikan dari Layar
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Items List */}
@@ -397,6 +488,11 @@ export default function KDS() {
   };
   return (
     <div className="h-full flex flex-col space-y-8">
+      {toast && (
+        <div className="fixed top-6 right-6 z-[120] bg-slate-900 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-bold">
+          {toast}
+        </div>
+      )}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Sistem Tampilan Dapur</h2>
@@ -422,7 +518,10 @@ export default function KDS() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold text-slate-600 shadow-sm">
             <Timer size={14} className="text-indigo-600" />
-            Rata-rata Persiapan: 12m
+            Rata-rata Persiapan: {queueEstimate ? `${queueEstimate.minutes}m` : '—'}
+            {queueEstimate && queueEstimate.message !== 'Normal' && (
+              <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-50 text-[9px] font-black uppercase text-amber-700">{queueEstimate.message}</span>
+            )}
           </div>
           {/* Tombol Mute Bell */}
           <button

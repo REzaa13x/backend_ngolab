@@ -40,23 +40,23 @@ interface SidebarProps {
 export type UserRole = 'Super Admin' | 'Kasir' | 'Koki' | 'Support';
 
 const navItems = [
-  { id: 'dashboard', label: 'Ringkasan', icon: LayoutDashboard, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki'] },
+  { id: 'dashboard', label: 'Ringkasan', icon: LayoutDashboard, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki', 'Support'] },
   { id: 'orders', label: 'Verifikasi & Transaksi', icon: ShoppingBag, section: 'Utama', roles: ['Super Admin', 'Kasir'] },
-  { id: 'manual-order', label: 'Pesanan Manual', icon: PhoneCall, section: 'Utama', roles: ['Super Admin', 'Kasir'] },
+  { id: 'manual-order', label: 'Pesanan Manual', icon: PhoneCall, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Support'] },
   { id: 'reports', label: 'Analisis & Laporan', icon: History, section: 'Utama', roles: ['Super Admin'] },
   { id: 'sales-history', label: 'Riwayat Transaksi', icon: TrendingUp, section: 'Utama', roles: ['Super Admin', 'Kasir'] },
-  { id: 'menu-availability', label: 'Ketersediaan Menu', icon: CheckCircle2, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki'] },
-  { id: 'stock', label: 'Inventori', icon: Package, section: 'Utama', roles: ['Super Admin', 'Koki', 'Kasir'] },
-  { id: 'kds', label: 'Tampilan Dapur', icon: ChefHat, section: 'Utama', roles: ['Super Admin', 'Koki', 'Kasir'] },
+  { id: 'menu-availability', label: 'Ketersediaan Menu', icon: CheckCircle2, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki', 'Support'] },
+  { id: 'stock', label: 'Inventori', icon: Package, section: 'Utama', roles: ['Super Admin', 'Koki'] },
+  { id: 'kds', label: 'Tampilan Dapur', icon: ChefHat, section: 'Utama', roles: ['Super Admin', 'Koki', 'Support'] },
   { id: 'promotions', label: 'Papan Digital', icon: Monitor, section: 'Pemasaran', roles: ['Super Admin'] },
-  { id: 'product-promos', label: 'Promo Produk', icon: Tag, section: 'Pemasaran', roles: ['Super Admin', 'Kasir'] },
-  { id: 'vouchers', label: 'Voucher Koin', icon: Gift, section: 'Pemasaran', roles: ['Super Admin', 'Kasir'] },
-  { id: 'users', label: 'Database Pengguna', icon: Users, section: 'Manajemen', roles: ['Super Admin', 'Kasir'] },
+  { id: 'product-promos', label: 'Promo Produk', icon: Tag, section: 'Pemasaran', roles: ['Super Admin'] },
+  { id: 'vouchers', label: 'Voucher Koin', icon: Gift, section: 'Pemasaran', roles: ['Super Admin'] },
+  { id: 'users', label: 'Database Pengguna', icon: Users, section: 'Manajemen', roles: ['Super Admin', 'Kasir', 'Support'] },
   { id: 'staff', label: 'Tim & Shift', icon: Users, section: 'Manajemen', roles: ['Super Admin'] },
   { id: 'menu-management', label: 'Manajemen Menu', icon: UtensilsCrossed, section: 'Manajemen', roles: ['Super Admin', 'Koki'] },
-  { id: 'preorders', label: 'Menu Pre-order', icon: CalendarClock, section: 'Manajemen', roles: ['Super Admin', 'Kasir', 'Koki'] },
-  { id: 'preorder-orders', label: 'Pesanan Pre-order', icon: CalendarCheck, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Koki'] },
-  { id: 'logs', label: 'Log Audit', icon: History, section: 'Sistem', roles: ['Super Admin', 'Kasir', 'Koki'] },
+  { id: 'preorders', label: 'Menu Pre-order', icon: CalendarClock, section: 'Manajemen', roles: ['Super Admin', 'Kasir'] },
+  { id: 'preorder-orders', label: 'Pesanan Pre-order', icon: CalendarCheck, section: 'Utama', roles: ['Super Admin', 'Kasir', 'Support'] },
+  { id: 'logs', label: 'Log Audit', icon: History, section: 'Sistem', roles: ['Super Admin'] },
   { id: 'api-docs', label: 'API & Integrasi', icon: Webhook, section: 'Sistem', roles: ['Super Admin'] },
   { id: 'settings', label: 'Pengaturan Admin', icon: Settings, section: 'Sistem', roles: ['Super Admin'] },
 ];
@@ -162,7 +162,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             Tampilan Peran:
           </label>
           <div className="flex gap-1 p-1 bg-slate-100 dark:bg-slate-800/50 rounded-xl border border-slate-200/50 dark:border-slate-700/50 shadow-inner">
-            {(['Super Admin', 'Kasir', 'Koki'] as UserRole[]).map(r => (
+            {(['Super Admin', 'Kasir', 'Koki', 'Support'] as UserRole[]).map(r => (
               <button
                 key={r}
                 onClick={() => {
@@ -171,6 +171,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                   if (r === 'Super Admin') setActiveTab('dashboard');
                   else if (r === 'Kasir') setActiveTab('orders');
                   else if (r === 'Koki') setActiveTab('kds');
+                  else if (r === 'Support') setActiveTab('manual-order');
                 }}
                 className={cn(
                   'flex-1 text-[11px] font-bold py-2 px-1 rounded-lg transition-all',

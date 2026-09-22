@@ -36,18 +36,16 @@ export default function Layout() {
   const soundEnabledRef = useRef(localStorage.getItem('tangolab_sound_enabled') !== 'false');
   
   // Define default tab based on role
-  const getDefaultTab = () => {
-    const currentRole = activeRole || user?.role;
-    switch(currentRole) {
-      case 'Super Admin': return 'dashboard';
-      case 'Kasir': return 'orders';
-      case 'Koki': return 'kds';
-      case 'Support': return 'dashboard';
-      default: return 'dashboard';
-    }
-  };
+const DEFAULT_TAB_BY_ROLE: Record<string, string> = {
+  'Super Admin': 'dashboard',
+  'Kasir': 'orders',
+  'Koki': 'kds',
+  'Support': 'kds'
+};
 
-  const [activeTab, setActiveTab] = useState(getDefaultTab());
+  const [activeTab, setActiveTab] = useState(
+    DEFAULT_TAB_BY_ROLE[activeRole || user?.role || ''] || 'dashboard'
+  );
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('tangolab_sound_enabled');
@@ -264,7 +262,7 @@ export default function Layout() {
             <div className="flex items-center gap-3">
               <div className="text-right hidden sm:block">
                 <p className="text-xs font-bold text-slate-900">{user?.name || 'Guest'}</p>
-                <p className="text-[10px] text-slate-500 font-medium">Tangolab Geasture-East</p>
+                <p className="text-[10px] text-slate-500 font-medium">GeastEats &middot; {activeRole || user?.role || 'Kasir'}</p>
               </div>
               <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
                 {(user?.name?.charAt(0) || 'U').toUpperCase()}

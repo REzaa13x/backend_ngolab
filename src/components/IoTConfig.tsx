@@ -242,8 +242,8 @@ export default function IoTConfig() {
     if (confirm('Apakah Anda yakin ingin mengembalikan seluruh pengaturan ke default pabrik?')) {
       setIsSaving(true);
       const defaults = {
-        brand_name: 'ngolab',
-        brand_subtitle: 'Gesture-Eats',
+        brand_name: 'GeastEats',
+        brand_subtitle: 'Admin Panel',
         brand_logo_url: '',
         active_zone: '60',
         dwell_time: '1.5',

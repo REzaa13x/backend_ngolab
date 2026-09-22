@@ -14,6 +14,7 @@ import {
   Ticket
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { cn } from '@/src/lib/utils';
 import { authFetch } from '../lib/authFetch';
 
 interface User {
@@ -62,6 +63,13 @@ export default function UserManagement() {
 
   const [toast, setToast] = useState('');
 
+  // Edit / aktivitas pengguna
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState({ nama: '', nim: '', email: '', phone: '', avatar_url: '' });
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [activity, setActivity] = useState<any[] | null>(null);
+  const [isLoadingActivity, setIsLoadingActivity] = useState(false);
+
   const fetchUsers = () => {
     authFetch('/api/users')
       .then(res => res.json())
@@ -103,6 +111,58 @@ export default function UserManagement() {
       alert('Terjadi kesalahan koneksi');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const openUserManager = (user: User) => {
+    setEditingUser(user);
+    setEditForm({
+      nama: user.nama || '',
+      nim: user.nim || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      avatar_url: user.avatar_url || ''
+    });
+    setActivity(null);
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setIsSavingEdit(true);
+    try {
+      const res = await authFetch(`/api/users/${editingUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.message || 'Gagal menyimpan data pengguna');
+        return;
+      }
+      setEditingUser(null);
+      fetchUsers();
+      showToast('Data pengguna tersimpan!');
+    } catch (err) {
+      console.error(err);
+      alert('Terjadi kesalahan koneksi');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const loadActivity = async (user: User) => {
+    setIsLoadingActivity(true);
+    try {
+      const res = await authFetch(`/api/users/transactions?user_id=${encodeURIComponent(user.id)}`);
+      const data = await res.json().catch(() => []);
+      setActivity(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Gagal mengambil aktivitas:', err);
+      setActivity([]);
+    } finally {
+      setIsLoadingActivity(false);
     }
   };
 
@@ -226,7 +286,11 @@ export default function UserManagement() {
                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">NIM / ID: {user.nim}</p>
                     </div>
                   </div>
-                  <button className="p-1.5 text-slate-300 hover:text-slate-600 transition-colors">
+                  <button
+                    onClick={() => openUserManager(user)}
+                    title="Kelola pengguna"
+                    className="p-1.5 text-slate-300 hover:text-slate-600 transition-colors"
+                  >
                     <MoreVertical size={16} />
                   </button>
                 </div>
@@ -290,7 +354,10 @@ export default function UserManagement() {
                 <div className="text-[10px] text-slate-400 font-semibold">
                   Terdaftar: {user.created_at ? new Date(user.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
                 </div>
-                <button className="text-[10px] font-bold text-indigo-600 hover:underline flex items-center gap-1">
+                <button
+                  onClick={() => openUserManager(user)}
+                  className="text-[10px] font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                >
                   Lihat Aktivitas <ArrowUpRight size={10} />
                 </button>
               </div>
@@ -425,6 +492,120 @@ export default function UserManagement() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ═══════════════════ KELOLA PENGGUNA MODAL ═══════════════════ */}
+      <AnimatePresence>
+        {editingUser && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setEditingUser(null)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl p-8 overflow-y-auto max-h-[90vh]"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">Kelola Pengguna</h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">{editingUser.nama} &middot; ID {editingUser.id}</p>
+                </div>
+                <button onClick={() => setEditingUser(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                  <X size={22} className="text-slate-400" />
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateUser} className="space-y-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Nama Lengkap</label>
+                  <input required type="text" value={editForm.nama}
+                    onChange={e => setEditForm({ ...editForm, nama: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">NIM / ID</label>
+                    <input type="text" value={editForm.nim}
+                      onChange={e => setEditForm({ ...editForm, nim: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">No. Telepon</label>
+                    <input type="tel" value={editForm.phone}
+                      onChange={e => setEditForm({ ...editForm, phone: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Email</label>
+                  <input type="email" value={editForm.email}
+                    onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Avatar URL</label>
+                  <input type="text" value={editForm.avatar_url}
+                    onChange={e => setEditForm({ ...editForm, avatar_url: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button type="button" onClick={() => setEditingUser(null)}
+                    className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest">
+                    Batal
+                  </button>
+                  <button type="submit" disabled={isSavingEdit}
+                    className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-60">
+                    {isSavingEdit ? 'Menyimpan...' : 'Simpan Perubahan'}
+                  </button>
+                </div>
+              </form>
+
+              <div className="mt-8 pt-6 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Coins size={16} className="text-amber-500" /> Riwayat Aktivitas Koin
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => loadActivity(editingUser)}
+                    disabled={isLoadingActivity}
+                    className="text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:underline disabled:opacity-50"
+                  >
+                    {isLoadingActivity ? 'Memuat...' : 'Muat Aktivitas'}
+                  </button>
+                </div>
+                {activity === null ? (
+                  <p className="text-xs text-slate-400">Tekan "Muat Aktivitas" untuk melihat riwayat perolehan koin pengguna ini.</p>
+                ) : activity.length === 0 ? (
+                  <p className="text-xs text-slate-400">Belum ada aktivitas koin.</p>
+                ) : (
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {activity.slice(0, 20).map((tx: any) => (
+                      <div key={tx.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-2.5">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">{tx.description || 'Tanpa keterangan'}</p>
+                          <p className="text-[10px] text-slate-400 font-medium">
+                            {tx.created_at ? new Date(tx.created_at).toLocaleString('id-ID') : '-'}
+                          </p>
+                        </div>
+                        <span className={cn(
+                          'text-xs font-black shrink-0 ml-3',
+                          tx.type === 'spend' ? 'text-rose-600' : 'text-emerald-600'
+                        )}>
+                          {tx.type === 'spend' ? '-' : '+'}{Number(tx.amount || 0).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </motion.div>
           </div>
         )}

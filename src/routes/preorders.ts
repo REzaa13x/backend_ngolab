@@ -23,7 +23,7 @@ import { buildOrderItemInsert, orderItemColumnNames } from '../lib/orderItems.js
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
-const requirePreorderStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
+const requirePreorderStaff = requireRoles('Super Admin', 'Kasir', 'Koki', 'Support');
 const validOutlets = new Set(['ngolab', 'coworking']);
 const validPaymentTimings = new Set(['before_pickup', 'on_pickup']);
 

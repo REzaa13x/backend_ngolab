@@ -430,6 +430,19 @@ export async function testDbConnection() {
       throw apiKeyErr;
     }
 
+    // Migration: Create staff table extras (kolom password_plain untuk Super Admin)
+    try {
+      const [plainColumn]: any = await connection.query(
+        "SELECT COUNT(*) AS total FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'staff' AND COLUMN_NAME = 'password_plain'"
+      );
+      if (Number(plainColumn[0]?.total || 0) === 0) {
+        await connection.query("ALTER TABLE staff ADD COLUMN password_plain VARCHAR(100) DEFAULT NULL AFTER password_hash");
+      }
+      console.log("✅ Staff password_plain column verified/created");
+    } catch (staffColumnErr: any) {
+      console.warn("⚠️ Staff password_plain migration warning:", staffColumnErr.message);
+    }
+
     // Migration: Create app_settings table
     try {
       await connection.query(`
@@ -443,8 +456,8 @@ export async function testDbConnection() {
 
       // Seed default/missing values
       const defaults = [
-        ['brand_name', 'ngolab'],
-        ['brand_subtitle', 'Gesture-Eats'],
+        ['brand_name', 'GeastEats'],
+        ['brand_subtitle', 'Admin Panel'],
         ['brand_logo_url', ''],
         ['active_zone', '60'],
         ['dwell_time', '1.5'],

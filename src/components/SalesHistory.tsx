@@ -31,8 +31,6 @@ interface Order {
 type FilterSource = 'semua' | 'ngolab' | 'coworking' | 'manual' | 'smart_tag';
 type FilterStatus = 'semua' | 'lunas' | 'pending_verifikasi' | 'belum_bayar' | 'ditolak';
 
-const SMART_TAG_BASE = 'http://192.168.1.11:5000';
-
 // ── Helpers ────────────────────────────────────────────────────────────────
 const statusLabel: Record<string, { label: string; color: string }> = {
   lunas:              { label: 'Lunas',    color: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
@@ -85,16 +83,11 @@ export default function SalesHistory() {
     }
   };
 
-  // ── Fetch friend's orders (Smart Tag API) ───────────────────────────────
+  // ── Fetch friend's orders (diproksikan backend; IP LAN tidak dijangkau browser) ──
   const fetchFriendOrders = async () => {
     setFriendStatus('loading');
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${SMART_TAG_BASE}/api/orders`, {
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
+      const res = await authFetch('/api/orders/smart-tag');
       if (!res.ok) throw new Error('Not ok');
       const raw: any[] = await res.json();
 
