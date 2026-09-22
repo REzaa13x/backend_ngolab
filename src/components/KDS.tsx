@@ -14,7 +14,8 @@ import {
   Volume2,
   VolumeX,
   Printer,
-  Copy
+  Copy,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -28,6 +29,7 @@ interface KDSItem {
   id: string;
   name: string;
   quantity: number;
+  price: number;
   image: string;
   completed: boolean;
 }
@@ -116,11 +118,12 @@ export default function KDS() {
           id: `i-${o.id}-${idx}`,
           name: item.name,
           quantity: item.quantity,
+          price: Number(item.price || 0),
           // Foto menu asli dari database; gambar contoh hanya dipakai bila menu tidak punya foto.
           image: item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80',
           completed: false
         })) : [
-          { id: `i-${o.id}`, name: 'Pesanan Paket', quantity: 1, image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80', completed: false }
+          { id: `i-${o.id}`, name: 'Pesanan Paket', quantity: 1, price: 0, image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=100&q=80', completed: false }
         ]
       }));
       setOrders(kdsOrders);
@@ -257,27 +260,62 @@ export default function KDS() {
   }, []);
 
   const printTicket = (order: KDSOrder) => {
-    const win = window.open('', '_blank', 'width=380,height=600');
+    const win = window.open('', '_blank', 'width=420,height=680');
     if (!win) {
       setToast('Popup diblokir browser, izinkan popup untuk mencetak tiket');
       window.setTimeout(() => setToast(''), 3000);
       return;
     }
-    const rows = order.items
-      .map(i => `<tr><td>${i.quantity}x</td><td>${i.name}</td></tr>`)
-      .join('');
-    win.document.write(`<!doctype html><html><head><title>${order.invoice}</title>
-      <style>body{font-family:monospace;padding:12px;font-size:13px}h2{margin:0 0 4px}table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}</style>
-      </head><body>
-      <h2>${order.invoice}</h2>
-      <div>${order.time} &middot; ${order.outlet || selectedOutlet}</div>
-      <div>Pelanggan: ${order.customer}</div>
-      <hr/>
-      <table>${rows}</table>
-      ${order.notes ? `<hr/><div><b>Catatan:</b> ${order.notes}</div>` : ''}
-      <hr/><div>&nbsp;</div>
-      <script>window.onload=function(){window.print();}</script>
-      </body></html>`);
+    const esc = (v: unknown) => String(v ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string));
+    const fmtRp = (n: number) => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
+    const total = order.items.reduce((sum, i) => sum + Number(i.price || 0) * i.quantity, 0);
+    const rows = order.items.map(i => `
+      <tr>
+        <td class="qty">${i.quantity}x</td>
+        <td class="nm">${esc(i.name)}<div class="unit">@ ${fmtRp(i.price)}</div></td>
+        <td class="amt">${fmtRp(Number(i.price || 0) * i.quantity)}</td>
+      </tr>`).join('');
+    const waktu = new Date().toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    win.document.write(`<!doctype html>
+<html><head><meta charset="utf-8"><title>${esc(order.invoice)}</title>
+<style>
+  @page { size: 80mm auto; margin: 4mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Courier New', ui-monospace, monospace; font-size: 12px; color: #000; margin: 0; padding: 8px; }
+  .center { text-align: center; }
+  .brand { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
+  .sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; }
+  .rule { border-top: 1px dashed #000; margin: 8px 0; }
+  .rule-strong { border-top: 2px solid #000; margin: 8px 0; }
+  .inv { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; }
+  td { vertical-align: top; padding: 3px 0; }
+  .qty { width: 30px; font-weight: 700; }
+  .nm { }
+  .unit { font-size: 10px; color: #333; }
+  .amt { text-align: right; white-space: nowrap; font-weight: 700; }
+  .total-row { display: flex; justify-content: space-between; font-size: 15px; font-weight: 700; }
+  .notes { font-size: 11px; border: 1px dashed #000; padding: 6px; margin-top: 8px; }
+  .foot { font-size: 10px; text-align: center; margin-top: 10px; }
+</style></head>
+<body>
+  <div class="center">
+    <div class="brand">GeastEats</div>
+    <div class="sub">Tiket Dapur</div>
+  </div>
+  <div class="rule"></div>
+  <div class="inv"><span>${esc(order.invoice)}</span><span>${esc(order.outlet || selectedOutlet)}</span></div>
+  <div class="inv"><span>${esc(order.customer)}</span><span>${esc(waktu)}</span></div>
+  <div class="rule"></div>
+  <table>${rows}</table>
+  <div class="rule-strong"></div>
+  <div class="total-row"><span>TOTAL</span><span>${fmtRp(total)}</span></div>
+  ${order.notes ? `<div class="notes"><b>Catatan:</b><br>${esc(order.notes)}</div>` : ''}
+  <div class="rule"></div>
+  <div class="foot">Dicetak ${esc(waktu)}<br>-- GeastEats --</div>
+  <script>window.onload=function(){window.focus();window.print();setTimeout(function(){window.close();},400);};</script>
+</body></html>`);
     win.document.close();
   };
 
@@ -290,6 +328,27 @@ export default function KDS() {
     }
     setOpenMenuId(null);
     window.setTimeout(() => setToast(''), 3000);
+  };
+
+  // Hapus pesanan permanen lewat DELETE /api/orders/:id (stok dikembalikan server).
+  // Backend membatasi aksi ini untuk Super Admin & Kasir, jadi Koki/Support melihat
+  // pesan penolakan alih-alih tombol yang diam-diam gagal.
+  const deleteOrder = async (order: KDSOrder) => {
+    setOpenMenuId(null);
+    if (!window.confirm(`Hapus pesanan ${order.invoice}? Stok yang terpakai akan dikembalikan.`)) return;
+    try {
+      const res = await authFetch(`/api/orders/${order.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast(data.message || 'Gagal menghapus pesanan');
+      } else {
+        setOrders(prev => prev.filter(o => o.id !== order.id));
+        setToast(`Pesanan ${order.invoice} dihapus`);
+      }
+    } catch {
+      setToast('Gagal menghubungi server');
+    }
+    window.setTimeout(() => setToast(''), 3500);
   };
 
   const Column = ({ title, status, icon: Icon, color }: { title: string, status: string, icon: any, color: string }) => {
@@ -383,10 +442,10 @@ export default function KDS() {
                           <Copy size={13} /> Salin No. Pesanan
                         </button>
                         <button
-                          onClick={() => { setOrders(prev => prev.filter(o => o.id !== order.id)); setOpenMenuId(null); }}
-                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-50 border-t border-slate-50"
+                          onClick={() => deleteOrder(order)}
+                          className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50 border-t border-slate-50"
                         >
-                          Sembunyikan dari Layar
+                          <Trash2 size={13} /> Hapus Pesanan
                         </button>
                       </div>
                     </>

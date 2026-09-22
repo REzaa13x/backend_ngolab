@@ -38,6 +38,17 @@ const paymentProofUpload = multer({
 // 1. ORDERS API
 // ==========================================
 
+// Foto menu untuk sebuah item pesanan. Sebagian pesanan menyimpan menu_id berprefiks 'ext-'
+// (dari integrasi luar) sehingga pencocokan lewat id gagal; nama menu dipakai sebagai cadangan.
+const ORDER_ITEM_IMAGE_SQL = `
+  SELECT oi.*, COALESCE(
+    (SELECT m.image_url FROM menus m WHERE m.id = oi.menu_id AND m.outlet = ? LIMIT 1),
+    (SELECT m.image_url FROM menus m WHERE m.name = COALESCE(oi.item_name, oi.menu_name) AND m.outlet = ? LIMIT 1)
+  ) AS menu_image
+  FROM order_items oi
+  WHERE oi.order_id = ?
+`;
+
 // GET /api/orders — Ambil semua pesanan
 router.get("/", requireOrderStaff, async (_req: Request, res: Response) => {
   try {
@@ -45,12 +56,14 @@ router.get("/", requireOrderStaff, async (_req: Request, res: Response) => {
     
     // Ambil item untuk setiap order
     for (const order of orders) {
-      const [items]: any = await db.query("SELECT * FROM order_items WHERE order_id = ?", [order.id]);
+      const outlet = order.outlet === 'coworking' ? 'coworking' : 'ngolab';
+      const [items]: any = await db.query(ORDER_ITEM_IMAGE_SQL, [outlet, outlet, order.id]);
       order.items = items.map((i: any) => ({
         id: i.menu_id || i.id,
         name: i.item_name || i.menu_name,
         quantity: i.quantity,
-        price: i.price
+        price: i.price,
+        image: i.menu_image || null
       }));
     }
     
@@ -104,13 +117,7 @@ router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
     );
     
     for (const order of orders) {
-      const [items]: any = await db.query(
-        `SELECT oi.*, m.image_url AS menu_image
-         FROM order_items oi
-         LEFT JOIN menus m ON m.id = oi.menu_id AND m.outlet = ?
-         WHERE oi.order_id = ?`,
-        [outlet, order.id]
-      );
+      const [items]: any = await db.query(ORDER_ITEM_IMAGE_SQL, [outlet, outlet, order.id]);
       order.items = items.map((i: any) => ({
         id: i.menu_id || i.id,
         name: i.item_name || i.menu_name,

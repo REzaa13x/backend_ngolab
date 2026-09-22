@@ -18,7 +18,8 @@ import {
   Plus,
   Minus,
   User,
-  PhoneCall
+  PhoneCall,
+  Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import socket from '../lib/socket';
@@ -31,6 +32,7 @@ interface OrderItem {
   name: string;
   quantity: number;
   price: number;
+  image?: string | null;
 }
 
 interface Order {
@@ -435,7 +437,7 @@ export default function OrderManagement() {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-300  dark: text-[10px] uppercase tracking-widest  font-black border-b border-slate-50">
-                <th className="px-6 py-5">Pesanan</th>
+                <th className="px-6 py-5">Pesanan &amp; Barang</th>
                 <th className="px-6 py-5">Info Bayar</th>
                 <th className="px-6 py-5 text-right">Total</th>
                 <th className="px-6 py-5 text-center">Status</th>
@@ -462,9 +464,9 @@ export default function OrderManagement() {
                   </td>
                 </tr>
               ) : filteredOrders.map((order) => (
-                <tr key={order.id} className="hover:bg-slate-50/30 transition-colors group">
+                <tr key={order.id} className="hover:bg-slate-50/30 transition-colors group align-top">
                   <td className="px-6 py-5">
-                    <div className="flex flex-col">
+                    <div className="flex flex-col max-w-[280px]">
                       <span className="text-sm font-black text-slate-900 leading-none">{order.invoice_number}</span>
                       <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                         <span className="text-[9px] text-indigo-600 font-black uppercase tracking-widest leading-none">
@@ -489,6 +491,29 @@ export default function OrderManagement() {
                           <span className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-widest leading-none bg-purple-50 text-purple-600">
                             Smart Tag
                           </span>
+                        )}
+                      </div>
+                      {/* Nama barang + harga satuan, supaya kasir tidak perlu membuka struk */}
+                      <div className="mt-2.5 pt-2 border-t border-dashed border-slate-200 space-y-1">
+                        {order.items?.length ? order.items.map((item, idx) => (
+                          <div key={idx} className="flex items-center justify-between gap-3 text-[11px]">
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              {item.image && (
+                                <img
+                                  src={item.image}
+                                  alt={item.name}
+                                  className="w-5 h-5 rounded object-cover border border-slate-100 shrink-0"
+                                  referrerPolicy="no-referrer"
+                                />
+                              )}
+                              <span className="font-bold text-slate-700 truncate">{item.quantity}x {item.name}</span>
+                            </span>
+                            <span className="font-bold text-slate-500 shrink-0 whitespace-nowrap">
+                              @ Rp {Number(item.price || 0).toLocaleString()}
+                            </span>
+                          </div>
+                        )) : (
+                          <span className="text-[10px] text-slate-300 italic">Tanpa rincian item</span>
                         )}
                       </div>
                     </div>
@@ -551,7 +576,7 @@ export default function OrderManagement() {
                          onClick={() => setSelectedOrder(order)}
                          className="px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-[9px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all flex items-center gap-1"
                        >
-                         Lihat Struk
+                         <Receipt size={12} /> Lihat Struk
                        </button>
                        {canManagePayments && (
                          <button

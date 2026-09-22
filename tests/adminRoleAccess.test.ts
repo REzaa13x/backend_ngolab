@@ -74,7 +74,7 @@ test('estimasi antrean dapur diambil dari API, bukan angka statis', async () => 
 test('gambar item KDS memakai foto menu bila tersedia', async () => {
   const orders = await read('../src/routes/orders.ts');
   const kds = await read('../src/components/KDS.tsx');
-  assert.match(orders, /m\.image_url AS menu_image/, 'endpoint KDS harus mengirim gambar menu');
+  assert.match(orders, /m\.image_url FROM menus m/, 'endpoint pesanan harus mengirim gambar menu');
   assert.match(kds, /item\.image \|\|/, 'KDS memakai gambar menu dengan cadangan contoh');
 });
 
