@@ -9,11 +9,19 @@ const requireSuperAdmin = requireRoles('Super Admin');
 
 router.use(requireSuperAdmin);
 
+// ponytail: password_plain disimpan agar Super Admin bisa membacakan ulang kredensial pegawai.
+// Batasnya jelas: hanya akun staf (bukan pelanggan), dan hanya dibaca oleh requireSuperAdmin.
+// Naikkan ke model undangan-reset (kirim email/WA sekali pakai) kalau pegawai sudah banyak.
+function validateStaffPassword(password: unknown): string | null {
+  if (typeof password !== 'string' || password.length < 6) return null;
+  return password;
+}
+
 // GET /api/staff
 router.get("/", async (_req: Request, res: Response) => {
   try {
     const [staff]: any = await db.query(
-      "SELECT id, name, role, email, phone, status, created_at FROM staff ORDER BY created_at DESC"
+      "SELECT id, name, role, email, phone, status, password_plain, created_at FROM staff ORDER BY created_at DESC"
     );
     res.json(staff);
   } catch (err: any) {
@@ -24,11 +32,16 @@ router.get("/", async (_req: Request, res: Response) => {
 // POST /api/staff (Admin adding staff manually)
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { name, role, email, phone } = req.body;
+    const { name, role, email, phone, password } = req.body;
     const normalizedEmail = normalizeEmail(email);
 
     if (!name || !role || !normalizedEmail) {
       return res.status(400).json({ message: "Nama, role, dan email wajib diisi" });
+    }
+
+    const staffPassword = validateStaffPassword(password);
+    if (!staffPassword) {
+      return res.status(400).json({ message: "Password pegawai wajib diisi, minimal 6 karakter" });
     }
     
     const [existing]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
@@ -41,15 +54,14 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-    // Default password 'password' for manually added staff
-    const hashedPassword = await hashPassword("password");
+    const hashedPassword = await hashPassword(staffPassword);
 
     await db.query(
-      "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
-      [newId, name, role, normalizedEmail, phone, hashedPassword]
+      "INSERT INTO staff (id, name, role, email, phone, password_hash, password_plain, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')",
+      [newId, name, role, normalizedEmail, phone, hashedPassword, staffPassword]
     );
 
-    const [newStaff]: any = await db.query("SELECT id, name, role, email, phone, status FROM staff WHERE id = ?", [newId]);
+    const [newStaff]: any = await db.query("SELECT id, name, role, email, phone, status, password_plain FROM staff WHERE id = ?", [newId]);
     const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Registrasi Pegawai", `${name} (${role})`);
     res.status(201).json(newStaff[0]);
@@ -62,7 +74,7 @@ router.post("/", async (req: Request, res: Response) => {
 router.patch("/:id", async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { role, name, email, phone, status } = req.body;
+    const { role, name, email, phone, status, password } = req.body;
     const normalizedEmail = email === undefined ? undefined : normalizeEmail(email);
 
     const updates = [];
@@ -80,6 +92,12 @@ router.patch("/:id", async (req: Request, res: Response) => {
     }
     if (phone !== undefined) { updates.push("phone = ?"); params.push(phone); }
     if (status !== undefined) { updates.push("status = ?"); params.push(status); }
+    if (password !== undefined && password !== '') {
+      const newPassword = validateStaffPassword(password);
+      if (!newPassword) return res.status(400).json({ message: "Password baru minimal 6 karakter" });
+      updates.push("password_hash = ?"); params.push(await hashPassword(newPassword));
+      updates.push("password_plain = ?"); params.push(newPassword);
+    }
 
     const [oldStaff]: any = await db.query("SELECT name, role FROM staff WHERE id = ?", [id]);
 
@@ -88,7 +106,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
       await db.query(`UPDATE staff SET ${updates.join(', ')} WHERE id = ?`, params);
     }
 
-    const [updatedStaff]: any = await db.query("SELECT id, name, role, email, phone, status FROM staff WHERE id = ?", [id]);
+    const [updatedStaff]: any = await db.query("SELECT id, name, role, email, phone, status, password_plain FROM staff WHERE id = ?", [id]);
     if (!updatedStaff.length) return res.status(404).json({ message: "Staf tidak ditemukan" });
     
     const actor = getVerifiedActor(req);

@@ -28,6 +28,7 @@ interface Staff {
   email: string;
   phone: string;
   status: string;
+  password_plain?: string | null;
 }
 
 interface Shift {
@@ -42,11 +43,13 @@ interface Shift {
 
 export default function StaffManagement() {
   const { user } = useAuth();
+  void user;
   const [activeTab, setActiveTab] = useState<'roster' | 'shifts'>('roster');
   const [staff, setStaff] = useState<Staff[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'Semua' | 'Super Admin' | 'Kasir' | 'Koki' | 'Support'>('Semua');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -71,99 +74,125 @@ export default function StaffManagement() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [isEditingStaff, setIsEditingStaff] = useState(false);
   const [newShift, setNewShift] = useState({ staff_id: '', shift_type: 'Pagi', time: '08:00 - 16:00' });
-  const [newStaff, setNewStaff] = useState({ name: '', role: 'Kasir', email: '', phone: '' });
-  const [selectedStaffMember, setSelectedStaffMember] = useState<Staff | null>(null);
+  const [newStaff, setNewStaff] = useState({ name: '', role: 'Kasir', email: '', phone: '', password: '' });
+  const [toast, setToast] = useState('');
+  const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
+  const [editPassword, setEditPassword] = useState('');
+  const [actionError, setActionError] = useState('');
+
+  const showToast = (message: string) => {
+    setToast(message);
+    window.setTimeout(() => setToast(''), 3500);
+  };
 
   const handleRegisterStaff = async () => {
-    if (!newStaff.name || !newStaff.email) return;
+    if (!newStaff.name || !newStaff.email || newStaff.password.length < 6) return;
+    setActionError('');
     try {
       const res = await authFetch('/api/staff', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-name': user?.name || 'Super Admin'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newStaff)
       });
-      if (res.ok) {
-        const data = await res.json();
-        setStaff([...staff, data]);
-        setIsRegistering(false);
-        setNewStaff({ name: '', role: 'Kasir', email: '', phone: '' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.message || 'Gagal mendaftarkan pegawai');
+        return;
       }
+      setStaff([data, ...staff]);
+      setIsRegistering(false);
+      setNewStaff({ name: '', role: 'Kasir', email: '', phone: '', password: '' });
+      showToast(`Pegawai ${data.name} terdaftar. Password: ${data.password_plain}`);
     } catch (err) {
       console.error("Failed to register staff", err);
+      setActionError('Terjadi kesalahan koneksi');
     }
   };
 
   const handleUpdateStaff = async () => {
-    if (!selectedStaffMember) return;
+    if (!editingStaff) return;
+    setActionError('');
     try {
-      const res = await authFetch(`/api/staff/${selectedStaffMember.id}`, {
+      const payload: any = { ...editingStaff };
+      if (editPassword) payload.password = editPassword;
+      const res = await authFetch(`/api/staff/${editingStaff.id}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-name': user?.name || 'Super Admin'
-        },
-        body: JSON.stringify(selectedStaffMember)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-      if (res.ok) {
-        const data = await res.json();
-        setStaff(staff.map(s => s.id === data.id ? data : s));
-        setIsEditingStaff(false);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.message || 'Gagal menyimpan perubahan');
+        return;
       }
+      setStaff(staff.map(s => s.id === data.id ? data : s));
+      setIsEditingStaff(false);
+      setEditPassword('');
+      showToast('Data pegawai tersimpan');
     } catch (err) {
       console.error("Failed to update staff", err);
+      setActionError('Terjadi kesalahan koneksi');
     }
   };
 
   const handleDeleteStaff = async () => {
-    if (!selectedStaffMember) return;
+    if (!editingStaff) return;
+    setActionError('');
     try {
-      const res = await authFetch(`/api/staff/${selectedStaffMember.id}`, {
-        method: 'DELETE',
-        headers: {
-          'x-user-name': user?.name || 'Super Admin'
-        }
-      });
-      if (res.ok) {
-        setStaff(staff.filter(s => s.id !== selectedStaffMember.id));
-        setIsEditingStaff(false);
+      const res = await authFetch(`/api/staff/${editingStaff.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.message || 'Gagal menghapus pegawai');
+        return;
       }
+      setStaff(staff.filter(s => s.id !== editingStaff.id));
+      setIsEditingStaff(false);
+      showToast('Pegawai dihapus');
     } catch (err) {
       console.error("Failed to delete staff", err);
+      setActionError('Terjadi kesalahan koneksi');
     }
   };
 
 
   const handleAssignShift = async () => {
     if (!newShift.staff_id) return;
+    setActionError('');
     try {
       const res = await authFetch('/api/shifts', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-name': user?.name || 'Super Admin'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newShift)
       });
-      if (res.ok) {
-        const data = await res.json();
-        setShifts([...shifts, data]);
-        setIsAssigning(false);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setActionError(data.message || 'Gagal menetapkan shift');
+        return;
       }
+      setShifts([...shifts, data]);
+      setIsAssigning(false);
+      showToast(`Shift ${data.name} ditetapkan`);
     } catch (err) {
       console.error("Failed to assign shift", err);
+      setActionError('Terjadi kesalahan koneksi');
     }
   };
 
   const filteredStaff = staff.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.role.toLowerCase().includes(searchTerm.toLowerCase())
+    (roleFilter === 'Semua' || s.role === roleFilter) &&
+    (s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     s.role.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-6 right-6 z-[120] bg-indigo-600 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-bold flex items-center gap-2">
+          <CheckCircle2 size={16} /> {toast}
+        </div>
+      )}
+
       {/* Modal Registrasi Pegawai */}
       {isRegistering && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
@@ -229,16 +258,34 @@ export default function StaffManagement() {
                 </div>
               </div>
 
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block mb-2">Password Awal *</label>
+                <input
+                  type="text"
+                  placeholder="Minimal 6 karakter"
+                  className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-indigo-600 outline-none"
+                  value={newStaff.password}
+                  onChange={(e) => setNewStaff({ ...newStaff, password: e.target.value })}
+                />
+                <p className="text-[10px] text-slate-400 font-medium mt-1.5 pl-1">
+                  Password ini yang dipakai pegawai untuk login. Catat dan berikan ke pegawai.
+                </p>
+              </div>
+
+              {actionError && (
+                <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-4 py-3">{actionError}</p>
+              )}
+
               <div className="pt-4 flex gap-3">
                 <button
-                  onClick={() => setIsRegistering(false)}
+                  onClick={() => { setIsRegistering(false); setActionError(''); }}
                   className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
                 >
                   Batal
                 </button>
                 <button
                   onClick={handleRegisterStaff}
-                  disabled={!newStaff.name || !newStaff.email}
+                  disabled={!newStaff.name || !newStaff.email || newStaff.password.length < 6}
                   className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50"
                 >
                   Daftarkan Sekarang
@@ -250,7 +297,7 @@ export default function StaffManagement() {
       )}
 
       {/* Modal Edit Pegawai */}
-      {isEditingStaff && selectedStaffMember && (
+      {isEditingStaff && editingStaff && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
@@ -262,7 +309,7 @@ export default function StaffManagement() {
                 <UserCircle size={32} />
               </div>
               <h3 className="text-xl font-black text-slate-900">Perbarui Data Pegawai</h3>
-              <p className="text-sm text-slate-500 font-medium">Ubah jabatan atau informasi kontak personil.</p>
+              <p className="text-sm text-slate-500 font-medium">Ubah jabatan, kontak, atau password pegawai.</p>
             </div>
 
             <div className="space-y-4">
@@ -271,8 +318,8 @@ export default function StaffManagement() {
                 <input 
                   type="text" 
                   className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-blue-600 outline-none"
-                  value={selectedStaffMember.name}
-                  onChange={(e) => setSelectedStaffMember({ ...selectedStaffMember, name: e.target.value })}
+                  value={editingStaff.name}
+                  onChange={(e) => setEditingStaff({ ...editingStaff, name: e.target.value })}
                 />
               </div>
 
@@ -280,8 +327,8 @@ export default function StaffManagement() {
                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block mb-2">Jabatan / Role</label>
                 <select 
                   className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-blue-600 outline-none"
-                  value={selectedStaffMember.role}
-                  onChange={(e) => setSelectedStaffMember({ ...selectedStaffMember, role: e.target.value })}
+                  value={editingStaff.role}
+                  onChange={(e) => setEditingStaff({ ...editingStaff, role: e.target.value })}
                 >
                   <option value="Kasir">Kasir</option>
                   <option value="Koki">Koki</option>
@@ -296,8 +343,8 @@ export default function StaffManagement() {
                   <input 
                     type="email" 
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-blue-600 outline-none"
-                    value={selectedStaffMember.email}
-                    onChange={(e) => setSelectedStaffMember({ ...selectedStaffMember, email: e.target.value })}
+                    value={editingStaff.email}
+                    onChange={(e) => setEditingStaff({ ...editingStaff, email: e.target.value })}
                   />
                 </div>
                 <div>
@@ -305,15 +352,37 @@ export default function StaffManagement() {
                   <input 
                     type="tel" 
                     className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-blue-600 outline-none"
-                    value={selectedStaffMember.phone}
-                    onChange={(e) => setSelectedStaffMember({ ...selectedStaffMember, phone: e.target.value })}
+                    value={editingStaff.phone}
+                    onChange={(e) => setEditingStaff({ ...editingStaff, phone: e.target.value })}
                   />
                 </div>
               </div>
 
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Password Saat Ini</p>
+                <p className="font-mono text-sm font-bold text-slate-900">
+                  {editingStaff.password_plain || '— (akun lama, belum tercatat)'}
+                </p>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest block mb-2">Password Baru (opsional)</label>
+                <input
+                  type="text"
+                  placeholder="Kosongkan bila tidak diganti"
+                  className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-blue-600 outline-none"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                />
+              </div>
+
+              {actionError && (
+                <p className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-4 py-3">{actionError}</p>
+              )}
+
               <div className="pt-4 flex gap-3">
                 <button
-                  onClick={() => setIsEditingStaff(false)}
+                  onClick={() => { setIsEditingStaff(false); setEditPassword(''); setActionError(''); }}
                   className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
                 >
                   Batal
@@ -473,9 +542,20 @@ export default function StaffManagement() {
                     className="w-full bg-white border border-slate-100 rounded-2xl pl-12 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-sm"
                   />
                </div>
-               <button className="px-6 py-3 bg-white border border-slate-100 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2 hover:text-indigo-600 transition-colors">
-                  <Filter size={16} /> Filter Jabatan
-               </button>
+               <div className="flex items-center gap-2">
+                 <Filter size={16} className="text-slate-400" />
+                 <select
+                   value={roleFilter}
+                   onChange={(e) => setRoleFilter(e.target.value as typeof roleFilter)}
+                   className="bg-transparent text-[10px] font-black uppercase tracking-widest text-slate-500 focus:outline-none cursor-pointer"
+                 >
+                   <option value="Semua">Semua Jabatan</option>
+                   <option value="Super Admin">Super Admin</option>
+                   <option value="Kasir">Kasir</option>
+                   <option value="Koki">Koki</option>
+                   <option value="Support">Support</option>
+                 </select>
+               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -504,9 +584,12 @@ export default function StaffManagement() {
                       </div>
                       <button
                         onClick={() => {
-                          setSelectedStaffMember(person);
+                          setEditingStaff(person);
+                          setEditPassword('');
+                          setActionError('');
                           setIsEditingStaff(true);
                         }}
+                        title="Kelola pegawai"
                         className="text-slate-300 hover:text-slate-600 p-1"
                       >
                          <MoreVertical size={20} />
@@ -520,7 +603,11 @@ export default function StaffManagement() {
                       </div>
                       <div className="flex items-center gap-3 text-xs text-slate-500">
                          <Phone size={14} className="text-slate-300" />
-                         {person.phone}
+                         {person.phone || '-'}
+                      </div>
+                      <div className="flex items-center justify-between gap-3 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                         <span className="font-bold uppercase text-[9px] tracking-widest text-slate-400">Password</span>
+                         <span className="font-mono font-bold text-slate-800">{person.password_plain || '—'}</span>
                       </div>
                    </div>
 

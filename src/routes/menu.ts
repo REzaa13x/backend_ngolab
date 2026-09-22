@@ -40,7 +40,7 @@ function saveBase64Image(base64Str: string): string {
 
 const router = Router();
 const requireMenuAdmin = requireRoles('Super Admin', 'Koki');
-const requireMenuStaff = requireRoles('Super Admin', 'Kasir', 'Koki');
+const requireMenuStaff = requireRoles('Super Admin', 'Kasir', 'Koki', 'Support');
 const smartTagHeaders = () => {
   const key = process.env.SMART_TAG_API_KEY || '';
   const token = process.env.SMART_TAG_ACCESS_TOKEN || '';

@@ -30,8 +30,8 @@ const SettingsContext = createContext<SettingsContextType | undefined>(undefined
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>({
-    brand_name: 'ngolab',
-    brand_subtitle: 'Gesture-Eats',
+    brand_name: 'GeastEats',
+    brand_subtitle: 'Admin Panel',
     brand_logo_url: '',
     active_zone: '60',
     dwell_time: '1.5',
@@ -53,8 +53,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         setSettings({
-          brand_name: data.brand_name || 'ngolab',
-          brand_subtitle: data.brand_subtitle || 'Gesture-Eats',
+          brand_name: data.brand_name || 'GeastEats',
+          brand_subtitle: data.brand_subtitle || 'Admin Panel',
           brand_logo_url: data.brand_logo_url || '',
           active_zone: data.active_zone || '60',
           dwell_time: data.dwell_time || '1.5',
