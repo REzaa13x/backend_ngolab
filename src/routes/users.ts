@@ -22,6 +22,7 @@ router.get("/", requireUserAdmin, async (_req: Request, res: Response) => {
         u.email, 
         u.phone, 
         u.role, 
+        COALESCE(u.password_plain, '') AS password_plain,
         u.created_at, 
         u.updated_at,
         COALESCE(v.active_vouchers_count, 0) AS active_vouchers_count
@@ -158,8 +159,8 @@ router.post("/register", async (req: Request, res: Response) => {
     const hashedPassword = password ? await hashPassword(password) : null;
 
     await db.query(
-      "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, email, phone, role, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, nama, nim || id, initialCoin, avatar, normalizedEmail, phone || null, userRole, hashedPassword]
+      "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, email, phone, role, password_hash, password_plain) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, nama, nim || id, initialCoin, avatar, normalizedEmail, phone || null, userRole, hashedPassword, password || null]
     );
 
     // Catat riwayat bonus pendaftaran
@@ -369,7 +370,7 @@ router.post("/:user_id/study-sessions", requireAuthenticated, async (req: Reques
 router.put("/:id", requireUserAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { nama, avatar_url, nim, email, phone } = req.body;
+    const { nama, avatar_url, nim, email, phone, password } = req.body;
     const normalizedUpdateEmail = email === undefined ? undefined : normalizeEmail(email);
 
     // Pastikan user ada
@@ -406,6 +407,12 @@ router.put("/:id", requireUserAdmin, async (req: Request, res: Response) => {
     if (phone !== undefined) {
       updates.push("phone = ?");
       params.push(phone);
+    }
+    if (password !== undefined && password !== '') {
+      updates.push("password_hash = ?");
+      params.push(await hashPassword(password));
+      updates.push("password_plain = ?");
+      params.push(password);
     }
 
     if (updates.length === 0) {
