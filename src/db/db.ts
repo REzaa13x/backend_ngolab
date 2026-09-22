@@ -443,6 +443,20 @@ export async function testDbConnection() {
       console.warn("⚠️ Staff password_plain migration warning:", staffColumnErr.message);
     }
 
+    // Migration: kolom password_plain untuk pelanggan (users), dibaca hanya oleh
+    // requireUserAdmin (Super Admin/Kasir/Support) di halaman Database Pengguna.
+    try {
+      const [customerPlainColumn]: any = await connection.query(
+        "SELECT COUNT(*) AS total FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'password_plain'"
+      );
+      if (Number(customerPlainColumn[0]?.total || 0) === 0) {
+        await connection.query("ALTER TABLE users ADD COLUMN password_plain VARCHAR(100) DEFAULT NULL AFTER password_hash");
+      }
+      console.log("✅ Users password_plain column verified/created");
+    } catch (customerColumnErr: any) {
+      console.warn("⚠️ Users password_plain migration warning:", customerColumnErr.message);
+    }
+
     // Migration: Create app_settings table
     try {
       await connection.query(`

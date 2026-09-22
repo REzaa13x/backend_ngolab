@@ -19,12 +19,14 @@ import {
   Minus,
   User,
   PhoneCall,
-  Receipt
+  Receipt,
+  Printer
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import socket from '../lib/socket';
 import { PaymentProofPreview } from './PaymentProofPreview';
 import { authFetch } from '../lib/authFetch';
+import { printReceipt } from '../lib/printDoc';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -690,6 +692,17 @@ export default function OrderManagement() {
                     {canManagePayments ? 'Sudah Terverifikasi' : 'Hanya Kasir/Admin yang dapat memverifikasi'}
                   </button>
                 )}
+                <button 
+                  onClick={() => {
+                    if (!printReceipt(selectedOrder)) {
+                      alert('Popup diblokir browser. Izinkan popup untuk mencetak struk.');
+                    }
+                  }}
+                  className="w-full bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-slate-200 dark:shadow-none"
+                >
+                  <Printer size={14} /> Cetak Struk
+                </button>
+
                 <button 
                   onClick={() => setSelectedOrder(null)}
                   className="w-full text-slate-400 py-2 text-[10px] font-black uppercase tracking-widest hover:text-slate-600 transition-colors"

@@ -11,7 +11,10 @@ import {
   CheckCircle2,
   Mail,
   Phone,
-  Ticket
+  Ticket,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -26,6 +29,8 @@ interface User {
   email?: string;
   phone?: string;
   role?: string;
+  password?: string;
+  password_plain?: string;
   active_vouchers_count?: number;
   created_at?: string;
 }
@@ -65,7 +70,9 @@ export default function UserManagement() {
 
   // Edit / aktivitas pengguna
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [editForm, setEditForm] = useState({ nama: '', nim: '', email: '', phone: '', avatar_url: '' });
+  const [editForm, setEditForm] = useState({ nama: '', nim: '', email: '', phone: '', avatar_url: '', password: '' });
+  const [showPassword, setShowPassword] = useState(false);
+  const [revealedPasswordId, setRevealedPasswordId] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [activity, setActivity] = useState<any[] | null>(null);
   const [isLoadingActivity, setIsLoadingActivity] = useState(false);
@@ -121,8 +128,10 @@ export default function UserManagement() {
       nim: user.nim || '',
       email: user.email || '',
       phone: user.phone || '',
-      avatar_url: user.avatar_url || ''
+      avatar_url: user.avatar_url || '',
+      password: ''
     });
+    setShowPassword(false);
     setActivity(null);
   };
 
@@ -131,10 +140,12 @@ export default function UserManagement() {
     if (!editingUser) return;
     setIsSavingEdit(true);
     try {
+      const payload: any = { nama: editForm.nama, nim: editForm.nim, email: editForm.email, phone: editForm.phone, avatar_url: editForm.avatar_url };
+      if (editForm.password) payload.password = editForm.password;
       const res = await authFetch(`/api/users/${editingUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm)
+        body: JSON.stringify(payload)
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -305,6 +316,35 @@ export default function UserManagement() {
                     <Phone size={13} className="text-slate-400 flex-shrink-0" />
                     <span>{user.phone || '-'}</span>
                   </div>
+                </div>
+
+                {/* Password akun pelanggan, dapat dibaca staf */}
+                <div className="flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-3.5 py-2.5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2 rounded-lg bg-white border border-slate-100 text-slate-500 shrink-0">
+                      <KeyRound size={16} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Password Akun</p>
+                      <p className="text-xs font-mono font-bold text-slate-900 truncate">
+                        {!user.password_plain
+                          ? '—'
+                          : revealedPasswordId === user.id
+                            ? user.password_plain
+                            : '•'.repeat(Math.min(user.password_plain.length, 12))}
+                      </p>
+                    </div>
+                  </div>
+                  {user.password_plain && (
+                    <button
+                      type="button"
+                      onClick={() => setRevealedPasswordId(revealedPasswordId === user.id ? null : user.id)}
+                      title={revealedPasswordId === user.id ? 'Sembunyikan password' : 'Tampilkan password'}
+                      className="p-1.5 bg-white border border-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 hover:border-indigo-100 transition-all shadow-sm shrink-0"
+                    >
+                      {revealedPasswordId === user.id ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  )}
                 </div>
 
                 {/* Koin & Voucher Container */}
@@ -553,6 +593,36 @@ export default function UserManagement() {
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Avatar URL</label>
                   <input type="text" value={editForm.avatar_url}
                     onChange={e => setEditForm({ ...editForm, avatar_url: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                </div>
+
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Password Saat Ini</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-mono text-sm font-bold text-slate-900">
+                      {!editingUser.password_plain
+                        ? '— (belum tercatat)'
+                        : showPassword
+                          ? editingUser.password_plain
+                          : '•'.repeat(Math.min(editingUser.password_plain.length, 12))}
+                    </p>
+                    {editingUser.password_plain && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="p-1.5 bg-white border border-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-all"
+                      >
+                        {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1.5 block">Password Baru (opsional)</label>
+                  <input type="text" value={editForm.password}
+                    onChange={e => setEditForm({ ...editForm, password: e.target.value })}
+                    placeholder="Kosongkan bila tidak diganti"
                     className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
                 </div>
                 <div className="flex gap-3 pt-2">

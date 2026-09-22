@@ -130,7 +130,7 @@ router.post("/login", async (req: Request, res: Response) => {
 // POST /api/auth/register
 router.post("/register", async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role, phone, phone_number } = req.body;
+    const { name, email, password, role: _role, phone, phone_number } = req.body;
     const normalizedEmail = normalizeEmail(email);
 
     // Hybrid Check: Jika menggunakan phone_number dan name, asumsikan ini Customer (Pelanggan)
@@ -158,8 +158,8 @@ router.post("/register", async (req: Request, res: Response) => {
       const userEmail = normalizedEmail;
 
       await db.query(
-        "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, phone, role, email, password_hash) VALUES (?, ?, ?, ?, ?, ?, 'Pelanggan', ?, ?)",
-        [newId, name, phone_number, initialCoin, avatar, phone_number, userEmail, hashedPassword]
+        "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, phone, role, email, password_hash, password_plain) VALUES (?, ?, ?, ?, ?, ?, 'Pelanggan', ?, ?, ?)",
+        [newId, name, phone_number, initialCoin, avatar, phone_number, userEmail, hashedPassword, password || null]
       );
 
       // Catat riwayat bonus pendaftaran

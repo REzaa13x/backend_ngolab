@@ -23,6 +23,7 @@ import socket from '../lib/socket';
 import { getOrderBellType, subscribeToOrderEvents } from '../lib/orderEvents';
 import { authFetch } from '../lib/authFetch';
 import { playConfiguredKdsSound, unlockAudioContext } from '../lib/audioHelper';
+import { printKitchenTicket } from '../lib/printDoc';
 import { useSettings } from '../contexts/SettingsContext';
 
 interface KDSItem {
@@ -259,64 +260,14 @@ export default function KDS() {
     return () => window.clearInterval(interval);
   }, []);
 
+  // Cetak tiket dapur ke printer. Implementasi ada di src/lib/printDoc.ts agar
+  // dipakai bersama dengan struk di Verifikasi & Transaksi.
   const printTicket = (order: KDSOrder) => {
-    const win = window.open('', '_blank', 'width=420,height=680');
-    if (!win) {
-      setToast('Popup diblokir browser, izinkan popup untuk mencetak tiket');
-      window.setTimeout(() => setToast(''), 3000);
-      return;
+    const ok = printKitchenTicket(order, selectedOutlet);
+    if (!ok) {
+      setToast('Popup diblokir browser, izinkan popup untuk mencetak');
+      window.setTimeout(() => setToast(''), 3500);
     }
-    const esc = (v: unknown) => String(v ?? '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] as string));
-    const fmtRp = (n: number) => 'Rp ' + Number(n || 0).toLocaleString('id-ID');
-    const total = order.items.reduce((sum, i) => sum + Number(i.price || 0) * i.quantity, 0);
-    const rows = order.items.map(i => `
-      <tr>
-        <td class="qty">${i.quantity}x</td>
-        <td class="nm">${esc(i.name)}<div class="unit">@ ${fmtRp(i.price)}</div></td>
-        <td class="amt">${fmtRp(Number(i.price || 0) * i.quantity)}</td>
-      </tr>`).join('');
-    const waktu = new Date().toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-    win.document.write(`<!doctype html>
-<html><head><meta charset="utf-8"><title>${esc(order.invoice)}</title>
-<style>
-  @page { size: 80mm auto; margin: 4mm; }
-  * { box-sizing: border-box; }
-  body { font-family: 'Courier New', ui-monospace, monospace; font-size: 12px; color: #000; margin: 0; padding: 8px; }
-  .center { text-align: center; }
-  .brand { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
-  .sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; }
-  .rule { border-top: 1px dashed #000; margin: 8px 0; }
-  .rule-strong { border-top: 2px solid #000; margin: 8px 0; }
-  .inv { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; }
-  table { width: 100%; border-collapse: collapse; }
-  td { vertical-align: top; padding: 3px 0; }
-  .qty { width: 30px; font-weight: 700; }
-  .nm { }
-  .unit { font-size: 10px; color: #333; }
-  .amt { text-align: right; white-space: nowrap; font-weight: 700; }
-  .total-row { display: flex; justify-content: space-between; font-size: 15px; font-weight: 700; }
-  .notes { font-size: 11px; border: 1px dashed #000; padding: 6px; margin-top: 8px; }
-  .foot { font-size: 10px; text-align: center; margin-top: 10px; }
-</style></head>
-<body>
-  <div class="center">
-    <div class="brand">GeastEats</div>
-    <div class="sub">Tiket Dapur</div>
-  </div>
-  <div class="rule"></div>
-  <div class="inv"><span>${esc(order.invoice)}</span><span>${esc(order.outlet || selectedOutlet)}</span></div>
-  <div class="inv"><span>${esc(order.customer)}</span><span>${esc(waktu)}</span></div>
-  <div class="rule"></div>
-  <table>${rows}</table>
-  <div class="rule-strong"></div>
-  <div class="total-row"><span>TOTAL</span><span>${fmtRp(total)}</span></div>
-  ${order.notes ? `<div class="notes"><b>Catatan:</b><br>${esc(order.notes)}</div>` : ''}
-  <div class="rule"></div>
-  <div class="foot">Dicetak ${esc(waktu)}<br>-- GeastEats --</div>
-  <script>window.onload=function(){window.focus();window.print();setTimeout(function(){window.close();},400);};</script>
-</body></html>`);
-    win.document.close();
   };
 
   const copyInvoice = async (order: KDSOrder) => {
