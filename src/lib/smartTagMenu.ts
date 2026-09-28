@@ -20,6 +20,13 @@ export function parseMenuMutationTarget(source: unknown, outlet: unknown): {
   return { source, outlet };
 }
 
+// Hapus permanen hanya berlaku untuk menu lokal; Smart Tag tidak punya kontrak DELETE.
+export function parseMenuDeleteTarget(source: unknown, outlet: unknown) {
+  const target = parseMenuMutationTarget(source ?? 'local', outlet);
+  if (target.source !== 'local') throw new Error('Menu Ngolab dikelola Smart Tag dan tidak dapat dihapus dari sini.');
+  return target;
+}
+
 export function serializeSmartTagMenu(item: any, smartTagBaseUrl: string) {
   const stock = Number(item.stock || 0);
   const displayed = Number(item.displayed ?? (item.status === 'Tersedia' ? 1 : 0)) === 1 ? 1 : 0;

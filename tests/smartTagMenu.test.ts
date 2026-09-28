@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desiredSmartTagDisplayed, parseMenuMutationTarget, serializeSmartTagMenu, smartTagMenuPathId } from '../src/lib/smartTagMenu.js';
+import { desiredSmartTagDisplayed, parseMenuDeleteTarget, parseMenuMutationTarget, serializeSmartTagMenu, smartTagMenuPathId } from '../src/lib/smartTagMenu.js';
 
 test('menu Smart Tag dinormalisasi untuk halaman Ngolab tanpa kehilangan sumber data', () => {
   const result = serializeSmartTagMenu({
@@ -65,4 +65,11 @@ test('target mutasi menu wajib menyebut sumber dan outlet yang valid secara eksp
   assert.throws(() => parseMenuMutationTarget(undefined, 'ngolab'), /sumber menu tidak valid/i);
   assert.throws(() => parseMenuMutationTarget('local', 'unknown'), /outlet tidak valid/i);
   assert.throws(() => parseMenuMutationTarget('smart-tag', 'coworking'), /Smart Tag hanya berlaku/i);
+});
+
+test('hapus permanen hanya untuk menu lokal, bukan Smart Tag', () => {
+  assert.deepEqual(parseMenuDeleteTarget(undefined, 'coworking'), { source: 'local', outlet: 'coworking' });
+  assert.deepEqual(parseMenuDeleteTarget('local', 'coworking'), { source: 'local', outlet: 'coworking' });
+  assert.throws(() => parseMenuDeleteTarget('smart-tag', 'ngolab'), /Smart Tag/i);
+  assert.throws(() => parseMenuDeleteTarget('local', 'ngolab-typo'), /outlet tidak valid/i);
 });

@@ -38,7 +38,7 @@ test('tiket cetak memuat harga satuan, subtotal, dan total', async () => {
   assert.match(rows, /formatRupiah\(i\.price\)/, 'harga satuan tampil di baris item');
   assert.match(rows, /formatRupiah\(Number\(i\.price \|\| 0\) \* Number\(i\.quantity \|\| 0\)\)/, 'subtotal per baris');
   assert.match(ticket, /total-label/, 'ada baris total');
-  assert.match(lib, /size: 80mm auto/, 'ukuran kertas termal 80mm');
+  assert.match(lib, /@page \{ size: \$\{PAPER_MM\}mm auto/, 'ukuran kertas termal dari konstanta');
 });
 
 test('Verifikasi & Transaksi menampilkan nama barang dan harga satuan', async () => {

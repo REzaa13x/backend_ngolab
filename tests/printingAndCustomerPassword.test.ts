@@ -12,7 +12,8 @@ test('dokumen cetak tidak memakai flexbox', async () => {
   const styles = lib.split('const STYLES')[1]?.split('`;')[0] ?? '';
   assert.doesNotMatch(styles, /display:\s*flex/, 'flexbox merusak layout di driver printer');
   assert.match(styles, /table-layout:\s*fixed/, 'lebar kolom harus dipatok');
-  assert.match(styles, /@page\s*\{[^}]*80mm/, 'ukuran kertas 80mm');
+  assert.match(styles, /@page\s*\{[^}]*\$\{PAPER_MM\}mm/, 'ukuran kertas dari konstanta');
+  assert.match(lib, /export const PAPER_MM = 58;/, 'RPP02N = kertas 58mm');
 });
 
 test('print dipanggil setelah jeda, bukan langsung setelah write', async () => {
@@ -25,8 +26,9 @@ test('print dipanggil setelah jeda, bukan langsung setelah write', async () => {
 test('tiket dapur dan struk pelanggan adalah dua dokumen terpisah', async () => {
   const lib = await read('../src/lib/printDoc.ts');
   assert.match(lib, /export function printKitchenTicket/);
-  assert.match(lib, /export function printReceipt/);
-  const receipt = lib.split('export function printReceipt')[1] ?? '';
+  assert.match(lib, /export async function printReceipt/);
+  const receipt = lib.split('export async function printReceipt')[1] ?? '';
+  assert.match(receipt, /await sendToBridge\(order, 'receipt'\)/, 'struk dicoba ke bridge ESC/POS dulu');
   assert.match(receipt, /Struk Pembayaran/);
   assert.match(receipt, /Status Bayar/);
   assert.match(receipt, /Terima kasih atas kunjungan Anda/);
@@ -41,6 +43,9 @@ test('KDS dan Verifikasi & Transaksi memakai modul cetak yang sama', async () =>
   assert.match(kds, /import \{ printKitchenTicket \} from '\.\.\/lib\/printDoc'/);
   assert.match(om, /printReceipt/, 'Verifikasi & Transaksi memakai printer struk bersama');
   assert.match(om, /Cetak Struk/);
+  assert.match(om, /Pelanggan mau struk fisik\?/, 'kasir ditanya dulu sebelum cetak struk');
+  assert.match(om, /await printReceipt\(/, 'hasil async printReceipt harus ditunggu, bukan dipakai sebagai Promise');
+  assert.doesNotMatch(om, /if \(!printReceipt\(/, 'sisa pemanggilan tanpa await bikin pesan gagal tak pernah muncul');
   assert.doesNotMatch(kds, /const ticketStyles/, 'duplikasi CSS cetak di komponen harus hilang');
 });
 

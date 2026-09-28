@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { requireApiKeyScope } from "../middleware/authApiKey.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
-import { desiredSmartTagDisplayed, parseMenuMutationTarget, serializeSmartTagMenu, smartTagMenuPathId } from "../lib/smartTagMenu.js";
+import { desiredSmartTagDisplayed, parseMenuDeleteTarget, parseMenuMutationTarget, serializeSmartTagMenu, smartTagMenuPathId } from "../lib/smartTagMenu.js";
 
 // Helper function to save base64 image string as a physical file on the server
 function saveBase64Image(base64Str: string): string {
@@ -403,20 +403,28 @@ router.patch('/:id/archive', requireMenuAdmin, async (req: Request, res: Respons
   }
 });
 
-// DELETE /api/menu/:id — Hapus menu
+// DELETE /api/menu/:id — Hapus permanen. Hanya menu lokal (Coworking).
 router.delete("/:id", requireMenuAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    // ponytail: hapus hanya untuk menu lokal; jalur Smart Tag tidak punya kontrak DELETE.
+    let target: ReturnType<typeof parseMenuMutationTarget>;
+    try {
+      target = parseMenuDeleteTarget(req.body?.source, req.body?.outlet);
+    } catch (validationError: any) {
+      return res.status(400).json({ message: validationError.message });
+    }
     const actor = getVerifiedActor(req);
-    const [menuData]: any = await db.query("SELECT name FROM menus WHERE id = ?", [id]);
-    const nameVal = menuData.length ? menuData[0].name : id;
+    const [menuData]: any = await db.query("SELECT name FROM menus WHERE id = ? AND outlet = ?", [id, target.outlet]);
+    if (!menuData.length) return res.status(404).json({ message: "Menu tidak ditemukan" });
+    const nameVal = menuData[0].name;
 
-    const [result]: any = await db.query("DELETE FROM menus WHERE id = ?", [id]);
+    const [result]: any = await db.query("DELETE FROM menus WHERE id = ? AND outlet = ?", [id, target.outlet]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: "Menu tidak ditemukan" });
     }
-    
-    await addAuditLog(actor, "Hapus Menu", `${nameVal}`, "warning");
+
+    await addAuditLog(actor, "Hapus Menu", `${nameVal} (${target.outlet})`, "warning");
     res.json({ message: "Menu berhasil dihapus" });
   } catch (error: any) {
     res.status(500).json({ message: "Gagal menghapus menu", error: error.message });

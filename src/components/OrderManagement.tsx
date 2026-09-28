@@ -179,6 +179,17 @@ export default function OrderManagement() {
         })
       });
       if (res.ok) {
+        // Tanya pelanggan sebelum kertas terpakai. Verifikasi hanya bisa dilakukan
+        // kasir/admin, jadi dialog ini selalu muncul di depan orang yang tepat.
+        if (selectedOrder && window.confirm('Pelanggan mau struk fisik?')) {
+          const ok = await printReceipt({
+            ...selectedOrder,
+            payment_status: 'lunas',
+            payment_method: paymentDetails?.method || selectedOrder.payment_method,
+            amount_paid: paymentDetails?.amount ?? selectedOrder.amount_paid
+          });
+          if (!ok) alert('Popup diblokir browser. Izinkan popup untuk mencetak struk.');
+        }
         fetchOrders();
         fetchSummary();
         setSelectedOrder(null);
@@ -693,8 +704,10 @@ export default function OrderManagement() {
                   </button>
                 )}
                 <button 
-                  onClick={() => {
-                    if (!printReceipt(selectedOrder)) {
+                  onClick={async () => {
+                    // printReceipt sekarang async (coba bridge ESC/POS dulu);
+                    // tanpa await, Promise selalu truthy dan pesan gagal tak pernah muncul.
+                    if (!(await printReceipt(selectedOrder))) {
                       alert('Popup diblokir browser. Izinkan popup untuk mencetak struk.');
                     }
                   }}
