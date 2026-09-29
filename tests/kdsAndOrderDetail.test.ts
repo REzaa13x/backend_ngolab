@@ -34,10 +34,11 @@ test('titik tiga KDS menyediakan hapus pesanan lewat API, bukan sekadar menyembu
 test('tiket cetak memuat harga satuan, subtotal, dan total', async () => {
   const lib = await read('../src/lib/printDoc.ts');
   const rows = lib.split('const itemRows')[1]?.split('// Baris kosong di akhir')[0] ?? '';
-  const ticket = lib.split('export function printKitchenTicket')[1]?.split('export function printReceipt')[0] ?? '';
+  const ticket = lib.split('export async function printKitchenTicket')[1]?.split('export async function printReceipt')[0] ?? '';
   assert.match(rows, /formatRupiah\(i\.price\)/, 'harga satuan tampil di baris item');
   assert.match(rows, /formatRupiah\(Number\(i\.price \|\| 0\) \* Number\(i\.quantity \|\| 0\)\)/, 'subtotal per baris');
   assert.match(ticket, /total-label/, 'ada baris total');
+  assert.match(ticket, /await sendToBridge\(order, 'ticket'\)/, 'tiket juga dicoba ke bridge ESC/POS dulu');
   assert.match(lib, /@page \{ size: \$\{PAPER_MM\}mm auto/, 'ukuran kertas termal dari konstanta');
 });
 

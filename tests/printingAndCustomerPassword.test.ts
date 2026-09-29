@@ -25,7 +25,7 @@ test('print dipanggil setelah jeda, bukan langsung setelah write', async () => {
 
 test('tiket dapur dan struk pelanggan adalah dua dokumen terpisah', async () => {
   const lib = await read('../src/lib/printDoc.ts');
-  assert.match(lib, /export function printKitchenTicket/);
+  assert.match(lib, /export async function printKitchenTicket/);
   assert.match(lib, /export async function printReceipt/);
   const receipt = lib.split('export async function printReceipt')[1] ?? '';
   assert.match(receipt, /await sendToBridge\(order, 'receipt'\)/, 'struk dicoba ke bridge ESC/POS dulu');

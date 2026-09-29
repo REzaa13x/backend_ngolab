@@ -94,7 +94,9 @@ export function openPrintWindow(title: string, bodyHtml: string): boolean {
 }
 
 /** Tiket dapur: tanpa harga total pelanggan, fokus pada item yang harus dimasak. */
-export function printKitchenTicket(order: PrintableOrder, outletFallback: string): boolean {
+export async function printKitchenTicket(order: PrintableOrder, outletFallback: string): Promise<boolean> {
+  // Sama seperti struk: coba bridge ESC/POS dulu supaya kertas 58mm tidak terbuang.
+  if (await sendToBridge(order, 'ticket')) return true;
   const items = Array.isArray(order.items) ? order.items : [];
   const total = items.reduce((sum, i) => sum + Number(i.price || 0) * Number(i.quantity || 0), 0);
   const waktu = formatWaktu(order.created_at);
