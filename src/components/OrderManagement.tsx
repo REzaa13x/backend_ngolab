@@ -186,7 +186,8 @@ export default function OrderManagement() {
             ...selectedOrder,
             payment_status: 'lunas',
             payment_method: paymentDetails?.method || selectedOrder.payment_method,
-            amount_paid: paymentDetails?.amount ?? selectedOrder.amount_paid
+            amount_paid: paymentDetails?.amount ?? selectedOrder.amount_paid,
+            cashier: user?.name || 'Kasir',
           });
           if (!ok) alert('Popup diblokir browser. Izinkan popup untuk mencetak struk.');
         }

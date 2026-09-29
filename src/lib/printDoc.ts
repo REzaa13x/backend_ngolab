@@ -25,6 +25,7 @@ export type PrintableOrder = {
   change_amount?: number;
   notes?: string;
   items?: PrintItem[];
+  cashier?: string;
 };
 
 // Lebar kertas struk. RPP02N = 58mm (32 karakter/baris). Ganti 80 bila pindah ke
