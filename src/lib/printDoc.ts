@@ -27,10 +27,14 @@ export type PrintableOrder = {
   items?: PrintItem[];
 };
 
+// Lebar kertas struk. RPP02N = 58mm (32 karakter/baris). Ganti 80 bila pindah ke
+// printer termal lebar.
+export const PAPER_MM = 58;
+
 const STYLES = `
-  @page { size: 80mm auto; margin: 4mm; }
+  @page { size: ${PAPER_MM}mm auto; margin: 3mm; }
   * { box-sizing: border-box; }
-  body { font-family: 'Courier New', ui-monospace, monospace; font-size: 12px; color: #000; margin: 0; padding: 6px; }
+  body { font-family: 'Courier New', ui-monospace, monospace; font-size: 10px; color: #000; margin: 0; padding: 4px; }
   .center { text-align: center; }
   .brand { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
   .sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; }
@@ -90,7 +94,9 @@ export function openPrintWindow(title: string, bodyHtml: string): boolean {
 }
 
 /** Tiket dapur: tanpa harga total pelanggan, fokus pada item yang harus dimasak. */
-export function printKitchenTicket(order: PrintableOrder, outletFallback: string): boolean {
+export async function printKitchenTicket(order: PrintableOrder, outletFallback: string): Promise<boolean> {
+  // Sama seperti struk: coba bridge ESC/POS dulu supaya kertas 58mm tidak terbuang.
+  if (await sendToBridge(order, 'ticket')) return true;
   const items = Array.isArray(order.items) ? order.items : [];
   const total = items.reduce((sum, i) => sum + Number(i.price || 0) * Number(i.quantity || 0), 0);
   const waktu = formatWaktu(order.created_at);
@@ -119,8 +125,35 @@ export function printKitchenTicket(order: PrintableOrder, outletFallback: string
   return openPrintWindow(order.invoice_number || 'tiket', html);
 }
 
+// Alamat bridge struk lokal (struk-bridge.py) — ESC/POS langsung ke printer
+// Bluetooth, tanpa dialog print. Kalau bridge tidak jalan, otomatis kembali ke
+// dialog print browser.
+// 127.0.0.1 dikecualikan dari pemblokiran mixed-content, jadi aman dipanggil
+// dari halaman https.
+const BRIDGE_URL = 'http://127.0.0.1:9100/print';
+
+async function sendToBridge(order: PrintableOrder, type: 'receipt' | 'ticket'): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const res = await fetch(BRIDGE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...order, type }),
+      signal: ctrl.signal
+    });
+    return res.ok;
+  } catch {
+    return false; // bridge mati/port sibuk -> pakai jalur browser
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 /** Struk pelanggan: memuat identitas pesanan, rincian item, dan status pembayaran. */
-export function printReceipt(order: PrintableOrder): boolean {
+export async function printReceipt(order: PrintableOrder): Promise<boolean> {
+  // Didahulukan ke bridge: hasilnya struk ESC/POS 58mm asli, kertas tidak terbuang.
+  if (await sendToBridge(order, 'receipt')) return true;
   const items = Array.isArray(order.items) ? order.items : [];
   const waktu = formatWaktu(order.created_at);
   const status = String(order.payment_status || 'belum_bayar').replace(/_/g, ' ');

@@ -262,8 +262,8 @@ export default function KDS() {
 
   // Cetak tiket dapur ke printer. Implementasi ada di src/lib/printDoc.ts agar
   // dipakai bersama dengan struk di Verifikasi & Transaksi.
-  const printTicket = (order: KDSOrder) => {
-    const ok = printKitchenTicket(order, selectedOutlet);
+  const printTicket = async (order: KDSOrder) => {
+    const ok = await printKitchenTicket(order, selectedOutlet);
     if (!ok) {
       setToast('Popup diblokir browser, izinkan popup untuk mencetak');
       window.setTimeout(() => setToast(''), 3500);
