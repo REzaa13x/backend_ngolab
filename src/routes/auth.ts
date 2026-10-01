@@ -199,9 +199,8 @@ router.post("/register", async (req: Request, res: Response) => {
 
     const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}-${Date.now().toString().slice(-4)}`;
     const hashedPassword = await hashPassword(password);
-    // Registrasi publik selalu mendapat role Support yang tidak memiliki akses operasional.
-    // Super Admin dapat mengubah role melalui halaman Tim & Shift yang terlindungi.
-    const assignedRole = 'Support';
+    const publicRoles = new Set(['Kasir', 'Koki', 'Support']);
+    const assignedRole = publicRoles.has(String(_role)) ? String(_role) : 'Kasir';
 
     await db.query(
       "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",

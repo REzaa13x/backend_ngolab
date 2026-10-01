@@ -20,6 +20,7 @@ export default function Login() {
   const [regPhone, setRegPhone] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regRole, setRegRole] = useState('Kasir');
+  const PUBLIC_STAFF_ROLES = ['Kasir', 'Koki', 'Support'] as const;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -220,7 +221,7 @@ export default function Login() {
                     <div>
                       <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Peran Akun Baru</label>
                       <select value={regRole} onChange={(e) => setRegRole(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900">
-                        <option value="Kasir">Kasir</option>
+                        {PUBLIC_STAFF_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
                       </select>
                     </div>
                   </div>
