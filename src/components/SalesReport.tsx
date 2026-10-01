@@ -35,6 +35,9 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+const APP_TIMEZONE = 'Asia/Jakarta';
+const wibDate = (value: string | Date) => new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+const wibMonth = (value: string | Date) => wibDate(value).slice(0, 7);
 
 interface OrderItem {
   name: string;
@@ -124,7 +127,7 @@ export default function SalesReport() {
       const now = new Date();
 
       if (period === 'day') {
-        return orderDate.toDateString() === now.toDateString();
+        return wibDate(order.created_at) === wibDate(now);
       }
 
       if (period === 'week') {
@@ -134,11 +137,11 @@ export default function SalesReport() {
       }
 
       if (period === 'month') {
-        return orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
+        return wibMonth(order.created_at) === wibMonth(now);
       }
 
       if (period === 'year') {
-        return orderDate.getFullYear() === now.getFullYear();
+        return wibDate(order.created_at).slice(0, 4) === wibDate(now).slice(0, 4);
       }
 
       return true;
@@ -378,7 +381,7 @@ export default function SalesReport() {
                          <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-900 leading-none">{row.invoice_number}</span>
                             <span className="text-[10px] text-slate-400 font-medium mt-1">
-                               {new Date(row.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                               {new Date(row.created_at).toLocaleString('id-ID', { timeZone: APP_TIMEZONE, dateStyle: 'medium', timeStyle: 'short' })}
                             </span>
                          </div>
                       </td>
@@ -587,7 +590,7 @@ export default function SalesReport() {
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Waktu</span>
-                    <span className="text-[11px] font-bold text-slate-700">{new Date(selectedOrder.created_at).toLocaleString('id-ID')}</span>
+                    <span className="text-[11px] font-bold text-slate-700">{new Date(selectedOrder.created_at).toLocaleString('id-ID', { timeZone: APP_TIMEZONE })}</span>
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">No. Faktur</span>

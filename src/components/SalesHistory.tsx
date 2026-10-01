@@ -51,11 +51,27 @@ function fmtRp(n: number) {
   return 'Rp ' + n.toLocaleString('id-ID');
 }
 
+const APP_TIMEZONE = 'Asia/Jakarta';
+
+function partsWib(value: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(value));
+  return Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value])) as { year: string; month: string; day: string };
+}
+
 function fmtDate(d: string) {
   return new Date(d).toLocaleString('id-ID', {
-    day: '2-digit', month: 'short', year: 'numeric',
+    timeZone: APP_TIMEZONE, day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
+} 
+
+function periodKey(value: string, monthOnly = false) {
+  const p = partsWib(value);
+  return monthOnly ? `${p.year}-${p.month}` : `${p.year}-${p.month}-${p.day}`;
+} 
+
+function fmtDay(key: string) {
+  return new Date(`${key}T00:00:00+07:00`).toLocaleDateString('id-ID', { timeZone: APP_TIMEZONE, day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -139,7 +155,7 @@ export default function SalesHistory() {
   useEffect(() => {
     if (!selectedMonth && allOrders.length) {
       const latestPaid = allOrders.find(o => o.payment_status === 'lunas') || allOrders[0];
-      setSelectedMonth(latestPaid.created_at.slice(0, 7));
+      setSelectedMonth(periodKey(latestPaid.created_at, true))
     }
   }, [allOrders.length, selectedMonth]);
 
@@ -157,20 +173,20 @@ export default function SalesHistory() {
       !search ||
       o.customer_name.toLowerCase().includes(search.toLowerCase()) ||
       o.invoice_number.toLowerCase().includes(search.toLowerCase());
-    const matchPeriod = period === 'semua' || o.created_at.slice(0, 7) === selectedMonth;
+    const matchPeriod = period === 'semua' || periodKey(o.created_at, true) === selectedMonth;
     return matchSrc && matchStatus && matchSearch && matchPeriod;
   });
 
   const paidOrders = filtered.filter(o => o.payment_status === 'lunas');
   const dailyTotals = Object.entries(paidOrders.reduce<Record<string, { revenue: number; orders: number }>>((acc, o) => {
-    const key = o.created_at.slice(0, 10);
+    const key = periodKey(o.created_at);
     acc[key] = acc[key] || { revenue: 0, orders: 0 };
     acc[key].revenue += Number(o.total_price) || 0;
     acc[key].orders += 1;
     return acc;
   }, {})).sort(([a], [b]) => b.localeCompare(a));
   const monthlyTotals = Object.entries(allOrders.filter(o => o.payment_status === 'lunas').reduce<Record<string, { revenue: number; orders: number }>>((acc, o) => {
-    const key = o.created_at.slice(0, 7);
+    const key = periodKey(o.created_at, true);
     acc[key] = acc[key] || { revenue: 0, orders: 0 };
     acc[key].revenue += Number(o.total_price) || 0;
     acc[key].orders += 1;
@@ -347,7 +363,7 @@ export default function SalesHistory() {
           </div>
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-          <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Hari</p><div className="max-h-52 overflow-auto space-y-2">{dailyTotals.length ? dailyTotals.map(([day, value]) => <div key={day} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-xs font-bold text-slate-600">{new Date(`${day}T00:00:00`).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-emerald-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
+          <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Hari</p><div className="max-h-52 overflow-auto space-y-2">{dailyTotals.length ? dailyTotals.map(([day, value]) => <div key={day} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-xs font-bold text-slate-600">{fmtDay(day)} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-emerald-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
           <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Bulan</p><div className="max-h-52 overflow-auto space-y-2">{monthlyTotals.length ? monthlyTotals.map(([month, value]) => <div key={month} className="flex items-center justify-between rounded-xl bg-violet-50/60 px-4 py-3"><span className="text-xs font-bold text-slate-600">{new Date(`${month}-01T00:00:00`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-violet-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
         </div>
       </section>
