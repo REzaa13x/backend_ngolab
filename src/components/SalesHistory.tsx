@@ -71,7 +71,7 @@ export default function SalesHistory() {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('semua');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [period, setPeriod] = useState<'semua' | 'bulan'>('bulan');
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState('');
 
   // ── Fetch our orders ─────────────────────────────────────────────────────
   const fetchOurOrders = async () => {
@@ -135,6 +135,13 @@ export default function SalesHistory() {
   const allOrders = [...ourOrders, ...friendOrders].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
+
+  useEffect(() => {
+    if (!selectedMonth && allOrders.length) {
+      const latestPaid = allOrders.find(o => o.payment_status === 'lunas') || allOrders[0];
+      setSelectedMonth(latestPaid.created_at.slice(0, 7));
+    }
+  }, [allOrders.length, selectedMonth]);
 
   const filtered = allOrders.filter(o => {
     const isManualOrder = o.external_id === 'MANUAL';
