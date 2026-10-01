@@ -82,7 +82,7 @@ export default function Login() {
           <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?q=80&w=1200&auto=format&fit=crop')] mix-blend-overlay opacity-30 bg-cover bg-center" />
           
           <div className="relative z-10">
-            <img src="/geasture-x-ngolab.svg" alt="Geasture X Ngolab" className="w-64 h-24 object-contain rounded-2xl shadow-lg mb-8" />
+            <img src="/geasture-x-ngolab.png" alt="Geasture X Ngolab" className="w-40 h-40 object-contain rounded-2xl shadow-lg mb-8" />
             
             <h1 className="text-4xl font-bold text-white mb-4 leading-tight">
               Platform Pintar<br/>Manajemen Bisnis Anda.

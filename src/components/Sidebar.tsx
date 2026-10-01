@@ -128,7 +128,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             className="w-10 h-10 rounded-xl object-cover shrink-0 shadow-sm border border-slate-200 dark:border-slate-700"
           />
         ) : (
-          <img src="/geasture-x-ngolab.svg" alt="Geasture X Ngolab" className="w-10 h-10 rounded-xl object-cover shrink-0 shadow-sm border border-slate-200 dark:border-slate-700" />
+          <img src="/geasture-x-ngolab.png" alt="Geasture X Ngolab" className="w-10 h-10 rounded-xl object-contain shrink-0 shadow-sm border border-slate-200 dark:border-slate-700" />
         )}
         {!isCollapsed && (
           <motion.div
