@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   History, RefreshCcw, Search, TrendingUp, ShoppingBag,
   CheckCircle2, XCircle, Clock, AlertCircle, ChevronDown, ChevronUp,
-  Wifi, WifiOff, Package, Coffee, ExternalLink, Download, FileText
+  Wifi, WifiOff, Package, Coffee, ExternalLink, Download, FileText, CalendarDays
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -70,6 +70,8 @@ export default function SalesHistory() {
   const [filterSource, setFilterSource] = useState<FilterSource>('semua');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('semua');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [period, setPeriod] = useState<'semua' | 'bulan'>('bulan');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
 
   // ── Fetch our orders ─────────────────────────────────────────────────────
   const fetchOurOrders = async () => {
@@ -148,8 +150,25 @@ export default function SalesHistory() {
       !search ||
       o.customer_name.toLowerCase().includes(search.toLowerCase()) ||
       o.invoice_number.toLowerCase().includes(search.toLowerCase());
-    return matchSrc && matchStatus && matchSearch;
+    const matchPeriod = period === 'semua' || o.created_at.slice(0, 7) === selectedMonth;
+    return matchSrc && matchStatus && matchSearch && matchPeriod;
   });
+
+  const paidOrders = filtered.filter(o => o.payment_status === 'lunas');
+  const dailyTotals = Object.entries(paidOrders.reduce<Record<string, { revenue: number; orders: number }>>((acc, o) => {
+    const key = o.created_at.slice(0, 10);
+    acc[key] = acc[key] || { revenue: 0, orders: 0 };
+    acc[key].revenue += Number(o.total_price) || 0;
+    acc[key].orders += 1;
+    return acc;
+  }, {})).sort(([a], [b]) => b.localeCompare(a));
+  const monthlyTotals = Object.entries(allOrders.filter(o => o.payment_status === 'lunas').reduce<Record<string, { revenue: number; orders: number }>>((acc, o) => {
+    const key = o.created_at.slice(0, 7);
+    acc[key] = acc[key] || { revenue: 0, orders: 0 };
+    acc[key].revenue += Number(o.total_price) || 0;
+    acc[key].orders += 1;
+    return acc;
+  }, {})).sort(([a], [b]) => b.localeCompare(a));
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = {
@@ -305,6 +324,26 @@ export default function SalesHistory() {
           ))}
         </div>
       </div>
+
+      {/* ── Period summary ── */}
+      <section className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-orange-50 rounded-xl"><CalendarDays size={18} className="text-orange-600" /></div>
+            <div><h3 className="font-black text-slate-900">Ringkasan Pendapatan</h3><p className="text-xs text-slate-400">Hanya transaksi berstatus Lunas</p></div>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex p-1 bg-slate-100 rounded-xl">
+              {(['bulan', 'semua'] as const).map(value => <button key={value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase', period === value ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400')}>{value === 'bulan' ? 'Per Bulan' : 'Semua Periode'}</button>)}
+            </div>
+            <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+          <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Hari</p><div className="max-h-52 overflow-auto space-y-2">{dailyTotals.length ? dailyTotals.map(([day, value]) => <div key={day} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-xs font-bold text-slate-600">{new Date(`${day}T00:00:00`).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-emerald-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
+          <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Bulan</p><div className="max-h-52 overflow-auto space-y-2">{monthlyTotals.length ? monthlyTotals.map(([month, value]) => <div key={month} className="flex items-center justify-between rounded-xl bg-violet-50/60 px-4 py-3"><span className="text-xs font-bold text-slate-600">{new Date(`${month}-01T00:00:00`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-violet-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
+        </div>
+      </section>
 
       {/* ── Table ── */}
       {loading ? (
