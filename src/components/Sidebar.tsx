@@ -128,16 +128,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             className="w-10 h-10 rounded-xl object-cover shrink-0 shadow-sm border border-slate-200 dark:border-slate-700"
           />
         ) : (
-          <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center shrink-0 shadow-sm relative">
-            <div className="flex flex-col items-center leading-none">
-              <span className="text-[10px] font-black text-slate-900 tracking-tighter -mb-0.5">
-                {settings.brand_name.substring(0, 3)}
-              </span>
-              <span className="text-[10px] font-black text-indigo-600 tracking-tighter">
-                {settings.brand_name.substring(3, 7) || 'lab'}
-              </span>
-            </div>
-          </div>
+          <img src="/geasture-x-ngolab.svg" alt="Geasture X Ngolab" className="w-10 h-10 rounded-xl object-cover shrink-0 shadow-sm border border-slate-200 dark:border-slate-700" />
         )}
         {!isCollapsed && (
           <motion.div
