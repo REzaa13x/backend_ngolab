@@ -220,9 +220,18 @@ export default function Login() {
                     </div>
                     <div>
                       <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Peran Akun Baru</label>
-                      <select value={regRole} onChange={(e) => setRegRole(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900">
-                        {PUBLIC_STAFF_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
-                      </select>
+                      <div className="grid grid-cols-3 gap-2">
+                        {PUBLIC_STAFF_ROLES.map(role => (
+                          <button
+                            key={role}
+                            type="button"
+                            onClick={() => setRegRole(role)}
+                            className={`rounded-lg border px-2 py-2.5 text-xs font-bold transition-colors ${regRole === role ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-indigo-300'}`}
+                          >
+                            {role}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                   
