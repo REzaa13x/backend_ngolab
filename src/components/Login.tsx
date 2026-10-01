@@ -70,19 +70,21 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center relative overflow-hidden">
-      {/* Background Ornaments */}
-      <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-indigo-600/30 blur-[120px] rounded-full mix-blend-screen pointer-events-none" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[40%] h-[40%] bg-orange-500/20 blur-[120px] rounded-full mix-blend-screen pointer-events-none" />
+    <div className="min-h-screen bg-[#111827] flex items-center justify-center relative overflow-hidden">
+      <style>{`@keyframes drift{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(24px,-18px,0) scale(1.08)}} @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}`}</style>
+      <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(249,115,22,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(249,115,22,.12) 1px, transparent 1px)', backgroundSize: '44px 44px' }} />
+      <div className="absolute -top-32 -left-24 w-[34rem] h-[34rem] bg-orange-500/30 blur-[100px] rounded-full pointer-events-none animate-[drift_11s_ease-in-out_infinite]" />
+      <div className="absolute -bottom-40 -right-24 w-[38rem] h-[38rem] bg-slate-700/70 blur-[110px] rounded-full pointer-events-none animate-[drift_14s_ease-in-out_infinite_reverse]" />
+      <div className="absolute top-16 right-[18%] text-orange-400/30 text-5xl pointer-events-none animate-[float_5s_ease-in-out_infinite]">✦</div>
 
-      <div className="w-full max-w-[1000px] bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden flex z-10 mx-4">
+      <div className="w-full max-w-[1040px] bg-white/95 backdrop-blur-xl border border-orange-200/30 rounded-[2rem] shadow-2xl shadow-black/40 overflow-hidden flex z-10 mx-4">
         
         {/* Left Side (Banner) */}
         <div className="hidden lg:flex w-1/2 flex-col justify-between p-12 bg-gradient-to-br from-indigo-600/90 to-indigo-900/90 relative">
           <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?q=80&w=1200&auto=format&fit=crop')] mix-blend-overlay opacity-30 bg-cover bg-center" />
           
           <div className="relative z-10">
-            <img src="/geasture-x-ngolab.png" alt="Geasture X Ngolab" className="w-40 h-40 object-contain rounded-2xl shadow-lg mb-8" />
+            <img src="/geasture-x-ngolab.png" alt="Geasture X Ngolab" className="w-24 h-24 object-contain rounded-xl shadow-lg mb-5" />
             
             <h1 className="text-4xl font-bold text-white mb-4 leading-tight">
               Platform Pintar<br/>Manajemen Bisnis Anda.
