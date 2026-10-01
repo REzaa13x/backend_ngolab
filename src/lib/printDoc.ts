@@ -171,6 +171,7 @@ export async function printReceipt(order: PrintableOrder): Promise<boolean> {
     <tr><td class="l">No. Faktur</td><td class="r">${escapeHtml(order.invoice_number)}</td></tr>
     <tr><td class="l">Waktu</td><td class="r">${escapeHtml(waktu)}</td></tr>
     <tr><td class="l">Pelanggan</td><td class="r">${escapeHtml(order.customer_name)}</td></tr>
+    <tr><td class="l">Kasir</td><td class="r">${escapeHtml(order.cashier || 'Kasir')}</td></tr>
     <tr><td class="l">Metode</td><td class="r">${escapeHtml(order.payment_method || 'Tunai')}</td></tr>
     <tr><td class="l">Outlet</td><td class="r">${escapeHtml(order.outlet || '-')}</td></tr>
   </table>

@@ -187,7 +187,7 @@ export default function OrderManagement() {
             payment_status: 'lunas',
             payment_method: paymentDetails?.method || selectedOrder.payment_method,
             amount_paid: paymentDetails?.amount ?? selectedOrder.amount_paid,
-            cashier: user?.name || 'Kasir',
+            cashier: (user as { name?: string } | undefined)?.name || 'Kasir',
           });
           if (!ok) alert('Popup diblokir browser. Izinkan popup untuk mencetak struk.');
         }
@@ -708,7 +708,7 @@ export default function OrderManagement() {
                   onClick={async () => {
                     // printReceipt sekarang async (coba bridge ESC/POS dulu);
                     // tanpa await, Promise selalu truthy dan pesan gagal tak pernah muncul.
-                    if (!(await printReceipt(selectedOrder))) {
+                    if (!(await printReceipt({ ...selectedOrder, cashier: user?.name || 'Kasir' }))) {
                       alert('Popup diblokir browser. Izinkan popup untuk mencetak struk.');
                     }
                   }}
