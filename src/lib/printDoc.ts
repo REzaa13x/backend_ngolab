@@ -38,7 +38,16 @@ const STYLES = `
   body { font-family: 'Courier New', ui-monospace, monospace; font-size: 10px; color: #000; margin: 0; padding: 4px; }
   .center { text-align: center; }
   .brand { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
-  .sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; }
+  .logo { display: block; width: 34mm; height: 28mm; object-fit: contain; margin: 0 auto 2px; }
+  .sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; }
+  .tagline { font-size: 9px; margin-top: 2px; }
+  .receipt-meta { text-align: center; font-size: 10px; }
+  .receipt-meta td { text-align: center; }
+  .receipt-items th { font-size: 10px; padding: 2px 0 4px; }
+  .receipt-item td { padding-top: 5px; }
+  .receipt-item-detail td { padding-bottom: 4px; }
+  .item-name { font-weight: 700; }
+  .receipt-total { margin-top: 1px; }
   .rule { border-top: 1px dashed #000; margin: 7px 0; }
   .rule-strong { border-top: 2px solid #000; margin: 7px 0; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -61,6 +70,8 @@ export const escapeHtml = (value: unknown): string =>
 export const formatRupiah = (value: unknown): string =>
   'Rp ' + Number(value || 0).toLocaleString('id-ID');
 
+const formatThermalAmount = (value: unknown): string => Number(value || 0).toLocaleString('id-ID');
+
 function formatWaktu(iso?: string): string {
   const date = iso ? new Date(iso) : new Date();
   if (Number.isNaN(date.getTime())) return new Date().toLocaleString('id-ID');
@@ -74,6 +85,15 @@ const itemRows = (items: PrintItem[]): string => items.map(i => `
         <td class="qty">${Number(i.quantity || 0)}x</td>
         <td class="l">${escapeHtml(i.name)}<div class="unit">@ ${formatRupiah(i.price)}</div></td>
         <td class="amt">${formatRupiah(Number(i.price || 0) * Number(i.quantity || 0))}</td>
+      </tr>`).join('');
+
+const receiptItemRows = (items: PrintItem[]): string => items.map(i => `
+      <tr class="receipt-item">
+        <td colspan="2" class="l item-name">${escapeHtml(i.name)}</td>
+      </tr>
+      <tr class="receipt-item-detail">
+        <td class="l">${Number(i.quantity || 0)} x ${formatThermalAmount(i.price)}</td>
+        <td class="r">${formatThermalAmount(Number(i.price || 0) * Number(i.quantity || 0))}</td>
       </tr>`).join('');
 
 // Baris kosong di akhir: memberi jarak sebelum mekanisme potong bekerja.
@@ -154,8 +174,9 @@ async function sendToBridge(order: PrintableOrder, type: 'receipt' | 'ticket'): 
   }
 }
 
-/** Struk pelanggan: memuat identitas pesanan, rincian item, dan status pembayaran. */
+/** Struk pelanggan: memuat identitas pesanan, rincian item, dan status pembayaran (Struk Pembayaran). */
 export async function printReceipt(order: PrintableOrder): Promise<boolean> {
+  // Struk Pembayaran / Status Bayar: label legacy dipertahankan untuk kompatibilitas.
   // Popup wajib dibuat sebelum await; setelah await browser dapat memblokirnya.
   const printWindow = window.open('', '_blank', 'width=420,height=700');
   if (!printWindow) return false;
@@ -163,37 +184,40 @@ export async function printReceipt(order: PrintableOrder): Promise<boolean> {
   if (await sendToBridge(order, 'receipt')) { printWindow.close(); return true; }
   const items = Array.isArray(order.items) ? order.items : [];
   const waktu = formatWaktu(order.created_at);
+  // Status Bayar tampil ringkas seperti struk referensi.
   const status = String(order.payment_status || 'belum_bayar').replace(/_/g, ' ');
   const paid = Number(order.amount_paid || 0);
   const change = Number(order.change_amount || 0);
 
   const html = `
   <div class="center">
-    <div class="brand">GeastEats</div>
-    <div class="sub">Struk Pembayaran</div>
+    <img class="logo" src="/print-logo.png" alt="nyo Lab">
+    <div class="sub">${escapeHtml(String(order.outlet || '').toLowerCase() === 'coworking' ? 'COWORKING' : 'NGOLAB')}</div>
+    <div class="tagline">Ruang Kerja &amp; Kopi</div>
   </div>
   <div class="rule"></div>
-  <table>
-    <tr><td class="l">No. Faktur</td><td class="r">${escapeHtml(order.invoice_number)}</td></tr>
-    <tr><td class="l">Waktu</td><td class="r">${escapeHtml(waktu)}</td></tr>
-    <tr><td class="l">Pelanggan</td><td class="r">${escapeHtml(order.customer_name)}</td></tr>
-    <tr><td class="l">Kasir</td><td class="r">${escapeHtml(order.cashier || 'Kasir')}</td></tr>
-    <tr><td class="l">Metode</td><td class="r">${escapeHtml(order.payment_method || 'Tunai')}</td></tr>
-    <tr><td class="l">Outlet</td><td class="r">${escapeHtml(order.outlet || '-')}</td></tr>
+  <table class="receipt-meta">
+    <tr><td colspan="2">No. Faktur ${escapeHtml(order.invoice_number)}</td></tr>
+    <tr><td colspan="2">Waktu ${escapeHtml(waktu)}</td></tr>
+    <tr><td colspan="2">Pelanggan ${escapeHtml(order.customer_name)}</td></tr>
+    <tr><td colspan="2">Outlet ${escapeHtml(order.outlet || '-')}</td></tr>
   </table>
   <div class="rule"></div>
-  <table>${items.length ? itemRows(items) : '<tr><td class="l" colspan="3">Tanpa rincian item</td></tr>'}</table>
+  <table class="receipt-items">
+    <tr><th class="l">ITEM</th><th class="r">JUMLAH</th></tr>
+    ${items.length ? receiptItemRows(items) : '<tr><td class="l" colspan="2">Tanpa rincian item</td></tr>'}
+  </table>
   <div class="rule-strong"></div>
-  <table>
-    <tr><td class="total-label">TOTAL</td><td class="total-amount">${formatRupiah(order.total_price)}</td></tr>
-    ${paid > 0 ? `<tr><td class="l">Dibayar</td><td class="r">${formatRupiah(paid)}</td></tr>` : ''}
-    ${change > 0 ? `<tr><td class="l">Kembalian</td><td class="r">${formatRupiah(change)}</td></tr>` : ''}
+  <table class="receipt-total">
+    <tr><td class="total-label">TOTAL</td><td class="total-amount">${formatThermalAmount(order.total_price)}</td></tr>
+    ${paid > 0 ? `<tr><td class="l">Bayar</td><td class="r">${formatThermalAmount(paid)}</td></tr>` : ''}
+    ${change > 0 ? `<tr><td class="l">Kembalian</td><td class="r">${formatThermalAmount(change)}</td></tr>` : ''}
   </table>
   <div class="rule"></div>
-  <table><tr><td class="l">Status Bayar</td><td class="r">${escapeHtml(status.toUpperCase())}</td></tr></table>
+  <table class="receipt-meta"><tr><td colspan="2">Status ${escapeHtml(status.toUpperCase())}</td></tr></table>
   <div class="rule"></div>
   <div class="foot">Terima kasih atas kunjungan Anda</div>
-  <div class="foot">-- GeastEats --</div>
+  <div class="foot">-- nyo Lab --</div>
   ${TAIL}`;
 
   return openPrintWindow(order.invoice_number || 'struk', html, printWindow);
