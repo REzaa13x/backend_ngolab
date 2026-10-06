@@ -182,7 +182,7 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const { customer_name, items, payment_method, payment_status, source, user_id } = req.body;
+    const { customer_name, items, payment_method, payment_status, source, user_id, amount_received } = req.body;
 
     if (!customer_name || !items || items.length === 0) {
       return res.status(400).json({ message: "Data pesanan tidak lengkap" });
@@ -204,7 +204,10 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
     // Status 'menunggu' agar masuk ke KDS kolom "Pesanan Masuk" — koki yang akan memulai
     const status = 'menunggu';
     const finalPaymentStatus = payment_status || 'belum_bayar';
-    const amountPaid = finalPaymentStatus === 'lunas' ? totalPrice : 0;
+    const received = amount_received == null ? totalPrice : Number(amount_received);
+    if (!Number.isFinite(received) || received < 0) { await connection.rollback(); return res.status(400).json({ message: 'Nominal uang diterima tidak valid.' }); }
+    if (finalPaymentStatus === 'lunas' && payment_method === 'Tunai' && received < totalPrice) { await connection.rollback(); return res.status(400).json({ message: 'Uang diterima kurang dari total pembayaran.' }); }
+    const amountPaid = finalPaymentStatus === 'lunas' ? received : 0;
 
     const finalOutlet = source === 'coworking' ? 'coworking' : 'ngolab';
     const finalSource = 'manual';
@@ -276,7 +279,7 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
       emitInventoryChanges(io, inventoryChanges);
     }
 
-    res.status(201).json(insertedOrder[0]);
+    res.status(201).json({ ...insertedOrder[0], amount_received: amountPaid, change_amount: Math.max(0, amountPaid - totalPrice) });
   } catch (err: any) {
     await connection.rollback();
     res.status(err.statusCode || 500).json({ message: err.statusCode ? err.message : "Gagal membuat pesanan", ...(err.statusCode ? {} : { error: err.message }) });

@@ -10,7 +10,7 @@ type MenuItem = {
 };
 const categories: Record<Outlet, string[]> = {
   ngolab: ['Main Course', 'Beverage', 'Snack'],
-  coworking: ['Ready Meal', 'Makanan Ringan', 'Es Krim', 'Minuman Siap Saji']
+  coworking: ['Menu Coworking', 'Retail', 'Ready Meal', 'Es Krim', 'Minuman Siap Saji']
 };
 const emptyForm = (outlet: Outlet) => ({ name: '', category: categories[outlet][0], price: 0, stock: 0, image: '', description: '', outlet });
 

@@ -37,7 +37,7 @@ router.get('/products', async (_req: Request, res: Response) => {
 
 router.get('/categories', async (_req: Request, res: Response) => {
   try {
-    const standard = ['Main Course', 'Beverage', 'Snack', 'Ready Meal', 'Makanan Ringan', 'Es Krim', 'Minuman Siap Saji'];
+    const standard = ['Main Course', 'Beverage', 'Snack', 'Menu Coworking', 'Retail', 'Ready Meal', 'Es Krim', 'Minuman Siap Saji'];
     const [local]: any = await db.query("SELECT DISTINCT category AS name FROM menus WHERE category IS NOT NULL AND category != ''");
     const external = await fetchExternalMenus();
     const categories = new Set<string>(standard);

@@ -83,8 +83,8 @@ const TAIL = `<div class="foot">&nbsp;</div><div class="foot">&nbsp;</div>`;
  * Membuka jendela cetak lalu memanggil print(). Mengembalikan false bila popup diblokir,
  * supaya pemanggil dapat menampilkan pesan alih-alih gagal diam-diam.
  */
-export function openPrintWindow(title: string, bodyHtml: string): boolean {
-  const win = window.open('', '_blank', 'width=420,height=700');
+export function openPrintWindow(title: string, bodyHtml: string, existingWindow?: Window | null): boolean {
+  const win = existingWindow || window.open('', '_blank', 'width=420,height=700');
   if (!win) return false;
   win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${STYLES}</style></head><body>${bodyHtml}</body></html>`);
   win.document.close();
@@ -96,8 +96,11 @@ export function openPrintWindow(title: string, bodyHtml: string): boolean {
 
 /** Tiket dapur: tanpa harga total pelanggan, fokus pada item yang harus dimasak. */
 export async function printKitchenTicket(order: PrintableOrder, outletFallback: string): Promise<boolean> {
+  // Popup wajib dibuat sebelum await; setelah await browser dapat memblokirnya.
+  const printWindow = window.open('', '_blank', 'width=420,height=700');
+  if (!printWindow) return false;
   // Sama seperti struk: coba bridge ESC/POS dulu supaya kertas 58mm tidak terbuang.
-  if (await sendToBridge(order, 'ticket')) return true;
+  if (await sendToBridge(order, 'ticket')) { printWindow.close(); return true; }
   const items = Array.isArray(order.items) ? order.items : [];
   const total = items.reduce((sum, i) => sum + Number(i.price || 0) * Number(i.quantity || 0), 0);
   const waktu = formatWaktu(order.created_at);
@@ -123,7 +126,7 @@ export async function printKitchenTicket(order: PrintableOrder, outletFallback: 
   <div class="foot">Dicetak ${escapeHtml(waktu)}<br>-- GeastEats --</div>
   ${TAIL}`;
 
-  return openPrintWindow(order.invoice_number || 'tiket', html);
+  return openPrintWindow(order.invoice_number || 'tiket', html, printWindow);
 }
 
 // Alamat bridge struk lokal (struk-bridge.py) — ESC/POS langsung ke printer
@@ -153,8 +156,11 @@ async function sendToBridge(order: PrintableOrder, type: 'receipt' | 'ticket'): 
 
 /** Struk pelanggan: memuat identitas pesanan, rincian item, dan status pembayaran. */
 export async function printReceipt(order: PrintableOrder): Promise<boolean> {
+  // Popup wajib dibuat sebelum await; setelah await browser dapat memblokirnya.
+  const printWindow = window.open('', '_blank', 'width=420,height=700');
+  if (!printWindow) return false;
   // Didahulukan ke bridge: hasilnya struk ESC/POS 58mm asli, kertas tidak terbuang.
-  if (await sendToBridge(order, 'receipt')) return true;
+  if (await sendToBridge(order, 'receipt')) { printWindow.close(); return true; }
   const items = Array.isArray(order.items) ? order.items : [];
   const waktu = formatWaktu(order.created_at);
   const status = String(order.payment_status || 'belum_bayar').replace(/_/g, ' ');
@@ -190,5 +196,5 @@ export async function printReceipt(order: PrintableOrder): Promise<boolean> {
   <div class="foot">-- GeastEats --</div>
   ${TAIL}`;
 
-  return openPrintWindow(order.invoice_number || 'struk', html);
+  return openPrintWindow(order.invoice_number || 'struk', html, printWindow);
 }

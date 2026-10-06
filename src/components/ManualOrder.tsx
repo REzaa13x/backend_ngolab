@@ -32,7 +32,9 @@ export default function ManualOrder() {
   const [selectedOutlet, setSelectedOutlet] = useState<'ngolab' | 'coworking'>('ngolab');
   const [paymentMethod, setPaymentMethod] = useState('Tunai');
   const [paymentStatus, setPaymentStatus] = useState<'belum_bayar' | 'lunas'>('belum_bayar');
+  const [cashReceived, setCashReceived] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState('Semua');
+  const [retailOnly, setRetailOnly] = useState(false);
   const [orderMode, setOrderMode] = useState<'regular' | 'preorder'>('regular');
   const [preorderCampaigns, setPreorderCampaigns] = useState<any[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
@@ -88,13 +90,14 @@ export default function ManualOrder() {
   const filteredMenu = useMemo(() => {
     if (!Array.isArray(menuItems)) return [];
     return menuItems.filter(m => {
+      if (retailOnly && m.category !== 'Retail') return false;
       const matchesSearch =
         (m.name || '').toLowerCase().includes(searchMenu.toLowerCase()) ||
         (m.category || '').toLowerCase().includes(searchMenu.toLowerCase());
       const matchesCategory = selectedCategory === 'Semua' || m.category === selectedCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [menuItems, searchMenu, selectedCategory]);
+  }, [menuItems, searchMenu, selectedCategory, retailOnly]);
 
   const categories = useMemo(() => {
     const values = menuItems
@@ -159,6 +162,7 @@ export default function ManualOrder() {
         items: itemsPayload,
         payment_method: paymentMethod,
         payment_status: paymentStatus,
+        amount_received: paymentMethod === 'Tunai' && paymentStatus === 'lunas' ? cashReceived : undefined,
         source: selectedOutlet
       };
       const res = await authFetch(endpoint, {
@@ -178,6 +182,7 @@ export default function ManualOrder() {
         setSelectedItems([]);
         setPaymentMethod('Tunai');
         setPaymentStatus('belum_bayar');
+        setCashReceived(0);
         setPaymentTiming('before_pickup');
         setSuccessMessage(`Pesanan berhasil dibuat! Invoice: ${data.invoice_number}`);
         setTimeout(() => setSuccessMessage(''), 5000);
@@ -197,6 +202,7 @@ export default function ManualOrder() {
     setSelectedItems([]);
     setSearchMenu('');
     setSelectedCategory('Semua');
+    setRetailOnly(false);
   };
 
   const handleModeChange = (mode: 'regular' | 'preorder') => {
@@ -276,6 +282,7 @@ export default function ManualOrder() {
             </div>
 
             <div className="flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
+              {selectedOutlet === 'coworking' && <button type="button" onClick={() => { setRetailOnly(value => !value); setSelectedCategory('Semua'); }} className={cn('h-8 px-3.5 rounded-md whitespace-nowrap text-xs font-bold border', retailOnly ? 'bg-amber-500 border-amber-500 text-white' : 'bg-amber-50 border-amber-200 text-amber-700')}>Pesanan Retail</button>}
               {categories.map(category => (
                 <button
                   key={category}
@@ -504,6 +511,15 @@ export default function ManualOrder() {
                     Lunas
                   </button>
                 </div>
+              </div>
+            )}
+
+            {orderMode === 'regular' && paymentMethod === 'Tunai' && paymentStatus === 'lunas' && (
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs font-medium text-slate-500">Uang diterima
+                  <input type="number" min={manualOrderTotal} value={cashReceived || ''} onChange={event => setCashReceived(Number(event.target.value))} className="mt-1 w-full h-10 border border-slate-200 rounded-lg px-3 text-sm" placeholder="Contoh: 100000" />
+                </label>
+                <div className="rounded-lg bg-emerald-50 px-3 py-2"><p className="text-xs text-emerald-700">Kembalian</p><p className="text-lg font-bold text-emerald-800">Rp {Math.max(0, cashReceived - manualOrderTotal).toLocaleString('id-ID')}</p></div>
               </div>
             )}
 

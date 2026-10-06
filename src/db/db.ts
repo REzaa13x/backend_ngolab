@@ -233,6 +233,7 @@ export async function testDbConnection() {
       if (!menuFields.has('inventory_available')) await connection.query('UPDATE menus SET inventory_available = in_stock');
       await connection.query("UPDATE menus SET availability_override = 'auto' WHERE availability_override NOT IN ('auto', 'force_off') OR availability_override IS NULL");
       await connection.query("UPDATE menus SET in_stock = IF(is_active = 1 AND availability_override = 'auto' AND inventory_available = 1, 1, 0)");
+      await connection.query("UPDATE menus SET category = 'Menu Coworking' WHERE outlet = 'coworking' AND category = 'Makanan Ringan'");
       console.log("✅ Menu availability schema verified/created");
     } catch (menuAvailabilityError: any) {
       console.warn("⚠️ Menu availability migration failed:", menuAvailabilityError.message);
