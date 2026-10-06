@@ -33,11 +33,9 @@ export type PrintableOrder = {
 export const PAPER_MM = 58;
 
 const STYLES = `
-  @page { size: ${PAPER_MM}mm auto; margin: 0; }
+  @page { size: ${PAPER_MM}mm auto; margin: 3mm; }
   * { box-sizing: border-box; }
-  html, body { width: ${PAPER_MM}mm; min-width: ${PAPER_MM}mm; margin: 0; padding: 0; }
-  body { font-family: 'Courier New', ui-monospace, monospace; font-size: 10px; color: #000; padding: 3mm; }
-  @media print { html, body { width: ${PAPER_MM}mm; min-width: ${PAPER_MM}mm; } }
+  body { font-family: 'Courier New', ui-monospace, monospace; font-size: 10px; color: #000; margin: 0; padding: 4px; }
   .center { text-align: center; }
   .brand { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
   .sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; }
