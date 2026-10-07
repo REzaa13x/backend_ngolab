@@ -41,9 +41,11 @@ const STYLES = `
   .logo { display: block; width: 34mm; height: 28mm; object-fit: contain; margin: 0 auto 2px; }
   .sub { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; }
   .tagline { font-size: 9px; margin-top: 2px; }
-  .receipt-meta { text-align: center; font-size: 10px; }
-  .receipt-meta td { text-align: center; }
+  .receipt-meta { text-align: left; font-size: 10px; }
+  .receipt-meta td { text-align: left; }
+  .meta-label { display: inline-block; width: 27%; font-weight: 700; }
   .receipt-items th { font-size: 10px; padding: 2px 0 4px; }
+  .receipt-items th.r { width: 32%; }
   .receipt-item td { padding-top: 5px; }
   .receipt-item-detail td { padding-bottom: 4px; }
   .item-name { font-weight: 700; }
@@ -197,10 +199,10 @@ export async function printReceipt(order: PrintableOrder): Promise<boolean> {
   </div>
   <div class="rule"></div>
   <table class="receipt-meta">
-    <tr><td colspan="2">No. Faktur ${escapeHtml(order.invoice_number)}</td></tr>
-    <tr><td colspan="2">Waktu ${escapeHtml(waktu)}</td></tr>
-    <tr><td colspan="2">Pelanggan ${escapeHtml(order.customer_name)}</td></tr>
-    <tr><td colspan="2">Outlet ${escapeHtml(order.outlet || '-')}</td></tr>
+    <tr><td><span class="meta-label">No. Faktur:</span>${escapeHtml(order.invoice_number)}</td></tr>
+    <tr><td><span class="meta-label">Waktu:</span>${escapeHtml(waktu)}</td></tr>
+    <tr><td><span class="meta-label">Pelanggan:</span>${escapeHtml(order.customer_name || '-')}</td></tr>
+    <tr><td><span class="meta-label">Outlet:</span>${escapeHtml(order.outlet || '-')}</td></tr>
   </table>
   <div class="rule"></div>
   <table class="receipt-items">
@@ -214,7 +216,7 @@ export async function printReceipt(order: PrintableOrder): Promise<boolean> {
     ${change > 0 ? `<tr><td class="l">Kembalian</td><td class="r">${formatThermalAmount(change)}</td></tr>` : ''}
   </table>
   <div class="rule"></div>
-  <table class="receipt-meta"><tr><td colspan="2">Status ${escapeHtml(status.toUpperCase())}</td></tr></table>
+  <table class="receipt-meta"><tr><td><span class="meta-label">Status:</span>${escapeHtml(status.toUpperCase())}</td></tr></table>
   <div class="rule"></div>
   <div class="foot">Terima kasih atas kunjungan Anda</div>
   <div class="foot">-- nyo Lab --</div>
