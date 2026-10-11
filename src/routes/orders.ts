@@ -8,7 +8,7 @@ import { requireApiKeyScope } from "../middleware/authApiKey.js";
 import { canUseGenericOrderStatus } from "../lib/preorderRules.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 import { consumeInventoryForOrder, emitInventoryChanges, restoreInventoryForOrder } from "../lib/inventoryDb.js";
-import { processLoyaltyPoints } from "../lib/loyaltyHelper.js";
+import { processLoyaltyPoints, awardOrderPoints } from "../lib/loyaltyHelper.js";
 import { buildOrderItemInsert, externalOrderPaymentState, normalizeExternalOrderItems, orderItemColumnNames } from "../lib/orderItems.js";
 import {
   buildPaymentProofFile,
@@ -258,6 +258,7 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
     
     if (finalPaymentStatus === 'lunas' && user_id) {
       await processLoyaltyPoints(connection, orderId, user_id, customer_name, invoiceNumber, totalPrice);
+      await awardOrderPoints(connection, { orderId, userId: user_id, userName: customer_name, invoiceNumber, totalPrice });
     }
     
     await connection.commit();
@@ -599,12 +600,13 @@ router.post("/:id/verify", requirePaymentStaff, async (req: Request, res: Respon
       [amountPaid, paymentMethod, id]
     );
 
-    // Koin Cashback Logic terpusat
+    // Koin Cashback Logic terpusat & Poin Loyalty
     let cashback = 0;
     if (order.user_id) {
       const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
       const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
       cashback = await processLoyaltyPoints(connection, order.id, order.user_id, userName, order.invoice_number, order.total_price);
+      await awardOrderPoints(connection, { orderId: order.id, userId: order.user_id, userName, invoiceNumber: order.invoice_number, totalPrice: order.total_price });
     }
 
     await connection.commit();
@@ -704,6 +706,7 @@ router.patch("/:id/payment-status", requirePaymentStaff, async (req: Request, re
       const [users]: any = await connection.query("SELECT nama FROM users WHERE id = ?", [order.user_id]);
       const userName = users && users.length > 0 ? users[0].nama : "Pelanggan";
       cashback = await processLoyaltyPoints(connection, order.id, order.user_id, userName, order.invoice_number, order.total_price);
+      await awardOrderPoints(connection, { orderId: order.id, userId: order.user_id, userName, invoiceNumber: order.invoice_number, totalPrice: order.total_price });
     }
 
     await connection.commit();

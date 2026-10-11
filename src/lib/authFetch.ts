@@ -4,7 +4,11 @@ export function withAuthHeaders(initial: HeadersInit | undefined, token: string)
   return headers;
 }
 
-export function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const token = localStorage.getItem('tangolab_auth_token') || '';
-  return fetch(input, { ...init, headers: withAuthHeaders(init.headers, token) });
+  const response = await fetch(input, { ...init, headers: withAuthHeaders(init.headers, token) });
+  if (response.status === 401 && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('tangolab:unauthorized'));
+  }
+  return response;
 }

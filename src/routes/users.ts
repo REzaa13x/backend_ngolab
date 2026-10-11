@@ -4,6 +4,7 @@ import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/passw
 import { normalizeEmail } from "../lib/auth.js";
 import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
 import { requireAuthenticated, requireRoles } from '../middleware/authSession.js';
+import { ensureMemberForUser, getMemberProfile } from "../lib/membershipService.js";
 
 const router = Router();
 const requireUserAdmin = requireRoles('Super Admin', 'Kasir', 'Support');
@@ -133,6 +134,10 @@ router.post("/register", async (req: Request, res: Response) => {
       return res.status(400).json({ message: "ID dan Nama wajib diisi" });
     }
 
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ message: "Password wajib diisi dan minimal 6 karakter" });
+    }
+
     // Cek apakah user sudah terdaftar
     const [existing]: any = await db.query("SELECT id FROM users WHERE id = ?", [id]);
     if (existing.length > 0) {
@@ -156,11 +161,12 @@ router.post("/register", async (req: Request, res: Response) => {
     const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
     const avatar = avatar_url || `https://picsum.photos/seed/${id}/100/100`;
     const userRole = 'Pelanggan';
-    const hashedPassword = password ? await hashPassword(password) : null;
+    const hashedPassword = await hashPassword(password);
 
+    // Keamanan: Kolom password_plain tidak lagi menyimpan plaintext baru (diisi NULL)
     await db.query(
       "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, email, phone, role, password_hash, password_plain) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [id, nama, nim || id, initialCoin, avatar, normalizedEmail, phone || null, userRole, hashedPassword, password || null]
+      [id, nama, nim || id, initialCoin, avatar, normalizedEmail, phone || null, userRole, hashedPassword, null]
     );
 
     // Catat riwayat bonus pendaftaran
@@ -169,6 +175,14 @@ router.post("/register", async (req: Request, res: Response) => {
       "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, 'Bonus Pendaftaran')",
       [txId, id, nama, initialCoin]
     );
+
+    // Otomatis buat profil keanggotaan dan loyalty account
+    const member = await ensureMemberForUser(db, id, {
+      nama,
+      email: normalizedEmail,
+      phone: phone || null,
+      nim: nim || id,
+    });
 
     res.status(201).json({
       message: "User berhasil terdaftar",
@@ -181,7 +195,9 @@ router.post("/register", async (req: Request, res: Response) => {
         email: normalizedEmail,
         phone: phone || null,
         role: userRole,
-        active_vouchers_count: 0
+        active_vouchers_count: 0,
+        memberId: member.id,
+        memberCode: member.member_code,
       }
     });
   } catch (err: any) {
@@ -204,14 +220,28 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     const user = users[0];
-    if (user.password_hash) {
-      if (!password || !(await verifyPassword(password, user.password_hash))) {
-        return res.status(401).json({ message: "User ID / NIM atau password salah" });
-      }
-      if (needsPasswordUpgrade(user.password_hash)) {
-        await upgradeLegacyPassword('users', user.id, password);
-      }
+    if (!user.password_hash) {
+      return res.status(401).json({
+        message: "Akun ini memerlukan pengaturan password sebelum dapat masuk. Silakan hubungi admin atau lakukan reset password.",
+        code: "PASSWORD_SETUP_REQUIRED",
+      });
     }
+
+    if (!password || !(await verifyPassword(password, user.password_hash))) {
+      return res.status(401).json({ message: "User ID / NIM atau password salah" });
+    }
+    if (needsPasswordUpgrade(user.password_hash)) {
+      await upgradeLegacyPassword('users', user.id, password);
+    }
+
+    const member = await ensureMemberForUser(db, user.id, {
+      nama: user.nama,
+      email: user.email,
+      phone: user.phone,
+      nim: user.nim,
+    });
+    const profile = await getMemberProfile(user.id);
+
     res.json({
       message: "Login berhasil",
       user: {
@@ -219,7 +249,11 @@ router.post("/login", async (req: Request, res: Response) => {
         nama: user.nama,
         nim: user.nim,
         coin_balance: user.coin_balance,
-        avatar_url: user.avatar_url
+        avatar_url: user.avatar_url,
+        memberId: member.id,
+        memberCode: member.member_code,
+        currentPoints: profile?.loyalty.currentPoints ?? 0,
+        tier: profile?.tier?.name || "Classmate",
       }
     });
   } catch (err: any) {

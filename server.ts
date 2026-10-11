@@ -26,6 +26,7 @@ import kioskRouter from './src/routes/kiosk.js';
 import promotionsRouter from './src/routes/promotions.js';
 import preordersRouter from './src/routes/preorders.js';
 import apiKeysRouter from './src/routes/apiKeys.js';
+import membershipRouter, { rewardsCatalogRouter, loyaltyStaffRouter } from './src/routes/membership.js';
 import { authenticateAuthorization, getAuthTokenSecret, isRoleAllowed } from './src/lib/authToken.js';
 import { lookupCurrentIdentity, requireRoles, AuthenticatedRequest } from './src/middleware/authSession.js';
 import { assertPaymentProofStorageOutsideRoot, evacuateLegacyPaymentProofDirs, isPublicUploadPath, isSafePaymentProofFilename, isUploadsRequestPath, normalizeRequestPath, paymentProofPathFromUrl } from './src/lib/paymentProof.js';
@@ -219,6 +220,9 @@ async function startServer() {
   app.use('/api/api-keys', apiKeysRouter);
   app.use('/api/ingredients', ingredientsRouter);
   app.use('/api/admin/catalog', catalogRouter);
+  app.use('/api/members', membershipRouter);
+  app.use('/api/rewards', rewardsCatalogRouter);
+  app.use('/api/loyalty', loyaltyStaffRouter);
   app.use('/api/v1', kioskRouter);
   app.use('/api', analyticsRouter);
 

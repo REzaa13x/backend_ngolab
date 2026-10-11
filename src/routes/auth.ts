@@ -4,6 +4,7 @@ import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/passw
 import { normalizeEmail } from "../lib/auth.js";
 import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
 import { getAuthTokenSecret, issueAuthToken } from "../lib/authToken.js";
+import { ensureMemberForUser, getMemberProfile } from "../lib/membershipService.js";
 
 const router = Router();
 
@@ -14,7 +15,6 @@ function authenticatedUser(user: any) {
   );
   return { user, token };
 }
-
 
 // POST /api/auth/login
 router.post("/login", async (req: Request, res: Response) => {
@@ -35,18 +35,33 @@ router.post("/login", async (req: Request, res: Response) => {
 
       const customer = customers[0];
 
-      // Verifikasi password jika akun memiliki password_hash
-      if (customer.password_hash) {
-        if (!password) {
-          return res.status(400).json({ message: "Password wajib diisi untuk akun ini" });
-        }
-        if (!(await verifyPassword(password, customer.password_hash))) {
-          return res.status(401).json({ message: "Password salah" });
-        }
-        if (needsPasswordUpgrade(customer.password_hash)) {
-          await upgradeLegacyPassword('users', customer.id, password);
-        }
+      // Verifikasi password: Jika tidak ada password_hash, tolak passwordless login untuk keamanan
+      if (!customer.password_hash) {
+        return res.status(401).json({
+          message: "Akun ini memerlukan pengaturan password sebelum dapat masuk. Silakan hubungi admin atau lakukan reset password.",
+          code: "PASSWORD_SETUP_REQUIRED",
+        });
       }
+
+      if (!password) {
+        return res.status(400).json({ message: "Password wajib diisi untuk akun ini" });
+      }
+
+      if (!(await verifyPassword(password, customer.password_hash))) {
+        return res.status(401).json({ message: "Password salah" });
+      }
+
+      if (needsPasswordUpgrade(customer.password_hash)) {
+        await upgradeLegacyPassword('users', customer.id, password);
+      }
+
+      // Pastikan akun membership dan loyalty tersedia
+      const member = await ensureMemberForUser(db, customer.id, {
+        nama: customer.nama,
+        phone: customer.phone,
+        nim: customer.nim,
+      });
+      const profile = await getMemberProfile(customer.id);
 
       const user = {
         id: customer.id,
@@ -55,7 +70,11 @@ router.post("/login", async (req: Request, res: Response) => {
         coin_balance: customer.coin_balance,
         avatar_url: customer.avatar_url,
         phone: customer.phone,
-        role: customer.role
+        role: customer.role || "Pelanggan",
+        memberId: member.id,
+        memberCode: member.member_code,
+        currentPoints: profile?.loyalty.currentPoints ?? 0,
+        tier: profile?.tier?.name || "Classmate",
       };
       return res.json({ message: "Login berhasil", ...authenticatedUser(user) });
     }
@@ -64,7 +83,7 @@ router.post("/login", async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Email dan password wajib diisi" });
     }
 
-    // Cek di tabel staff (Super Admin, Kasir, Koki, dll.)
+    // Cek di tabel staff (Super Admin, Kasir, Koki, Support)
     const [staffUsers]: any = await db.query(
       "SELECT id, name, role, email, status, password_hash FROM staff WHERE email = ?",
       [normalizedEmail]
@@ -89,7 +108,7 @@ router.post("/login", async (req: Request, res: Response) => {
         id: user.id,
         name: user.name,
         role: user.role,
-        email: user.email
+        email: user.email,
       };
       return res.json({ message: "Login berhasil", ...authenticatedUser(authenticatedStaff) });
     }
@@ -102,12 +121,29 @@ router.post("/login", async (req: Request, res: Response) => {
 
     if (customers.length > 0) {
       const customer = customers[0];
+
+      if (!customer.password_hash) {
+        return res.status(401).json({
+          message: "Akun ini memerlukan pengaturan password sebelum dapat masuk. Silakan hubungi admin atau lakukan reset password.",
+          code: "PASSWORD_SETUP_REQUIRED",
+        });
+      }
+
       if (!(await verifyPassword(password, customer.password_hash))) {
         return res.status(401).json({ message: "Email atau password salah" });
       }
       if (needsPasswordUpgrade(customer.password_hash)) {
         await upgradeLegacyPassword('users', customer.id, password);
       }
+
+      const member = await ensureMemberForUser(db, customer.id, {
+        nama: customer.nama,
+        email: customer.email,
+        phone: customer.phone,
+        nim: customer.nim,
+      });
+      const profile = await getMemberProfile(customer.id);
+
       const authenticatedCustomer = {
         id: customer.id,
         nama: customer.nama,
@@ -115,8 +151,12 @@ router.post("/login", async (req: Request, res: Response) => {
         coin_balance: customer.coin_balance,
         avatar_url: customer.avatar_url,
         phone: customer.phone,
-        role: customer.role,
-        email: customer.email
+        role: customer.role || "Pelanggan",
+        email: customer.email,
+        memberId: member.id,
+        memberCode: member.member_code,
+        currentPoints: profile?.loyalty.currentPoints ?? 0,
+        tier: profile?.tier?.name || "Classmate",
       };
       return res.json({ message: "Login berhasil", ...authenticatedUser(authenticatedCustomer) });
     }
@@ -128,90 +168,87 @@ router.post("/login", async (req: Request, res: Response) => {
 });
 
 // POST /api/auth/register
+// CATATAN KEAMANAN: Registrasi publik HANYA membuat akun Pelanggan/Member.
+// Pembuatan staf (Kasir, Koki, Support, Admin) hanya diperbolehkan melalui rute terproteksi /api/staff oleh Super Admin.
 router.post("/register", async (req: Request, res: Response) => {
   try {
-    const { name, email, password, role: _role, phone, phone_number } = req.body;
+    const { name, email, password, phone, phone_number } = req.body;
     const normalizedEmail = normalizeEmail(email);
+    const contactPhone = phone_number || phone || null;
 
-    // Hybrid Check: Jika menggunakan phone_number dan name, asumsikan ini Customer (Pelanggan)
-    if (phone_number && name) {
-      // Cek apakah nomor telepon sudah terdaftar
-      const [existing]: any = await db.query("SELECT id FROM users WHERE phone = ?", [phone_number]);
-      if (existing.length > 0) {
+    if (!name || (!normalizedEmail && !contactPhone)) {
+      return res.status(400).json({ message: "Nama dan setidaknya email atau nomor telepon wajib diisi" });
+    }
+
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ message: "Password wajib diisi dan minimal 6 karakter" });
+    }
+
+    // Cek duplikasi nomor telepon jika disertakan
+    if (contactPhone) {
+      const [existingPhone]: any = await db.query("SELECT id FROM users WHERE phone = ?", [contactPhone]);
+      if (existingPhone.length > 0) {
         return res.status(400).json({ message: "Nomor telepon sudah terdaftar" });
       }
-      if (normalizedEmail) {
-        const [existingEmail]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
-        if (existingEmail.length > 0) {
-          return res.status(400).json({ message: "Email sudah terdaftar sebagai pelanggan" });
-        }
-        const [existingStaffEmail]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
-        if (existingStaffEmail.length > 0) {
-          return res.status(400).json({ message: "Email sudah terdaftar sebagai staf" });
-        }
+    }
+
+    // Cek duplikasi email jika disertakan
+    if (normalizedEmail) {
+      const [existingEmail]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+      if (existingEmail.length > 0) {
+        return res.status(400).json({ message: "Email sudah terdaftar sebagai pelanggan" });
       }
+      const [existingStaffEmail]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
+      if (existingStaffEmail.length > 0) {
+        return res.status(400).json({ message: "Email sudah terdaftar sebagai staf" });
+      }
+    }
 
-      const newId = `u-${Date.now()}`;
-      const initialCoin = 100; // Bonus pendaftaran 100 koin gratis
-      const avatar = `https://picsum.photos/seed/${newId}/100/100`;
-      const hashedPassword = password ? await hashPassword(password) : null;
-      const userEmail = normalizedEmail;
+    const newId = `u-${Date.now()}`;
+    const initialCoin = 100; // Bonus pendaftaran legacy
+    const avatar = `https://picsum.photos/seed/${newId}/100/100`;
+    const hashedPassword = await hashPassword(password);
 
-      await db.query(
-        "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, phone, role, email, password_hash, password_plain) VALUES (?, ?, ?, ?, ?, ?, 'Pelanggan', ?, ?, ?)",
-        [newId, name, phone_number, initialCoin, avatar, phone_number, userEmail, hashedPassword, password || null]
-      );
+    // Simpan akun customer: role strictly 'Pelanggan', TIDAK MENULIS password_plain baru
+    await db.query(
+      "INSERT INTO users (id, nama, nim, coin_balance, avatar_url, phone, role, email, password_hash, password_plain) VALUES (?, ?, ?, ?, ?, ?, 'Pelanggan', ?, ?, NULL)",
+      [newId, name, contactPhone || newId, initialCoin, avatar, contactPhone, normalizedEmail, hashedPassword]
+    );
 
-      // Catat riwayat bonus pendaftaran
-      const txId = `ct-${Date.now()}`;
+    // Catat riwayat bonus pendaftaran koin legacy
+    const txId = `ct-${Date.now()}`;
+    try {
       await db.query(
         "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, 'Bonus Pendaftaran')",
         [txId, newId, name, initialCoin]
       );
+    } catch (_) {}
 
-      const registeredCustomer = {
-        id: newId,
-        nama: name,
-        nim: phone_number,
-        coin_balance: initialCoin,
-        avatar_url: avatar,
-        phone: phone_number,
-        role: "Pelanggan"
-      };
-      return res.status(201).json({ message: "Registrasi berhasil", ...authenticatedUser(registeredCustomer) });
-    }
-
-    if (!name || !normalizedEmail || !password) {
-      return res.status(400).json({ message: "Nama, email, dan password wajib diisi" });
-    }
-
-    // Cek apakah email sudah terdaftar di staff
-    const [existingStaff]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
-    if (existingStaff.length > 0) {
-      return res.status(400).json({ message: "Email sudah terdaftar sebagai staf" });
-    }
-
-    // Cek apakah email sudah terdaftar di users
-    const [existingUser]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
-    if (existingUser.length > 0) {
-      return res.status(400).json({ message: "Email sudah terdaftar sebagai pelanggan" });
-    }
-
-    const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}-${Date.now().toString().slice(-4)}`;
-    const hashedPassword = await hashPassword(password);
-    const publicRoles = new Set(['Kasir', 'Koki', 'Support']);
-    const assignedRole = publicRoles.has(String(_role)) ? String(_role) : 'Kasir';
-
-    await db.query(
-      "INSERT INTO staff (id, name, role, email, phone, password_hash, status) VALUES (?, ?, ?, ?, ?, ?, 'active')",
-      [newId, name, assignedRole, normalizedEmail, phone || null, hashedPassword]
-    );
-
-    const registeredStaff = { id: newId, name, role: assignedRole, email: normalizedEmail };
-    res.status(201).json({
-      message: "Registrasi berhasil",
-      ...authenticatedUser(registeredStaff)
+    // Buat profil membership dan loyalty account baru secara otomatis
+    const member = await ensureMemberForUser(db, newId, {
+      nama: name,
+      email: normalizedEmail,
+      phone: contactPhone,
+      nim: contactPhone || null,
     });
+    const profile = await getMemberProfile(newId);
+
+    const registeredCustomer = {
+      id: newId,
+      nama: name,
+      nim: contactPhone || newId,
+      coin_balance: initialCoin,
+      avatar_url: avatar,
+      phone: contactPhone,
+      role: "Pelanggan",
+      email: normalizedEmail,
+      memberId: member.id,
+      memberCode: member.member_code,
+      currentPoints: profile?.loyalty.currentPoints ?? 0,
+      tier: profile?.tier?.name || "Classmate",
+    };
+
+    return res.status(201).json({ message: "Registrasi berhasil", ...authenticatedUser(registeredCustomer) });
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mendaftar akun", error: err.message });
   }
