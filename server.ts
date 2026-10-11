@@ -27,6 +27,7 @@ import promotionsRouter from './src/routes/promotions.js';
 import preordersRouter from './src/routes/preorders.js';
 import apiKeysRouter from './src/routes/apiKeys.js';
 import membershipRouter, { rewardsCatalogRouter, loyaltyStaffRouter } from './src/routes/membership.js';
+import { coinsRouter, promosRouter, vouchersRouter, menusRouter, userOrdersRouter } from './src/routes/pointlabRoutes.js';
 import { authenticateAuthorization, getAuthTokenSecret, isRoleAllowed } from './src/lib/authToken.js';
 import { lookupCurrentIdentity, requireRoles, AuthenticatedRequest } from './src/middleware/authSession.js';
 import { assertPaymentProofStorageOutsideRoot, evacuateLegacyPaymentProofDirs, isPublicUploadPath, isSafePaymentProofFilename, isUploadsRequestPath, normalizeRequestPath, paymentProofPathFromUrl } from './src/lib/paymentProof.js';
@@ -35,26 +36,35 @@ import { createRateLimit } from './src/middleware/rateLimit.js';
 async function startServer() {
   const app = express();
   const httpServer = createServer(app);
-  const io = new Server(httpServer, {
-    cors: {
-      origin: process.env.CORS_ORIGIN
-        ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean)
-        : false,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-      credentials: true,
-    },
-  });
   const port = Number(process.env.PORT || 3000);
   const configuredOrigins = (process.env.CORS_ORIGIN || '')
     .split(',')
     .map(origin => origin.trim())
     .filter(Boolean);
-  const corsOrigin = configuredOrigins.length
-    ? (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
-        if (!origin || configuredOrigins.includes(origin)) callback(null, true);
-        else callback(new Error('Origin tidak diizinkan'));
-      }
-    : false;
+  const corsOrigin = (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
+    if (!origin) return callback(null, true);
+    if (configuredOrigins.includes(origin)) return callback(null, true);
+    // Allow localhost & 127.0.0.1 on all ports (e.g. 3000, 5173, 5174, etc.)
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+    // Allow production and staging domains
+    if (/^https?:\/\/([a-z0-9-]+\.)?ngolab\.online$/.test(origin)) {
+      return callback(null, true);
+    }
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    callback(new Error('Origin tidak diizinkan'));
+  };
+
+  const io = new Server(httpServer, {
+    cors: {
+      origin: corsOrigin,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      credentials: true,
+    },
+  });
 
   app.use(cors({ origin: corsOrigin, credentials: true }));
   app.use(express.json({ limit: '20mb' }));
@@ -206,8 +216,17 @@ async function startServer() {
   app.use('/api/staff', staffRouter);
   app.use('/api/shifts', shiftsRouter);
   app.use('/api/audit-logs', auditLogsRouter);
+  app.use('/api/orders', userOrdersRouter);
   app.use('/api/orders', orderSimulationRouter);
   app.use('/api/orders', externalRateLimit, ordersRouter);
+  app.use('/api/coins', coinsRouter);
+  app.use('/api/promos', promosRouter);
+  app.use('/api/vouchers', vouchersRouter);
+  app.use('/api/menus', menusRouter);
+  app.get('/api/me/loyalty/balance', (req, res, next) => {
+    req.url = '/me/loyalty/balance';
+    membershipRouter(req, res, next);
+  });
   app.use('/api/users', usersRouter);
   app.use('/api/coin-promos', coinPromosRouter);
   app.use('/api/menu', menuRouter);

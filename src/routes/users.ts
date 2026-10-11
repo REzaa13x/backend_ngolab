@@ -1,13 +1,41 @@
 import { Router, Request, Response } from "express";
+import path from "path";
+import fs from "fs";
+import multer from "multer";
 import { db } from "../db/db.js";
 import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
 import { normalizeEmail } from "../lib/auth.js";
 import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
+import { isRoleAllowed } from "../lib/authToken.js";
 import { requireAuthenticated, requireRoles } from '../middleware/authSession.js';
 import { ensureMemberForUser, getMemberProfile } from "../lib/membershipService.js";
 
 const router = Router();
 const requireUserAdmin = requireRoles('Super Admin', 'Kasir', 'Support');
+
+// ─── Multer Config Avatar ───────────────────────────────────────────────────
+const avatarUploadDir = path.join(process.cwd(), "public", "uploads", "avatars");
+if (!fs.existsSync(avatarUploadDir)) {
+  fs.mkdirSync(avatarUploadDir, { recursive: true });
+}
+
+const avatarStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, avatarUploadDir),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `avatar-${Date.now()}-${Math.floor(Math.random() * 1000)}${ext}`);
+  },
+});
+
+const uploadAvatar = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Format gambar tidak didukung. Gunakan JPG, PNG, WEBP, atau GIF."));
+  },
+});
 
 // GET /api/users
 router.get("/", requireUserAdmin, async (_req: Request, res: Response) => {
@@ -40,6 +68,107 @@ router.get("/", requireUserAdmin, async (_req: Request, res: Response) => {
     res.json(users);
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil data pelanggan", error: err.message });
+  }
+});
+
+// GET /api/users/profile — Mengambil profil user & saldo koin saat ini
+router.get("/profile", requireAuthenticated, async (req: Request, res: Response) => {
+  try {
+    const auth = (req as any).auth;
+    const [rows]: any = await db.query(
+      "SELECT id, nama, nim, phone, avatar_url, coin_balance, rfid_tag_id, email, role FROM users WHERE id = ?",
+      [auth.id]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "User tidak ditemukan" });
+    }
+    const user = rows[0];
+    const member = await ensureMemberForUser(db, user.id, {
+      nama: user.nama,
+      phone: user.phone,
+      nim: user.nim,
+      email: user.email,
+    });
+    const profile = await getMemberProfile(user.id);
+
+    res.json({
+      id: user.id,
+      nama: user.nama,
+      nim: user.nim || "",
+      phone: user.phone || "",
+      avatar_url: user.avatar_url || "",
+      coin_balance: user.coin_balance || 0,
+      rfid_tag_id: user.rfid_tag_id || "",
+      memberId: member.id,
+      memberCode: member.member_code,
+      currentPoints: profile?.loyalty.currentPoints ?? 0,
+      tier: profile?.tier?.name || "Classmate",
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: "Gagal mengambil profil", error: err.message });
+  }
+});
+
+// PUT /api/users/profile — Update nama lengkap & nomor telepon
+router.put("/profile", requireAuthenticated, async (req: Request, res: Response) => {
+  try {
+    const auth = (req as any).auth;
+    const { nama, phone, telp, avatar_url } = req.body;
+    const resolvedPhone = phone !== undefined ? phone : telp;
+    const updates: string[] = [];
+    const params: any[] = [];
+    if (nama !== undefined) { updates.push("nama = ?"); params.push(String(nama).trim()); }
+    if (resolvedPhone !== undefined) { updates.push("phone = ?"); params.push(String(resolvedPhone).trim()); }
+    if (avatar_url !== undefined) { updates.push("avatar_url = ?"); params.push(String(avatar_url).trim()); }
+    if (updates.length === 0) {
+      return res.status(400).json({ success: false, message: "Tidak ada data yang diperbarui" });
+    }
+    params.push(auth.id);
+    await db.query(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, params);
+    res.json({ success: true, message: "Profil berhasil diperbarui" });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: "Gagal memperbarui profil", error: err.message });
+  }
+});
+
+// PUT /api/users/password — Ganti password akun di modal Edit Profile
+router.put("/password", requireAuthenticated, async (req: Request, res: Response) => {
+  try {
+    const auth = (req as any).auth;
+    const { password, new_password } = req.body;
+    const targetPassword = new_password || password;
+    if (!targetPassword || String(targetPassword).length < 6) {
+      return res.status(400).json({ success: false, message: "Password minimal 6 karakter" });
+    }
+    const hashed = await hashPassword(targetPassword);
+    await db.query("UPDATE users SET password_hash = ? WHERE id = ?", [hashed, auth.id]);
+    res.json({ success: true, message: "Password berhasil diperbarui" });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: "Gagal memperbarui password", error: err.message });
+  }
+});
+
+// POST /api/users/avatar — Upload & ganti foto profil
+router.post("/avatar", requireAuthenticated, uploadAvatar.single("file"), async (req: Request, res: Response) => {
+  try {
+    const auth = (req as any).auth;
+    let avatarUrl = "";
+    if (req.file) {
+      avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    } else if (req.body?.avatar_url) {
+      avatarUrl = req.body.avatar_url;
+    } else {
+      return res.status(400).json({ success: false, message: "File gambar atau avatar_url wajib disertakan" });
+    }
+
+    await db.query("UPDATE users SET avatar_url = ? WHERE id = ?", [avatarUrl, auth.id]);
+    res.json({
+      success: true,
+      message: "Foto profil berhasil diperbarui",
+      avatar_url: avatarUrl,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: "Gagal mengunggah foto profil", error: err.message });
   }
 });
 
@@ -401,10 +530,18 @@ router.post("/:user_id/study-sessions", requireAuthenticated, async (req: Reques
 });
 
 // PUT /api/users/:id — Update Profile User (Nama & Avatar secara permanen)
-router.put("/:id", requireUserAdmin, async (req: Request, res: Response) => {
+router.put("/:id", requireAuthenticated, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { nama, avatar_url, nim, email, phone, password } = req.body;
+    const auth = (req as any).auth;
+    const isOwner = String(auth?.id) === String(id);
+    const isAdmin = isRoleAllowed(auth, ['Super Admin', 'Admin', 'Kasir', 'Support']);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: "Anda tidak memiliki izin untuk mengedit profil ini" });
+    }
+
+    const { nama, avatar_url, nim, email, phone, telp, password } = req.body;
+    const resolvedPhone = phone !== undefined ? phone : telp;
     const normalizedUpdateEmail = email === undefined ? undefined : normalizeEmail(email);
 
     // Pastikan user ada
@@ -418,15 +555,15 @@ router.put("/:id", requireUserAdmin, async (req: Request, res: Response) => {
 
     if (nama !== undefined) {
       updates.push("nama = ?");
-      params.push(nama);
+      params.push(String(nama).trim());
     }
     if (avatar_url !== undefined) {
       updates.push("avatar_url = ?");
-      params.push(avatar_url);
+      params.push(String(avatar_url).trim());
     }
     if (nim !== undefined) {
       updates.push("nim = ?");
-      params.push(nim);
+      params.push(String(nim).trim());
     }
     if (email !== undefined) {
       if (normalizedUpdateEmail) {
@@ -438,9 +575,9 @@ router.put("/:id", requireUserAdmin, async (req: Request, res: Response) => {
       updates.push("email = ?");
       params.push(normalizedUpdateEmail);
     }
-    if (phone !== undefined) {
+    if (resolvedPhone !== undefined) {
       updates.push("phone = ?");
-      params.push(phone);
+      params.push(String(resolvedPhone).trim());
     }
     if (password !== undefined && password !== '') {
       updates.push("password_hash = ?");
@@ -462,11 +599,42 @@ router.put("/:id", requireUserAdmin, async (req: Request, res: Response) => {
     );
 
     res.json({
+      success: true,
       message: "Profil berhasil diperbarui secara permanen di database",
       user: updatedUser[0]
     });
   } catch (err: any) {
     res.status(500).json({ message: "Gagal memperbarui profil", error: err.message });
+  }
+});
+
+// POST /api/users/:id/avatar — Upload & ganti foto profil user
+router.post("/:id/avatar", requireAuthenticated, uploadAvatar.single("file"), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const auth = (req as any).auth;
+    const isOwner = String(auth?.id) === String(id);
+    const isAdmin = isRoleAllowed(auth, ['Super Admin', 'Admin', 'Kasir', 'Support']);
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: "Anda tidak memiliki izin untuk mengedit avatar akun ini" });
+    }
+    let avatarUrl = "";
+    if (req.file) {
+      avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    } else if (req.body?.avatar_url) {
+      avatarUrl = req.body.avatar_url;
+    } else {
+      return res.status(400).json({ success: false, message: "File gambar atau avatar_url wajib disertakan" });
+    }
+
+    await db.query("UPDATE users SET avatar_url = ? WHERE id = ?", [avatarUrl, id]);
+    res.json({
+      success: true,
+      message: "Foto profil berhasil diperbarui",
+      avatar_url: avatarUrl,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: "Gagal mengunggah foto profil", error: err.message });
   }
 });
 

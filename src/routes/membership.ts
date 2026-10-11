@@ -7,8 +7,10 @@ import {
   getMemberProfile,
   getLoyaltyBalance,
   getLoyaltyTransactions,
+  creditPoints,
   manualAdjustPoints,
   evaluateMemberTier,
+  LoyaltyTxType,
 } from "../lib/membershipService.js";
 import {
   getActiveRewardsCatalog,
@@ -185,6 +187,116 @@ router.post("/:memberId/rewards/:rewardId/redeem", requireAuthenticated, async (
     const status = err.statusCode || 500;
     const code = err.code || "INTERNAL_ERROR";
     res.status(status).json({ code, message: err.message });
+  }
+});
+
+// GET /api/members/:memberId/loyalty/balance — Saldo poin member
+router.get("/:memberId/loyalty/balance", requireAuthenticated, async (req: Request, res: Response) => {
+  try {
+    const targetMemberId = req.params.memberId;
+    const currentAuth = (req as any).auth;
+
+    if (currentAuth?.role === "Pelanggan") {
+      const ownMember = await resolveAuthMember(req);
+      if (!ownMember || String(ownMember.id) !== String(targetMemberId)) {
+        return res.status(403).json({ code: "FORBIDDEN", message: "Anda hanya dapat melihat data akun sendiri" });
+      }
+    }
+
+    const balance = await getLoyaltyBalance(targetMemberId);
+    const profile = await getMemberProfile(targetMemberId);
+
+    const data = {
+      memberId: targetMemberId,
+      currentPoints: balance.currentPoints,
+      pointsBalance: balance.currentPoints,
+      lifetimeEarned: balance.lifetimeEarnedPoints,
+      lifetimeRedeemed: balance.lifetimeRedeemedPoints,
+      currentTier: profile?.tier?.name || "Classmate",
+    };
+
+    res.json({
+      status: "success",
+      success: true,
+      data,
+      ...data,
+    });
+  } catch (err: any) {
+    res.status(500).json({ code: "INTERNAL_ERROR", message: "Gagal memuat saldo poin", error: err.message });
+  }
+});
+
+// POST /api/members/:memberId/loyalty/points/earn — Tambah poin game atau belajar (Idempoten)
+router.post("/:memberId/loyalty/points/earn", requireAuthenticated, async (req: Request, res: Response) => {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const { memberId } = req.params;
+    const currentAuth = (req as any).auth;
+
+    if (currentAuth?.role === "Pelanggan") {
+      const ownMember = await resolveAuthMember(req);
+      if (!ownMember || String(ownMember.id) !== String(memberId)) {
+        await connection.rollback();
+        return res.status(403).json({ code: "FORBIDDEN", message: "Anda hanya dapat menambahkan poin untuk akun sendiri" });
+      }
+    }
+
+    const { points, source, referenceType, referenceId, description } = req.body;
+    const idempotencyKey = (req.headers["idempotency-key"] as string) || (req.body?.idempotencyKey as string) || null;
+    const pointsNum = Math.floor(Number(points));
+
+    if (isNaN(pointsNum) || pointsNum <= 0) {
+      await connection.rollback();
+      return res.status(400).json({ code: "VALIDATION_ERROR", message: "Jumlah poin wajib angka lebih dari 0" });
+    }
+
+    const txType: LoyaltyTxType = (source === "GAME" ? "GAMIFICATION" : (source === "STUDY" ? "BONUS" : "GAMIFICATION"));
+
+    const creditResult = await creditPoints({
+      connection,
+      memberId,
+      points: pointsNum,
+      transactionType: txType,
+      referenceType: referenceType || (source === "GAME" ? "GAME_PLAY" : "STUDY_SESSION"),
+      referenceId: referenceId || null,
+      idempotencyKey,
+      description: description || `Perolehan poin dari ${source || 'aktivitas'}`,
+    });
+
+    // Sinkronkan juga ke saldo koin legacy users.coin_balance jika belum pernah tercatat
+    if (!creditResult.repeated) {
+      const [members]: any = await connection.query("SELECT user_id FROM members WHERE id = ?", [memberId]);
+      if (members.length > 0) {
+        await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [creditResult.credited, members[0].user_id]);
+      }
+    }
+
+    await connection.commit();
+
+    const txId = `ltx-${Date.now()}`;
+    const resultData = {
+      transactionId: txId,
+      memberId,
+      transactionType: "EARN",
+      points: creditResult.credited,
+      currentPoints: creditResult.newBalance,
+      referenceType: referenceType || "GAME_PLAY",
+      referenceId: referenceId || null,
+    };
+
+    const statusCode = creditResult.repeated ? 200 : 201;
+    res.status(statusCode).json({
+      status: "success",
+      success: true,
+      data: resultData,
+      ...resultData,
+    });
+  } catch (err: any) {
+    await connection.rollback();
+    res.status(500).json({ code: "INTERNAL_ERROR", message: "Gagal menambahkan poin loyalty", error: err.message });
+  } finally {
+    connection.release();
   }
 });
 
