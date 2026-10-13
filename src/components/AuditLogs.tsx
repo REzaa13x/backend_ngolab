@@ -33,13 +33,21 @@ export default function AuditLogs() {
 
   useEffect(() => {
     authFetch('/api/audit-logs')
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then(data => {
-        setLogs(data);
+        if (Array.isArray(data)) {
+          setLogs(data);
+        } else {
+          setLogs([]);
+        }
         setLoading(false);
       })
       .catch(err => {
         console.error("Failed to fetch audit logs:", err);
+        setLogs([]);
         setLoading(false);
       });
   }, []);
