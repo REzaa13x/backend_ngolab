@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import socket from '../lib/socket';
 import { authFetch } from '../lib/authFetch';
+import { buildSalesAxisScale, formatRupiah } from '../lib/reporting';
 import { 
   TrendingUp, 
   Users, 
@@ -42,13 +43,28 @@ import {
 
 type ChartType = 'bar' | 'line' | 'pie';
 
+interface SalesPoint {
+  day: string;
+  sales: number;
+}
+
+const DEFAULT_SALES_DATA: SalesPoint[] = [
+  { day: 'Sen', sales: 0 },
+  { day: 'Sel', sales: 0 },
+  { day: 'Rab', sales: 0 },
+  { day: 'Kam', sales: 0 },
+  { day: 'Jum', sales: 0 },
+  { day: 'Sab', sales: 0 },
+  { day: 'Min', sales: 0 },
+];
+
 export default function Dashboard() {
   const [stats, setStats] = useState({
     totalRevenue: 0,
     pendingOrders: 0,
     distributedCoins: 0
   });
-  const [salesData, setSalesData] = useState([]);
+  const [salesData, setSalesData] = useState<SalesPoint[]>(DEFAULT_SALES_DATA);
   const [chartType, setChartType] = useState<ChartType>('bar');
   const [isExporting, setIsExporting] = useState(false);
   const [selectedTx, setSelectedTx] = useState<any | null>(null);
@@ -79,8 +95,8 @@ export default function Dashboard() {
     doc.text('RINGKASAN FINANSIAL', 20, 55);
     
     doc.setFontSize(10);
-    doc.text(`Total Pemasukan: Rp ${(stats?.totalRevenue ?? 0).toLocaleString()}`, 20, 65);
-    doc.text(`Koin Terdistribusi: ${(stats?.distributedCoins ?? 0).toLocaleString()}`, 100, 65);
+    doc.text(`Total Pemasukan: ${formatRupiah(stats?.totalRevenue ?? 0)}`, 20, 65);
+    doc.text(`Koin Terdistribusi: ${(stats?.distributedCoins ?? 0).toLocaleString('id-ID')}`, 100, 65);
 
     // Table
     autoTable(doc, {
@@ -92,7 +108,7 @@ export default function Dashboard() {
         t.date, 
         t.method, 
         t.status.toUpperCase(), 
-        `Rp ${t.amount.toLocaleString()}`
+        formatRupiah(t.amount)
       ]),
       headStyles: { fillColor: [79, 70, 229], fontSize: 10, halign: 'center' },
       bodyStyles: { fontSize: 9 },
@@ -142,7 +158,14 @@ export default function Dashboard() {
           return res.json();
         })
         .then(data => {
-          if (Array.isArray(data)) setSalesData(data);
+          if (Array.isArray(data) && data.length > 0) {
+            setSalesData(
+              data.map((item: any) => ({
+                day: String(item.day || ''),
+                sales: Number(item.sales || 0),
+              }))
+            );
+          }
         })
         .catch(err => console.error("Failed to fetch sales data:", err));
 
@@ -181,10 +204,16 @@ export default function Dashboard() {
     };
   }, []);
 
+  const chartData = salesData.length > 0 ? salesData : DEFAULT_SALES_DATA;
+  const yAxisScale = useMemo(
+    () => buildSalesAxisScale(chartData.map(item => item.sales)),
+    [chartData]
+  );
+
   const summaryCards = [
     { 
       label: 'Total Pemasukan', 
-      value: `Rp ${(stats?.totalRevenue ?? 0).toLocaleString()}`, 
+      value: formatRupiah(stats?.totalRevenue ?? 0), 
       change: '+12.5%', 
       isPositive: true, 
       icon: TrendingUp,
@@ -200,7 +229,7 @@ export default function Dashboard() {
     },
     { 
       label: 'Koin Terdistribusi', 
-      value: (stats?.distributedCoins ?? 0).toLocaleString(), 
+      value: (stats?.distributedCoins ?? 0).toLocaleString('id-ID'), 
       change: '+18.2%', 
       isPositive: true, 
       icon: Wallet,
@@ -212,7 +241,7 @@ export default function Dashboard() {
     switch (chartType) {
       case 'line':
         return (
-          <LineChart data={salesData} margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
+          <LineChart data={chartData} margin={{ top: 10, right: 16, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
             <XAxis 
               dataKey="day" 
@@ -222,10 +251,13 @@ export default function Dashboard() {
               dy={10}
             />
             <YAxis 
+              domain={yAxisScale.domain}
+              ticks={yAxisScale.ticks}
+              width={yAxisScale.width}
               axisLine={false} 
               tickLine={false} 
-              tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 500 }}
-              tickFormatter={(value) => `Rp ${value / 1000000}jt`}
+              tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 600 }}
+              tickFormatter={(value) => formatRupiah(value)}
             />
             <Tooltip 
               contentStyle={{ 
@@ -235,7 +267,7 @@ export default function Dashboard() {
                 fontSize: '12px',
                 fontWeight: 'bold'
               }}
-              formatter={(value: any) => [`Rp ${Number(value || 0).toLocaleString()}`, 'Penjualan']}
+              formatter={(value: any) => [formatRupiah(value), 'Penjualan']}
             />
             <Line 
               type="monotone" 
@@ -251,7 +283,7 @@ export default function Dashboard() {
         return (
           <PieChart>
             <Pie
-              data={salesData}
+              data={chartData}
               cx="50%"
               cy="50%"
               innerRadius={60}
@@ -260,7 +292,7 @@ export default function Dashboard() {
               dataKey="sales"
               nameKey="day"
             >
-              {Array.isArray(salesData) && salesData.map((entry, index) => (
+              {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={['#4F46E5', '#6366F1', '#818CF8', '#A5B4FC', '#C7D2FE', '#E0E7FF', '#EEF2FF'][index % 7]} />
               ))}
             </Pie>
@@ -272,13 +304,13 @@ export default function Dashboard() {
                 fontSize: '12px',
                 fontWeight: 'bold'
               }}
-              formatter={(value: any) => [`Rp ${Number(value || 0).toLocaleString()}`, 'Penjualan']}
+              formatter={(value: any) => [formatRupiah(value), 'Penjualan']}
             />
           </PieChart>
         );
       default:
         return (
-          <BarChart data={salesData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+          <BarChart data={chartData} margin={{ top: 10, right: 16, left: 4, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
             <XAxis 
               dataKey="day" 
@@ -288,10 +320,13 @@ export default function Dashboard() {
               dy={10}
             />
             <YAxis 
+              domain={yAxisScale.domain}
+              ticks={yAxisScale.ticks}
+              width={yAxisScale.width}
               axisLine={false} 
               tickLine={false} 
-              tick={{ fill: '#94A3B8', fontSize: 10, fontWeight: 500 }}
-              tickFormatter={(value) => `Rp ${value / 1000000}jt`}
+              tick={{ fill: '#94A3B8', fontSize: 11, fontWeight: 600 }}
+              tickFormatter={(value) => formatRupiah(value)}
             />
             <Tooltip 
               cursor={{ fill: '#F8FAFC' }}
@@ -302,11 +337,11 @@ export default function Dashboard() {
                 fontSize: '12px',
                 fontWeight: 'bold'
               }}
-              formatter={(value: any) => [`Rp ${Number(value || 0).toLocaleString()}`, 'Penjualan']}
+              formatter={(value: any) => [formatRupiah(value), 'Penjualan']}
             />
             <Bar dataKey="sales" radius={[6, 6, 0, 0]} barSize={40}>
-              {Array.isArray(salesData) && salesData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={index === salesData.length - 1 ? '#4F46E5' : '#E2E8F0'} />
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={index === chartData.length - 1 ? '#4F46E5' : '#E2E8F0'} />
               ))}
             </Bar>
           </BarChart>
@@ -482,7 +517,7 @@ export default function Dashboard() {
                         {row.method}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm font-bold text-slate-900">Rp {row.amount.toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm font-bold text-slate-900">{formatRupiah(row.amount)}</td>
                     <td className="px-6 py-4">
                       <span className={cn(
                         "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
@@ -530,7 +565,7 @@ export default function Dashboard() {
                 ))}
                 <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total</span>
-                  <span className="font-black text-indigo-600">Rp {Number(selectedTx.amount || 0).toLocaleString()}</span>
+                  <span className="font-black text-indigo-600">{formatRupiah(selectedTx.amount || 0)}</span>
                 </div>
               </div>
               {selectedTx.items?.length > 0 && (
@@ -539,7 +574,7 @@ export default function Dashboard() {
                   {selectedTx.items.map((item: any, idx: number) => (
                     <div key={idx} className="flex justify-between text-xs">
                       <span className="text-slate-600 font-medium">{item.quantity}x {item.name}</span>
-                      <span className="font-bold text-slate-800">Rp {Number(item.price || 0).toLocaleString()}</span>
+                      <span className="font-bold text-slate-800">{formatRupiah(item.price || 0)}</span>
                     </div>
                   ))}
                 </div>
@@ -598,4 +633,3 @@ export default function Dashboard() {
 function cn(...classes: any[]) {
   return classes.filter(Boolean).join(' ');
 }
-

@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { authFetch } from '../lib/authFetch';
+import { buildSalesAxisScale, formatRupiah } from '../lib/reporting';
 import { PaymentProofPreview } from './PaymentProofPreview';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -469,7 +470,10 @@ export default function SalesReport() {
                   axisLine={false} 
                   tickLine={false} 
                   tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} 
-                  tickFormatter={(val) => `Rp${val/1000}k`}
+                  domain={buildSalesAxisScale((reportData.monthlyData || []).map((m: any) => m.sales)).domain}
+                  ticks={buildSalesAxisScale((reportData.monthlyData || []).map((m: any) => m.sales)).ticks}
+                  width={buildSalesAxisScale((reportData.monthlyData || []).map((m: any) => m.sales)).width}
+                  tickFormatter={(val) => formatRupiah(val)}
                 />
                 <Tooltip 
                   cursor={{ fill: '#f8fafc' }}
@@ -481,6 +485,7 @@ export default function SalesReport() {
                   }}
                   itemStyle={{ fontSize: '12px', fontWeight: 900, color: '#1e293b' }}
                   labelStyle={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}
+                  formatter={(val: any) => [formatRupiah(val), 'Penjualan']}
                 />
                 <Bar dataKey="sales" radius={[8, 8, 0, 0]} barSize={40}>
                   {reportData.monthlyData.map((entry: any, index: number) => (
@@ -532,7 +537,7 @@ export default function SalesReport() {
                         <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
                         <span className="text-xs font-black text-slate-700 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">{cat.name}</span>
                      </div>
-                     <span className="text-xs font-mono font-bold text-slate-400">Rp {(cat.value/1000000).toFixed(1)}M</span>
+                     <span className="text-xs font-mono font-bold text-slate-400">{formatRupiah(cat.value)}</span>
                   </div>
                ))}
             </div>
