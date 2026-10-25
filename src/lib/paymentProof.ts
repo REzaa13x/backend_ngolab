@@ -161,6 +161,7 @@ export async function buildPaymentProofFile(buffer: Buffer, id: string): Promise
 // daftar hitam berbasis teks selalu dapat dilewati ('%7E' untuk alias nama pendek NTFS, '%2e',
 // '%73torage', 'storage%5C', garis miring ganda, segmen '.'/'..').
 const PUBLIC_UPLOAD_DIRS = new Set([
+  'avatars',
   'brand',
   'digital-board',
   'menus',

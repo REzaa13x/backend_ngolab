@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS `loyalty_periods` (
   UNIQUE KEY `uq_loyalty_periods_code` (`code`),
   KEY `idx_loyalty_periods_status` (`status`),
   KEY `idx_loyalty_periods_dates` (`start_date`, `end_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 2. MEMBER TIERS
 CREATE TABLE IF NOT EXISTS `member_tiers` (
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS `member_tiers` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_member_tiers_code` (`code`),
   KEY `idx_member_tiers_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 3. MEMBERS
 CREATE TABLE IF NOT EXISTS `members` (
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   KEY `idx_members_status` (`status`),
   CONSTRAINT `fk_members_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT `fk_members_tier_id` FOREIGN KEY (`current_tier_id`) REFERENCES `member_tiers` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 4. MEMBER IDENTIFIERS
 CREATE TABLE IF NOT EXISTS `member_identifiers` (
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS `member_identifiers` (
   UNIQUE KEY `uq_member_identifiers_type_value` (`identifier_type`, `identifier_value`),
   KEY `idx_member_identifiers_member_id` (`member_id`),
   CONSTRAINT `fk_member_identifiers_member_id` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 5. LOYALTY ACCOUNTS
 CREATE TABLE IF NOT EXISTS `loyalty_accounts` (
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS `loyalty_accounts` (
   KEY `idx_loyalty_accounts_current_period_id` (`current_period_id`),
   CONSTRAINT `fk_loyalty_accounts_member_id` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT `fk_loyalty_accounts_period_id` FOREIGN KEY (`current_period_id`) REFERENCES `loyalty_periods` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 6. LOYALTY TRANSACTIONS (LEDGER)
 CREATE TABLE IF NOT EXISTS `loyalty_transactions` (
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS `loyalty_transactions` (
   KEY `idx_loyalty_tx_period_id` (`period_id`),
   CONSTRAINT `fk_loyalty_tx_account_id` FOREIGN KEY (`loyalty_account_id`) REFERENCES `loyalty_accounts` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT `fk_loyalty_tx_period_id` FOREIGN KEY (`period_id`) REFERENCES `loyalty_periods` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 7. MEMBER TIER HISTORIES
 CREATE TABLE IF NOT EXISTS `member_tier_histories` (
@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS `member_tier_histories` (
   CONSTRAINT `fk_tier_histories_tier_id` FOREIGN KEY (`tier_id`) REFERENCES `member_tiers` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT `fk_tier_histories_prev_tier_id` FOREIGN KEY (`previous_tier_id`) REFERENCES `member_tiers` (`id`) ON UPDATE CASCADE ON DELETE SET NULL,
   CONSTRAINT `fk_tier_histories_period_id` FOREIGN KEY (`period_id`) REFERENCES `loyalty_periods` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 8. REWARDS
 CREATE TABLE IF NOT EXISTS `rewards` (
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS `rewards` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_rewards_code` (`code`),
   KEY `idx_rewards_status_validity` (`status`, `valid_from`, `valid_until`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 9. REDEMPTIONS
 CREATE TABLE IF NOT EXISTS `redemptions` (
@@ -186,7 +186,7 @@ CREATE TABLE IF NOT EXISTS `redemptions` (
   CONSTRAINT `fk_redemptions_member_id` FOREIGN KEY (`member_id`) REFERENCES `members` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT `fk_redemptions_reward_id` FOREIGN KEY (`reward_id`) REFERENCES `rewards` (`id`) ON UPDATE CASCADE ON DELETE RESTRICT,
   CONSTRAINT `fk_redemptions_staff_id` FOREIGN KEY (`fulfilled_by_staff_id`) REFERENCES `staff` (`id`) ON UPDATE CASCADE ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- 10. INITIAL SEEDS (TIERS & CURRENT PERIOD IF EMPTY)
 INSERT IGNORE INTO `loyalty_periods` (`id`, `code`, `name`, `start_date`, `end_date`, `status`)

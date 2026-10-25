@@ -18,7 +18,7 @@ export async function lookupCurrentIdentity(tokenIdentity: AuthIdentity): Promis
     'SELECT id, nama AS name FROM users WHERE id = ? LIMIT 1',
     [tokenIdentity.id]
   );
-  if (tokenIdentity.role === 'Pelanggan') {
+  if (['Pelanggan', 'Mahasiswa', 'member', 'MEMBER'].includes(tokenIdentity.role)) {
     return userRows[0] ? { ...userRows[0], role: 'Pelanggan' } : null;
   }
   // Fail closed on legacy cross-table ID collisions instead of trusting a role from the token.

@@ -27,7 +27,7 @@ import promotionsRouter from './src/routes/promotions.js';
 import preordersRouter from './src/routes/preorders.js';
 import apiKeysRouter from './src/routes/apiKeys.js';
 import membershipRouter, { rewardsCatalogRouter, loyaltyStaffRouter } from './src/routes/membership.js';
-import { coinsRouter, promosRouter, vouchersRouter, menusRouter, userOrdersRouter } from './src/routes/pointlabRoutes.js';
+import { coinsRouter, promosRouter, vouchersRouter, menusRouter, userOrdersRouter, chatRouter } from './src/routes/pointlabRoutes.js';
 import { authenticateAuthorization, getAuthTokenSecret, isRoleAllowed } from './src/lib/authToken.js';
 import { lookupCurrentIdentity, requireRoles, AuthenticatedRequest } from './src/middleware/authSession.js';
 import { assertPaymentProofStorageOutsideRoot, evacuateLegacyPaymentProofDirs, isPublicUploadPath, isSafePaymentProofFilename, isUploadsRequestPath, normalizeRequestPath, paymentProofPathFromUrl } from './src/lib/paymentProof.js';
@@ -212,7 +212,9 @@ async function startServer() {
   preorderTimer.unref();
 
   // API routes. Routers with specific endpoints are mounted before generic routers.
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'backend_ngolab', environment: process.env.NODE_ENV || 'development' }));
   app.use('/api/auth', authRateLimit, authRouter);
+  app.use('/api/chat', chatRouter);
   app.use('/api/staff', staffRouter);
   app.use('/api/shifts', shiftsRouter);
   app.use('/api/audit-logs', auditLogsRouter);

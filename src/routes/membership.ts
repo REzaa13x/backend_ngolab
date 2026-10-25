@@ -18,6 +18,7 @@ import {
   validateRedemptionCode,
   fulfillRedemption,
 } from "../lib/rewardService.js";
+import { handlePromoRedeem } from "./pointlabRoutes.js";
 
 const router = Router();
 
@@ -184,6 +185,13 @@ router.post("/:memberId/rewards/:rewardId/redeem", requireAuthenticated, async (
     const statusCode = result.isIdempotentReplay ? 200 : 201;
     res.status(statusCode).json(result);
   } catch (err: any) {
+    if (err?.code === "REWARD_NOT_FOUND") {
+      const [cpCheck]: any = await db.query("SELECT id FROM coin_promos WHERE id = ? LIMIT 1", [req.params.rewardId]);
+      if (cpCheck.length > 0) {
+        req.body = { ...(req.body || {}), promo_id: req.params.rewardId };
+        return handlePromoRedeem(req, res);
+      }
+    }
     const status = err.statusCode || 500;
     const code = err.code || "INTERNAL_ERROR";
     res.status(status).json({ code, message: err.message });
@@ -264,14 +272,7 @@ router.post("/:memberId/loyalty/points/earn", requireAuthenticated, async (req: 
       description: description || `Perolehan poin dari ${source || 'aktivitas'}`,
     });
 
-    // Sinkronkan juga ke saldo koin legacy users.coin_balance jika belum pernah tercatat
-    if (!creditResult.repeated) {
-      const [members]: any = await connection.query("SELECT user_id FROM members WHERE id = ?", [memberId]);
-      if (members.length > 0) {
-        await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [creditResult.credited, members[0].user_id]);
-      }
-    }
-
+    // Sinkronisasi saldo users.coin_balance sudah ditangani secara atomik di dalam creditPoints()
     await connection.commit();
 
     const txId = `ltx-${Date.now()}`;
@@ -316,6 +317,32 @@ rewardsCatalogRouter.get("/", async (_req: Request, res: Response) => {
   }
 });
 
+// POST /api/rewards/redeem — Kompatibilitas legacy PointLab (mendukung reward_id maupun promo_id)
+rewardsCatalogRouter.post("/redeem", requireAuthenticated, async (req: Request, res: Response) => {
+  try {
+    const targetId = req.body?.reward_id ?? req.body?.promo_id ?? req.body?.rewardId ?? req.body?.promoId;
+    if (!targetId) {
+      return res.status(400).json({ code: "VALIDATION_ERROR", message: "reward_id atau promo_id wajib diisi" });
+    }
+    const [rwCheck]: any = await db.query("SELECT id FROM rewards WHERE id = ? LIMIT 1", [targetId]);
+    if (rwCheck.length > 0) {
+      const member = await resolveAuthMember(req);
+      if (!member) {
+        return res.status(404).json({ code: "MEMBER_NOT_FOUND", message: "Member tidak ditemukan" });
+      }
+      const idempotencyKey = (req.headers["idempotency-key"] as string) || (req.body?.idempotencyKey as string) || null;
+      const result = await atomicRedeemReward({ memberId: member.id, rewardId: String(targetId), idempotencyKey });
+      return res.status(result.isIdempotentReplay ? 200 : 201).json(result);
+    }
+    req.body = { ...(req.body || {}), promo_id: targetId };
+    return handlePromoRedeem(req, res);
+  } catch (err: any) {
+    const status = err.statusCode || 500;
+    const code = err.code || "INTERNAL_ERROR";
+    res.status(status).json({ code, message: err.message });
+  }
+});
+
 // POST /api/rewards/:rewardId/redeem — Tukar reward untuk authenticated member
 rewardsCatalogRouter.post("/:rewardId/redeem", requireAuthenticated, async (req: Request, res: Response) => {
   try {
@@ -354,12 +381,40 @@ export const loyaltyStaffRouter = Router();
 // POST /api/loyalty/redemptions/validate — Kasir memvalidasi kode voucher
 loyaltyStaffRouter.post("/redemptions/validate", requireStaff, async (req: Request, res: Response) => {
   try {
-    const code = req.body?.code || req.body?.redemption_code || req.body?.voucher_code;
+    const code = req.body?.code || req.body?.redemptionCode || req.body?.redemption_code || req.body?.voucher_code;
     if (!code || typeof code !== "string") {
       return res.status(400).json({ code: "VALIDATION_ERROR", message: "Kode penukaran wajib diisi" });
     }
 
     const result = await validateRedemptionCode(code);
+    res.json({
+      status: "success",
+      data: result,
+    });
+  } catch (err: any) {
+    const status = err.statusCode || 500;
+    const code = err.code || "INTERNAL_ERROR";
+    res.status(status).json({ code, message: err.message });
+  }
+});
+
+// POST /api/loyalty/redemptions/fulfill — Kasir menyelesaikan voucher via body JSON
+loyaltyStaffRouter.post("/redemptions/fulfill", requireStaff, async (req: Request, res: Response) => {
+  try {
+    const code = req.body?.code || req.body?.redemptionCode || req.body?.redemption_code || req.body?.voucher_code;
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ code: "VALIDATION_ERROR", message: "Kode penukaran wajib diisi" });
+    }
+    const auth = (req as any).auth;
+    const staffId = auth?.id || "S000";
+    const staffName = auth?.name || getVerifiedActor(req);
+
+    const result = await fulfillRedemption({
+      code,
+      staffId,
+      staffName,
+    });
+
     res.json({
       status: "success",
       data: result,

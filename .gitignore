@@ -10,6 +10,7 @@ scratch/
 .hermes/
 backups/
 .tangolab-payment-proofs/
+public/uploads/avatars/
 Laporan_Pengujian_Perangkat_Lunak_Tangolab.docx
 Laporan_Pengujian_Perangkat_Lunak_Tangolab.md
 .npmrc

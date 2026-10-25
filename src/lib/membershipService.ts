@@ -101,10 +101,12 @@ export async function ensureMemberForUser(
     );
     if (accs.length === 0) {
       const activePeriod = await getActiveLoyaltyPeriod(executor);
+      const [uRows]: any = await executor.query("SELECT coin_balance FROM users WHERE id = ?", [userId]);
+      const initPts = Math.max(0, Number(uRows?.[0]?.coin_balance || 0));
       const accId = `la-${crypto.randomUUID()}`;
       await executor.query(
-        "INSERT INTO loyalty_accounts (id, member_id, current_period_id, current_points, lifetime_earned_points, lifetime_redeemed_points) VALUES (?, ?, ?, 0, 0, 0)",
-        [accId, member.id, activePeriod ? activePeriod.id : null]
+        "INSERT INTO loyalty_accounts (id, member_id, current_period_id, current_points, lifetime_earned_points, lifetime_redeemed_points) VALUES (?, ?, ?, ?, ?, 0)",
+        [accId, member.id, activePeriod ? activePeriod.id : null, initPts, initPts]
       );
     }
     return member;
@@ -145,12 +147,23 @@ export async function ensureMemberForUser(
     }
   }
 
-  // Buat loyalty account
+  // Buat loyalty account (sinkronkan saldo awal dari users.coin_balance bila ada, mis. bonus daftar 100 poin)
+  const [uRows]: any = await executor.query("SELECT coin_balance FROM users WHERE id = ?", [userId]);
+  const initialPoints = Math.max(0, Number(uRows?.[0]?.coin_balance || 0));
   const accId = `la-${crypto.randomUUID()}`;
   await executor.query(
-    "INSERT INTO loyalty_accounts (id, member_id, current_period_id, current_points, lifetime_earned_points, lifetime_redeemed_points) VALUES (?, ?, ?, 0, 0, 0)",
-    [accId, memberId, activePeriod ? activePeriod.id : null]
+    "INSERT INTO loyalty_accounts (id, member_id, current_period_id, current_points, lifetime_earned_points, lifetime_redeemed_points) VALUES (?, ?, ?, ?, ?, 0)",
+    [accId, memberId, activePeriod ? activePeriod.id : null, initialPoints, initialPoints]
   );
+  if (initialPoints > 0) {
+    try {
+      await executor.query(
+        `INSERT INTO loyalty_transactions (id, loyalty_account_id, period_id, transaction_type, points, reference_type, reference_id, idempotency_key, description)
+         VALUES (?, ?, ?, 'BONUS', ?, 'WELCOME', ?, ?, 'Bonus Pendaftaran Member')`,
+        [`lt-${crypto.randomUUID()}`, accId, activePeriod ? activePeriod.id : null, initialPoints, userId, `welcome:${userId}`]
+      );
+    } catch (_) {}
+  }
 
   // Buat member identifiers jika ada
   if (userProfile) {
@@ -429,6 +442,12 @@ export async function creditPoints({
     ]
   );
 
+  // 6. Sinkronkan users.coin_balance agar selalu identik dengan loyalty_accounts.current_points
+  await connection.query(
+    "UPDATE users u JOIN members m ON m.user_id = u.id SET u.coin_balance = ? WHERE m.id = ?",
+    [newBalance, memberId]
+  );
+
   return { credited: pointsToCredit, newBalance, repeated: false };
 }
 
@@ -522,6 +541,12 @@ export async function debitPoints({
       idempotencyKey,
       description,
     ]
+  );
+
+  // 5. Sinkronkan users.coin_balance agar selalu identik dengan loyalty_accounts.current_points
+  await connection.query(
+    "UPDATE users u JOIN members m ON m.user_id = u.id SET u.coin_balance = ? WHERE m.id = ?",
+    [newBalance, memberId]
   );
 
   return { debited: pointsToDebit, newBalance, repeated: false };

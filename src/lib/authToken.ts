@@ -50,16 +50,47 @@ export function issueAuthToken(identity: AuthIdentity, options: TokenOptions) {
 
 export function verifyAuthToken(token: string, options: Pick<TokenOptions, 'secret' | 'nowMs'>): AuthIdentity | null {
   try {
-    const [payload, signature, extra] = token.split('.');
-    if (!payload || !signature || extra) return null;
-    const expected = sign(payload, options.secret);
-    const actualBuffer = Buffer.from(signature);
-    const expectedBuffer = Buffer.from(expected);
-    if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return null;
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!parsed || typeof parsed.id !== 'string' || typeof parsed.name !== 'string' || typeof parsed.role !== 'string') return null;
-    if (!Number.isFinite(parsed.expMs) || (options.nowMs ?? Date.now()) > parsed.expMs) return null;
-    return { id: parsed.id, name: parsed.name, role: parsed.role };
+    const parts = token.split('.');
+    const nowMs = options.nowMs ?? Date.now();
+
+    // Format 1: 2-part Ngolab HMAC token (payload.signature)
+    if (parts.length === 2) {
+      const [payload, signature] = parts;
+      if (!payload || !signature) return null;
+      const expected = sign(payload, options.secret);
+      const actualBuffer = Buffer.from(signature);
+      const expectedBuffer = Buffer.from(expected);
+      if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return null;
+      const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+      if (!parsed || typeof parsed.id !== 'string' || typeof parsed.name !== 'string' || typeof parsed.role !== 'string') return null;
+      if (!Number.isFinite(parsed.expMs) || nowMs > parsed.expMs) return null;
+      return { id: parsed.id, name: parsed.name, role: parsed.role };
+    }
+
+    // Format 2: 3-part HS256 JWT interoperability (PointLab SSO / JWT)
+    if (parts.length === 3) {
+      const [headerB64, payloadB64, signature] = parts;
+      if (!headerB64 || !payloadB64 || !signature) return null;
+      const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+      if (!header || header.alg !== 'HS256') return null;
+      const signingInput = `${headerB64}.${payloadB64}`;
+      const expected = sign(signingInput, options.secret);
+      const actualBuffer = Buffer.from(signature);
+      const expectedBuffer = Buffer.from(expected);
+      if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) return null;
+      const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+      const rawId = parsed?.id ?? parsed?.userId;
+      if (rawId === undefined || rawId === null || String(rawId).trim() === '') return null;
+      if (parsed.exp !== undefined) {
+        if (!Number.isFinite(parsed.exp) || nowMs > Number(parsed.exp) * 1000) return null;
+      }
+      const rawRole = String(parsed.role || 'Pelanggan');
+      const normalizedRole = ['Mahasiswa', 'member', 'MEMBER', 'Pelanggan'].includes(rawRole) ? 'Pelanggan' : rawRole;
+      const name = String(parsed.name || parsed.nama || parsed.nim || 'Member');
+      return { id: String(rawId), name, role: normalizedRole };
+    }
+
+    return null;
   } catch {
     return null;
   }

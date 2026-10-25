@@ -8,7 +8,7 @@ import { normalizeEmail } from "../lib/auth.js";
 import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
 import { isRoleAllowed } from "../lib/authToken.js";
 import { requireAuthenticated, requireRoles } from '../middleware/authSession.js';
-import { ensureMemberForUser, getMemberProfile } from "../lib/membershipService.js";
+import { creditPoints, ensureMemberForUser, getMemberProfile } from "../lib/membershipService.js";
 
 const router = Router();
 const requireUserAdmin = requireRoles('Super Admin', 'Kasir', 'Support');
@@ -36,6 +36,24 @@ const uploadAvatar = multer({
     else cb(new Error("Format gambar tidak didukung. Gunakan JPG, PNG, WEBP, atau GIF."));
   },
 });
+
+function extractUploadedFile(req: Request): Express.Multer.File | undefined {
+  const anyReq = req as any;
+  if (anyReq.file) return anyReq.file;
+  if (Array.isArray(anyReq.files) && anyReq.files.length > 0) return anyReq.files[0];
+  return undefined;
+}
+
+function persistAvatarInput(rawAvatar: unknown): string {
+  const value = String(rawAvatar ?? "").trim();
+  const match = /^data:image\/(jpeg|jpg|png|webp|gif);base64,([A-Za-z0-9+/=]+)$/i.exec(value);
+  if (!match) return value;
+  const ext = match[1].toLowerCase() === "jpeg" ? "jpg" : match[1].toLowerCase();
+  const filename = `avatar-${Date.now()}-${Math.floor(Math.random() * 10000)}.${ext}`;
+  const targetPath = path.join(avatarUploadDir, filename);
+  fs.writeFileSync(targetPath, Buffer.from(match[2], "base64"));
+  return `/uploads/avatars/${filename}`;
+}
 
 // GET /api/users
 router.get("/", requireUserAdmin, async (_req: Request, res: Response) => {
@@ -90,42 +108,163 @@ router.get("/profile", requireAuthenticated, async (req: Request, res: Response)
       email: user.email,
     });
     const profile = await getMemberProfile(user.id);
+    const currentPoints = Math.max(
+      Number(user.coin_balance || 0),
+      Number(profile?.loyalty.currentPoints ?? 0)
+    );
+    const lifetimePoints = Math.max(
+      currentPoints,
+      Number(profile?.loyalty.lifetimeEarnedPoints ?? 0)
+    );
 
-    res.json({
+    const userPayload = {
       id: user.id,
       nama: user.nama,
       nim: user.nim || "",
+      email: user.email || "",
       phone: user.phone || "",
+      telp: user.phone || "",
+      role: user.role || "Pelanggan",
       avatar_url: user.avatar_url || "",
-      coin_balance: user.coin_balance || 0,
+      avatar: user.avatar_url || "",
+      coin_balance: currentPoints,
+      poin: currentPoints,
+      totalPoin: lifetimePoints,
       rfid_tag_id: user.rfid_tag_id || "",
       memberId: member.id,
       memberCode: member.member_code,
-      currentPoints: profile?.loyalty.currentPoints ?? 0,
+      currentPoints,
       tier: profile?.tier?.name || "Classmate",
+    };
+
+    res.json({
+      ...userPayload,
+      user: userPayload,
     });
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil profil", error: err.message });
   }
 });
 
-// PUT /api/users/profile — Update nama lengkap & nomor telepon
+// PUT /api/users/profile — Update nama lengkap, email, NIM, nomor telepon & foto profil
 router.put("/profile", requireAuthenticated, async (req: Request, res: Response) => {
   try {
     const auth = (req as any).auth;
-    const { nama, phone, telp, avatar_url } = req.body;
+    const { nama, phone, telp, avatar_url, avatar, email, nim } = req.body;
     const resolvedPhone = phone !== undefined ? phone : telp;
+    const resolvedAvatar = avatar_url !== undefined ? avatar_url : avatar;
+    const normalizedUpdateEmail = email === undefined ? undefined : normalizeEmail(email);
+
     const updates: string[] = [];
     const params: any[] = [];
-    if (nama !== undefined) { updates.push("nama = ?"); params.push(String(nama).trim()); }
-    if (resolvedPhone !== undefined) { updates.push("phone = ?"); params.push(String(resolvedPhone).trim()); }
-    if (avatar_url !== undefined) { updates.push("avatar_url = ?"); params.push(String(avatar_url).trim()); }
+
+    if (nama !== undefined) {
+      const trimmedNama = String(nama).trim();
+      if (!trimmedNama) {
+        return res.status(400).json({ success: false, message: "Nama tidak boleh kosong" });
+      }
+      updates.push("nama = ?");
+      params.push(trimmedNama);
+    }
+    if (resolvedPhone !== undefined) {
+      const trimmedPhone = String(resolvedPhone).trim();
+      if (trimmedPhone) {
+        const [phoneOwner]: any = await db.query(
+          "SELECT id FROM users WHERE phone = ? AND id != ?",
+          [trimmedPhone, auth.id]
+        );
+        if (phoneOwner.length > 0) {
+          return res.status(400).json({ success: false, message: "Nomor telepon sudah digunakan akun lain" });
+        }
+      }
+      updates.push("phone = ?");
+      params.push(trimmedPhone || null);
+    }
+    if (resolvedAvatar !== undefined) {
+      updates.push("avatar_url = ?");
+      params.push(persistAvatarInput(resolvedAvatar));
+    }
+    if (email !== undefined) {
+      if (normalizedUpdateEmail) {
+        const [emailOwner]: any = await db.query(
+          "SELECT id FROM users WHERE email = ? AND id != ?",
+          [normalizedUpdateEmail, auth.id]
+        );
+        if (emailOwner.length > 0) {
+          return res.status(400).json({ success: false, message: "Email sudah digunakan pengguna lain" });
+        }
+        const [staffEmailOwner]: any = await db.query(
+          "SELECT id FROM staff WHERE email = ?",
+          [normalizedUpdateEmail]
+        );
+        if (staffEmailOwner.length > 0) {
+          return res.status(400).json({ success: false, message: "Email sudah digunakan oleh akun staf" });
+        }
+      }
+      updates.push("email = ?");
+      params.push(normalizedUpdateEmail || null);
+    }
+    if (nim !== undefined) {
+      const trimmedNim = String(nim).trim();
+      if (trimmedNim) {
+        const [nimOwner]: any = await db.query(
+          "SELECT id FROM users WHERE nim = ? AND id != ?",
+          [trimmedNim, auth.id]
+        );
+        if (nimOwner.length > 0) {
+          return res.status(400).json({ success: false, message: "NIM sudah terdaftar pada akun lain" });
+        }
+      }
+      updates.push("nim = ?");
+      params.push(trimmedNim || null);
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ success: false, message: "Tidak ada data yang diperbarui" });
     }
     params.push(auth.id);
     await db.query(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, params);
-    res.json({ success: true, message: "Profil berhasil diperbarui" });
+
+    const [updatedRows]: any = await db.query(
+      "SELECT id, nama, nim, phone, avatar_url, coin_balance, rfid_tag_id, email, role FROM users WHERE id = ?",
+      [auth.id]
+    );
+    const updated = updatedRows[0];
+    if (updated) {
+      const member = await ensureMemberForUser(db, updated.id, {
+        nama: updated.nama,
+        phone: updated.phone,
+        nim: updated.nim,
+        email: updated.email,
+      });
+      // Sinkronkan identifier member yang diperbarui
+      if (updated.nim) {
+        await db.query(
+          `INSERT INTO member_identifiers (id, member_id, identifier_type, identifier_value, is_primary, is_verified, verified_at)
+           VALUES (?, ?, 'STUDENT_NIM', ?, 1, 1, NOW())
+           ON DUPLICATE KEY UPDATE identifier_value = VALUES(identifier_value), updated_at = NOW()`,
+          [`mi-nim-${member.id}`.slice(0, 50), member.id, updated.nim]
+        ).catch(() => {});
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Profil berhasil diperbarui",
+      user: updated ? {
+        id: updated.id,
+        nama: updated.nama,
+        nim: updated.nim || "",
+        email: updated.email || "",
+        phone: updated.phone || "",
+        telp: updated.phone || "",
+        role: updated.role || "Pelanggan",
+        avatar_url: updated.avatar_url || "",
+        avatar: updated.avatar_url || "",
+        coin_balance: Number(updated.coin_balance || 0),
+        poin: Number(updated.coin_balance || 0),
+      } : undefined,
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: "Gagal memperbarui profil", error: err.message });
   }
@@ -135,8 +274,8 @@ router.put("/profile", requireAuthenticated, async (req: Request, res: Response)
 router.put("/password", requireAuthenticated, async (req: Request, res: Response) => {
   try {
     const auth = (req as any).auth;
-    const { password, new_password } = req.body;
-    const targetPassword = new_password || password;
+    const { password, new_password, newPassword } = req.body;
+    const targetPassword = new_password || newPassword || password;
     if (!targetPassword || String(targetPassword).length < 6) {
       return res.status(400).json({ success: false, message: "Password minimal 6 karakter" });
     }
@@ -148,13 +287,14 @@ router.put("/password", requireAuthenticated, async (req: Request, res: Response
   }
 });
 
-// POST /api/users/avatar — Upload & ganti foto profil
-router.post("/avatar", requireAuthenticated, uploadAvatar.single("file"), async (req: Request, res: Response) => {
+// POST /api/users/avatar — Upload & ganti foto profil (mendukung field 'file' maupun 'avatar')
+router.post("/avatar", requireAuthenticated, uploadAvatar.any(), async (req: Request, res: Response) => {
   try {
     const auth = (req as any).auth;
+    const uploadedFile = extractUploadedFile(req);
     let avatarUrl = "";
-    if (req.file) {
-      avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    if (uploadedFile) {
+      avatarUrl = `/uploads/avatars/${uploadedFile.filename}`;
     } else if (req.body?.avatar_url) {
       avatarUrl = req.body.avatar_url;
     } else {
@@ -166,6 +306,7 @@ router.post("/avatar", requireAuthenticated, uploadAvatar.single("file"), async 
       success: true,
       message: "Foto profil berhasil diperbarui",
       avatar_url: avatarUrl,
+      avatar: avatarUrl,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: "Gagal mengunggah foto profil", error: err.message });
@@ -226,8 +367,33 @@ router.get("/:id/recommendations", requireAuthenticated, async (req: Request, re
       return a.can_redeem === b.can_redeem ? a.coin_cost - b.coin_cost : a.can_redeem ? -1 : 1;
     });
 
+    const member = await ensureMemberForUser(db, user.id, {
+      nama: user.nama,
+      phone: user.phone,
+      nim: user.nim,
+      email: user.email,
+    });
+    const profile = await getMemberProfile(user.id);
+    const currentPoints = Math.max(
+      Number(user.coin_balance || 0),
+      Number(profile?.loyalty.currentPoints ?? 0)
+    );
+
     res.json({
-      user: { id: user.id, nama: user.nama, coin_balance: user.coin_balance },
+      user: {
+        id: user.id,
+        nama: user.nama,
+        nim: user.nim || "",
+        email: user.email || "",
+        phone: user.phone || "",
+        avatar_url: user.avatar_url || "",
+        role: user.role || "Pelanggan",
+        coin_balance: currentPoints,
+        currentPoints,
+        memberId: member.id,
+        memberCode: member.member_code,
+        tier: profile?.tier?.name || "Classmate",
+      },
       recommendations
     });
   } catch (err: any) {
@@ -320,6 +486,7 @@ router.post("/register", async (req: Request, res: Response) => {
         nama,
         nim: nim || id,
         coin_balance: initialCoin,
+        currentPoints: initialCoin,
         avatar_url: avatar,
         email: normalizedEmail,
         phone: phone || null,
@@ -370,6 +537,10 @@ router.post("/login", async (req: Request, res: Response) => {
       nim: user.nim,
     });
     const profile = await getMemberProfile(user.id);
+    const currentPoints = Math.max(
+      Number(user.coin_balance || 0),
+      Number(profile?.loyalty.currentPoints ?? 0)
+    );
 
     res.json({
       message: "Login berhasil",
@@ -377,11 +548,11 @@ router.post("/login", async (req: Request, res: Response) => {
         id: user.id,
         nama: user.nama,
         nim: user.nim,
-        coin_balance: user.coin_balance,
+        coin_balance: currentPoints,
         avatar_url: user.avatar_url,
         memberId: member.id,
         memberCode: member.member_code,
-        currentPoints: profile?.loyalty.currentPoints ?? 0,
+        currentPoints,
         tier: profile?.tier?.name || "Classmate",
       }
     });
@@ -412,13 +583,27 @@ router.post("/:id/earn-coins", requireUserAdmin, async (req: Request, res: Respo
     }
 
     const user = users[0];
+    const desc = description || "Hadiah koin dari aktivitas game/kiosk";
 
-    // Tambah saldo koin
-    await connection.query("UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?", [parsedAmount, id]);
+    const member = await ensureMemberForUser(connection, user.id, {
+      nama: user.nama,
+      phone: user.phone,
+      nim: user.nim,
+      email: user.email,
+    });
+
+    // Tambah poin via loyalty ledger (otomatis menyinkronkan users.coin_balance)
+    const creditResult = await creditPoints({
+      connection,
+      memberId: member.id,
+      points: parsedAmount,
+      transactionType: "GAMIFICATION",
+      referenceType: "LEGACY_COIN_EARN",
+      description: desc,
+    });
 
     // Catat transaksi koin masuk
     const txId = `ct-${Date.now()}`;
-    const desc = description || "Hadiah koin dari aktivitas game/kiosk";
     await connection.query(
       "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
       [txId, id, user.nama, parsedAmount, desc]
@@ -426,11 +611,9 @@ router.post("/:id/earn-coins", requireUserAdmin, async (req: Request, res: Respo
 
     await connection.commit();
 
-    const [updatedUser]: any = await db.query("SELECT coin_balance FROM users WHERE id = ?", [id]);
-
     res.json({
       message: "Koin berhasil ditambahkan",
-      new_balance: updatedUser[0].coin_balance,
+      new_balance: creditResult.newBalance,
       transaction: {
         id: txId,
         amount: parsedAmount,
@@ -458,7 +641,16 @@ router.get("/:user_id/study-sessions", requireAuthenticated, async (req: Request
       "SELECT * FROM study_sessions WHERE user_id = ? ORDER BY created_at DESC",
       [user_id]
     );
-    res.json(rows);
+    const enriched = rows.map((row: any) => ({
+      ...row,
+      task_title: row.subject,
+      taskTitle: row.subject,
+      duration: Number(row.duration_minutes || 0),
+      durationMinutes: Number(row.duration_minutes || 0),
+      points: Number(row.points_earned || 0),
+      coins: Number(row.points_earned || 0),
+    }));
+    res.json(enriched);
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil riwayat sesi belajar", error: err.message });
   }
@@ -475,12 +667,31 @@ router.post("/:user_id/study-sessions", requireAuthenticated, async (req: Reques
       await connection.rollback();
       return res.status(403).json({ message: 'Anda hanya dapat menambah aktivitas akun sendiri' });
     }
-    const { subject, duration_minutes, points_earned } = req.body;
+    const {
+      subject,
+      task_title,
+      notes,
+      duration_minutes,
+      duration,
+      planned_duration,
+      points_earned,
+      points,
+      coins,
+      session_id,
+      skip_credit,
+    } = req.body;
 
-    if (!subject || duration_minutes === undefined || points_earned === undefined) {
+    const resolvedSubject = String(subject || task_title || notes || "").trim();
+    const rawDuration = duration_minutes !== undefined ? duration_minutes : (duration ?? planned_duration);
+    const rawPoints = points_earned !== undefined ? points_earned : (points ?? coins);
+
+    if (!resolvedSubject || rawDuration === undefined || rawPoints === undefined) {
       await connection.rollback();
-      return res.status(400).json({ message: "Subject, duration_minutes, dan points_earned wajib diisi" });
+      return res.status(400).json({ message: "Subject/task_title, duration_minutes/duration, dan points_earned/points wajib diisi" });
     }
+
+    const parsedDuration = Math.max(0, parseInt(String(rawDuration), 10) || 0);
+    const parsedPoints = Math.max(0, parseInt(String(rawPoints), 10) || 0);
 
     // Cek apakah user ada
     const [users]: any = await connection.query("SELECT * FROM users WHERE id = ? FOR UPDATE", [user_id]);
@@ -493,21 +704,38 @@ router.post("/:user_id/study-sessions", requireAuthenticated, async (req: Reques
     // Simpan sesi belajar
     await connection.query(
       "INSERT INTO study_sessions (user_id, subject, duration_minutes, points_earned) VALUES (?, ?, ?, ?)",
-      [user_id, subject, parseInt(duration_minutes), parseInt(points_earned)]
+      [user_id, resolvedSubject, parsedDuration, parsedPoints]
     );
 
-    // Tambah saldo koin user
-    await connection.query(
-      "UPDATE users SET coin_balance = coin_balance + ? WHERE id = ?",
-      [parseInt(points_earned), user_id]
-    );
+    let newBalance = Number(user.coin_balance || 0);
 
-    // Catat transaksi koin masuk
-    const txId = `ct-${Date.now()}`;
-    await connection.query(
-      "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
-      [txId, user_id, user.nama, parseInt(points_earned), `Belajar: ${subject} (${duration_minutes} Menit)`]
-    );
+    // Bila dipanggil dari NGOLAB-GAMI MobileStudyTracker (menyertakan session_id), kredit poin
+    // dilakukan melalui endpoint kanonik /api/members/:id/points/earn ber-idempotency-key
+    // tepat setelah request ini agar tidak terjadi kredit ganda.
+    if (!session_id && !skip_credit && parsedPoints > 0) {
+      const member = await ensureMemberForUser(connection, user.id, {
+        nama: user.nama,
+        phone: user.phone,
+        nim: user.nim,
+        email: user.email,
+      });
+      const creditResult = await creditPoints({
+        connection,
+        memberId: member.id,
+        points: parsedPoints,
+        transactionType: "GAMIFICATION",
+        referenceType: "STUDY_SESSION_LEGACY",
+        description: `Belajar: ${resolvedSubject} (${parsedDuration} Menit)`,
+      });
+      newBalance = creditResult.newBalance;
+
+      // Catat transaksi koin masuk
+      const txId = `ct-${Date.now()}`;
+      await connection.query(
+        "INSERT INTO coin_transactions (id, user_id, user_name, type, amount, description) VALUES (?, ?, ?, 'earn', ?, ?)",
+        [txId, user_id, user.nama, parsedPoints, `Belajar: ${resolvedSubject} (${parsedDuration} Menit)`]
+      );
+    }
 
     await connection.commit();
 
@@ -517,9 +745,9 @@ router.post("/:user_id/study-sessions", requireAuthenticated, async (req: Reques
     }
 
     res.status(201).json({
-      message: "Sesi belajar berhasil disimpan dan koin ditambahkan",
-      points_earned: parseInt(points_earned),
-      new_balance: user.coin_balance + parseInt(points_earned)
+      message: "Sesi belajar berhasil disimpan",
+      points_earned: parsedPoints,
+      new_balance: newBalance,
     });
   } catch (err: any) {
     await connection.rollback();
@@ -540,8 +768,9 @@ router.put("/:id", requireAuthenticated, async (req: Request, res: Response) => 
       return res.status(403).json({ success: false, message: "Anda tidak memiliki izin untuk mengedit profil ini" });
     }
 
-    const { nama, avatar_url, nim, email, phone, telp, password } = req.body;
+    const { nama, avatar_url, avatar, nim, email, phone, telp, password } = req.body;
     const resolvedPhone = phone !== undefined ? phone : telp;
+    const resolvedAvatar = avatar_url !== undefined ? avatar_url : avatar;
     const normalizedUpdateEmail = email === undefined ? undefined : normalizeEmail(email);
 
     // Pastikan user ada
@@ -557,13 +786,13 @@ router.put("/:id", requireAuthenticated, async (req: Request, res: Response) => 
       updates.push("nama = ?");
       params.push(String(nama).trim());
     }
-    if (avatar_url !== undefined) {
+    if (resolvedAvatar !== undefined) {
       updates.push("avatar_url = ?");
-      params.push(String(avatar_url).trim());
+      params.push(persistAvatarInput(resolvedAvatar));
     }
     if (nim !== undefined) {
       updates.push("nim = ?");
-      params.push(String(nim).trim());
+      params.push(String(nim).trim() || null);
     }
     if (email !== undefined) {
       if (normalizedUpdateEmail) {
@@ -583,7 +812,7 @@ router.put("/:id", requireAuthenticated, async (req: Request, res: Response) => 
       updates.push("password_hash = ?");
       params.push(await hashPassword(password));
       updates.push("password_plain = ?");
-      params.push(password);
+      params.push(isAdmin ? password : null);
     }
 
     if (updates.length === 0) {
@@ -597,19 +826,41 @@ router.put("/:id", requireAuthenticated, async (req: Request, res: Response) => 
       "SELECT id, nama, nim, coin_balance, avatar_url, rfid_tag_id, email, phone, role, created_at, updated_at FROM users WHERE id = ?",
       [id]
     );
+    const updatedRow = updatedUser[0];
+    let enrichedUser = updatedRow;
+    if (updatedRow) {
+      const member = await ensureMemberForUser(db, updatedRow.id, {
+        nama: updatedRow.nama,
+        phone: updatedRow.phone,
+        nim: updatedRow.nim,
+        email: updatedRow.email,
+      });
+      const profile = await getMemberProfile(updatedRow.id);
+      const currentPoints = Math.max(
+        Number(updatedRow.coin_balance || 0),
+        Number(profile?.loyalty.currentPoints ?? 0)
+      );
+      enrichedUser = {
+        ...updatedRow,
+        coin_balance: currentPoints,
+        currentPoints,
+        memberId: member.id,
+        memberCode: member.member_code,
+      };
+    }
 
     res.json({
       success: true,
       message: "Profil berhasil diperbarui secara permanen di database",
-      user: updatedUser[0]
+      user: enrichedUser
     });
   } catch (err: any) {
     res.status(500).json({ message: "Gagal memperbarui profil", error: err.message });
   }
 });
 
-// POST /api/users/:id/avatar — Upload & ganti foto profil user
-router.post("/:id/avatar", requireAuthenticated, uploadAvatar.single("file"), async (req: Request, res: Response) => {
+// POST /api/users/:id/avatar — Upload & ganti foto profil user (mendukung field 'file' maupun 'avatar')
+router.post("/:id/avatar", requireAuthenticated, uploadAvatar.any(), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const auth = (req as any).auth;
@@ -618,9 +869,10 @@ router.post("/:id/avatar", requireAuthenticated, uploadAvatar.single("file"), as
     if (!isOwner && !isAdmin) {
       return res.status(403).json({ success: false, message: "Anda tidak memiliki izin untuk mengedit avatar akun ini" });
     }
+    const uploadedFile = extractUploadedFile(req);
     let avatarUrl = "";
-    if (req.file) {
-      avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    if (uploadedFile) {
+      avatarUrl = `/uploads/avatars/${uploadedFile.filename}`;
     } else if (req.body?.avatar_url) {
       avatarUrl = req.body.avatar_url;
     } else {
@@ -632,6 +884,7 @@ router.post("/:id/avatar", requireAuthenticated, uploadAvatar.single("file"), as
       success: true,
       message: "Foto profil berhasil diperbarui",
       avatar_url: avatarUrl,
+      avatar: avatarUrl,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: "Gagal mengunggah foto profil", error: err.message });

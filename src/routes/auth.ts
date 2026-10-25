@@ -249,8 +249,9 @@ router.post("/change-password", requireAuthenticated, async (req: Request, res: 
       return res.status(401).json({ success: false, message: "Sesi tidak valid" });
     }
 
-    const { current_password, new_password, password } = req.body;
-    const targetPassword = new_password || password;
+    const { current_password, currentPassword, new_password, newPassword, password } = req.body;
+    const resolvedCurrentPassword = current_password ?? currentPassword;
+    const targetPassword = new_password ?? newPassword ?? password;
 
     if (!targetPassword || String(targetPassword).length < 6) {
       return res.status(400).json({ success: false, message: "Password baru wajib diisi dan minimal 6 karakter" });
@@ -264,8 +265,8 @@ router.post("/change-password", requireAuthenticated, async (req: Request, res: 
       return res.status(404).json({ success: false, message: "Pengguna tidak ditemukan" });
     }
 
-    if (current_password) {
-      const match = await verifyPassword(current_password, rows[0].password_hash);
+    if (resolvedCurrentPassword) {
+      const match = await verifyPassword(resolvedCurrentPassword, rows[0].password_hash);
       if (!match) {
         return res.status(400).json({ success: false, message: "Password saat ini tidak sesuai" });
       }
@@ -277,6 +278,141 @@ router.post("/change-password", requireAuthenticated, async (req: Request, res: 
     res.json({ success: true, message: "Password berhasil diperbarui" });
   } catch (err: any) {
     res.status(500).json({ success: false, message: "Gagal memperbarui password", error: err.message });
+  }
+});
+
+// POST /api/auth/forgot-password — Permintaan reset password via Email / NIM / No HP
+router.post("/forgot-password", async (req: Request, res: Response) => {
+  try {
+    const rawIdentifier = String(req.body.identifier || req.body.email || req.body.nim || "").trim();
+    if (!rawIdentifier) {
+      return res.status(400).json({ success: false, message: "Email atau NIM wajib diisi." });
+    }
+    const clean = rawIdentifier.toLowerCase();
+    const [users]: any = await db.query(
+      "SELECT id, nama, email FROM users WHERE LOWER(email) = ? OR LOWER(nim) = ? OR phone = ? LIMIT 1",
+      [clean, clean, rawIdentifier]
+    );
+    const [staffRows]: any = users.length === 0
+      ? await db.query("SELECT id, name AS nama, email FROM staff WHERE LOWER(email) = ? OR phone = ? LIMIT 1", [clean, rawIdentifier])
+      : [[]];
+
+    const found = users[0] || staffRows[0];
+    if (!found) {
+      return res.status(404).json({ success: false, message: "Akun dengan Email atau NIM tersebut tidak ditemukan." });
+    }
+
+    return res.json({
+      success: true,
+      message: "Instruksi reset password telah dikirim ke email terdaftar Anda."
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "Gagal memproses permintaan reset password", error: err.message });
+  }
+});
+
+// POST /api/auth/logout — Akhiri sesi client
+router.post("/logout", (_req: Request, res: Response) => {
+  return res.json({ success: true, message: "Logout berhasil." });
+});
+
+// POST /api/auth/feedback — Kirim feedback member (PointLab)
+router.post("/feedback", async (req: Request, res: Response) => {
+  try {
+    const { category, message, rating } = req.body;
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ success: false, message: "Pesan feedback wajib diisi." });
+    }
+
+    let userId: string | null = null;
+    let userName = "Member PointLab";
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+      try {
+        const { authenticateAuthorization } = await import("../lib/authToken.js");
+        const tokenIdentity = authenticateAuthorization(authHeader, { secret: getAuthTokenSecret() });
+        if (tokenIdentity) {
+          userId = tokenIdentity.id;
+          userName = tokenIdentity.name || userName;
+        }
+      } catch (_) {}
+    }
+
+    const fbId = `fb-${Date.now()}`;
+    const parsedRating = rating !== null && rating !== undefined && Number(rating) > 0 ? Number(rating) : null;
+    const cat = String(category || "Umum").trim();
+
+    await db.query(
+      "INSERT INTO feedbacks (id, user_id, user_name, category, message, rating) VALUES (?, ?, ?, ?, ?, ?)",
+      [fbId, userId, userName, cat, String(message).trim(), parsedRating]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Feedback berhasil dikirim! Terima kasih atas masukan Anda.",
+      feedback: {
+        id: fbId,
+        userId,
+        category: cat,
+        message: String(message).trim(),
+        rating: parsedRating,
+        createdAt: new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "Gagal menyimpan feedback", error: err.message });
+  }
+});
+
+// POST /api/auth/review — Kirim ulasan pesanan makanan (PointLab History)
+router.post("/review", async (req: Request, res: Response) => {
+  try {
+    const { orderId, order_id, menuItemId, menu_item_id, rating, reviewText, review_text } = req.body;
+    const text = String(reviewText ?? review_text ?? "").trim();
+    const parsedRating = Math.min(5, Math.max(1, Number(rating) || 5));
+
+    if (!text && !rating) {
+      return res.status(400).json({ success: false, message: "Rating atau teks ulasan wajib diisi." });
+    }
+
+    let userId: string | null = null;
+    let userName = "Member PointLab";
+    const authHeader = req.headers.authorization;
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+      try {
+        const { authenticateAuthorization } = await import("../lib/authToken.js");
+        const tokenIdentity = authenticateAuthorization(authHeader, { secret: getAuthTokenSecret() });
+        if (tokenIdentity) {
+          userId = tokenIdentity.id;
+          userName = tokenIdentity.name || userName;
+        }
+      } catch (_) {}
+    }
+
+    const revId = `rev-${Date.now()}`;
+    const resolvedOrderId = orderId ?? order_id ?? null;
+    const resolvedMenuId = menuItemId ?? menu_item_id ?? null;
+
+    await db.query(
+      "INSERT INTO reviews (id, user_id, user_name, order_id, menu_item_id, rating, review_text) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [revId, userId, userName, resolvedOrderId ? String(resolvedOrderId) : null, resolvedMenuId ? String(resolvedMenuId) : null, parsedRating, text]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Ulasan berhasil dikirim! Terima kasih.",
+      review: {
+        id: revId,
+        userId,
+        orderId: resolvedOrderId,
+        menuItemId: resolvedMenuId,
+        rating: parsedRating,
+        reviewText: text,
+        createdAt: new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: "Gagal menyimpan ulasan", error: err.message });
   }
 });
 

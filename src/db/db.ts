@@ -589,7 +589,7 @@ export async function testDbConnection() {
           UNIQUE KEY \`uq_loyalty_periods_code\` (\`code\`),
           KEY \`idx_loyalty_periods_status\` (\`status\`),
           KEY \`idx_loyalty_periods_dates\` (\`start_date\`, \`end_date\`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -607,7 +607,7 @@ export async function testDbConnection() {
           PRIMARY KEY (\`id\`),
           UNIQUE KEY \`uq_member_tiers_code\` (\`code\`),
           KEY \`idx_member_tiers_status\` (\`status\`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -628,7 +628,7 @@ export async function testDbConnection() {
           KEY \`idx_members_status\` (\`status\`),
           CONSTRAINT \`fk_members_user_id\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON UPDATE CASCADE ON DELETE RESTRICT,
           CONSTRAINT \`fk_members_tier_id\` FOREIGN KEY (\`current_tier_id\`) REFERENCES \`member_tiers\` (\`id\`) ON UPDATE CASCADE ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -646,7 +646,7 @@ export async function testDbConnection() {
           UNIQUE KEY \`uq_member_identifiers_type_value\` (\`identifier_type\`, \`identifier_value\`),
           KEY \`idx_member_identifiers_member_id\` (\`member_id\`),
           CONSTRAINT \`fk_member_identifiers_member_id\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\` (\`id\`) ON UPDATE CASCADE ON DELETE RESTRICT
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -664,7 +664,7 @@ export async function testDbConnection() {
           KEY \`idx_loyalty_accounts_current_period_id\` (\`current_period_id\`),
           CONSTRAINT \`fk_loyalty_accounts_member_id\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\` (\`id\`) ON UPDATE CASCADE ON DELETE RESTRICT,
           CONSTRAINT \`fk_loyalty_accounts_period_id\` FOREIGN KEY (\`current_period_id\`) REFERENCES \`loyalty_periods\` (\`id\`) ON UPDATE CASCADE ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -687,7 +687,7 @@ export async function testDbConnection() {
           KEY \`idx_loyalty_tx_period_id\` (\`period_id\`),
           CONSTRAINT \`fk_loyalty_tx_account_id\` FOREIGN KEY (\`loyalty_account_id\`) REFERENCES \`loyalty_accounts\` (\`id\`) ON UPDATE CASCADE ON DELETE RESTRICT,
           CONSTRAINT \`fk_loyalty_tx_period_id\` FOREIGN KEY (\`period_id\`) REFERENCES \`loyalty_periods\` (\`id\`) ON UPDATE CASCADE ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -710,7 +710,7 @@ export async function testDbConnection() {
           CONSTRAINT \`fk_tier_histories_tier_id\` FOREIGN KEY (\`tier_id\`) REFERENCES \`member_tiers\` (\`id\`) ON UPDATE CASCADE ON DELETE RESTRICT,
           CONSTRAINT \`fk_tier_histories_prev_tier_id\` FOREIGN KEY (\`previous_tier_id\`) REFERENCES \`member_tiers\` (\`id\`) ON UPDATE CASCADE ON DELETE SET NULL,
           CONSTRAINT \`fk_tier_histories_period_id\` FOREIGN KEY (\`period_id\`) REFERENCES \`loyalty_periods\` (\`id\`) ON UPDATE CASCADE ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -735,7 +735,7 @@ export async function testDbConnection() {
           PRIMARY KEY (\`id\`),
           UNIQUE KEY \`uq_rewards_code\` (\`code\`),
           KEY \`idx_rewards_status_validity\` (\`status\`, \`valid_from\`, \`valid_until\`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       await connection.query(`
@@ -764,7 +764,7 @@ export async function testDbConnection() {
           CONSTRAINT \`fk_redemptions_member_id\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\` (\`id\`) ON UPDATE CASCADE ON DELETE RESTRICT,
           CONSTRAINT \`fk_redemptions_reward_id\` FOREIGN KEY (\`reward_id\`) REFERENCES \`rewards\` (\`id\`) ON UPDATE CASCADE ON DELETE RESTRICT,
           CONSTRAINT \`fk_redemptions_staff_id\` FOREIGN KEY (\`fulfilled_by_staff_id\`) REFERENCES \`staff\` (\`id\`) ON UPDATE CASCADE ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
       `);
 
       // Seed default loyalty period if empty
@@ -788,6 +788,95 @@ export async function testDbConnection() {
           ('tier-hall-of-fame', 'HALL_OF_FAME', 'Hall of Fame', 750000.00, NULL, 'Dapat 2x poin tiap transaksi, diskon khusus 30% bulanan', 2.00, 'ACTIVE')
         `);
       }
+
+      // Pastikan periode aktif hingga akhir 2027
+      await connection.query(`
+        UPDATE loyalty_periods SET end_date = '2027-12-31 23:59:59', status = 'ACTIVE'
+        WHERE id = 'lp-default-2026' AND end_date < '2027-12-31 00:00:00'
+      `);
+
+      // Seed default rewards catalog if empty (digunakan oleh NGOLAB-GAMI & PointLab)
+      const [rewardsCount]: any = await connection.query("SELECT COUNT(*) AS count FROM rewards");
+      if (rewardsCount[0].count === 0) {
+        await connection.query(`
+          INSERT IGNORE INTO rewards (id, code, name, description, points_required, stock, is_unlimited, valid_from, valid_until, status, reward_type, discount_type, discount_value, image_url, category)
+          VALUES
+          ('rw-esteh-free', 'ESTEH100', 'Gratis Es Teh Manis Segar', 'Tukar 100 poin untuk 1 cup Es Teh Manis dingin di WarmingUp FIT.', 100, NULL, 1, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'ACTIVE', 'VOUCHER', 'FREE_ITEM', 7000, '/uploads/default_voucher.png', 'Drink'),
+          ('rw-gila-cash20', 'GILACASH20', 'Cashback 20% Nasi Goreng Gila', 'Cashback poin 20% khusus pembelian Nasi Goreng Gila terfavorit.', 150, NULL, 1, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'ACTIVE', 'VOUCHER', 'PERCENTAGE', 20, '/uploads/default_voucher.png', 'Food'),
+          ('rw-ayam-20', 'AYAM20', 'Diskon 20% Ayam Bakar', 'Ayam bakar diskon 20% untuk makan siang hemat di WarmingUp FIT.', 200, NULL, 1, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'ACTIVE', 'VOUCHER', 'PERCENTAGE', 20, '/uploads/promos/promo-1780646072923.jpeg', 'Food'),
+          ('rw-ayam-teh', 'AYAMTEH', 'Beli Ayam Bakar Gratis Es Teh Manis', 'Dapatkan 1 cup Es Teh Manis dingin gratis pada pembelian paket Ayam Bakar.', 400, NULL, 1, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'ACTIVE', 'VOUCHER', 'FREE_ITEM', 7000, '/uploads/promos/promo-1781605494248.jpeg', 'Drink'),
+          ('rw-diskon-5k', 'DISKON5K', 'Voucher Potongan Rp 5.000', 'Potongan langsung Rp 5.000 khusus pembelian menu kantin (min. belanja Rp 10.000).', 500, NULL, 1, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'ACTIVE', 'VOUCHER', 'FIXED', 5000, '/uploads/default_voucher.png', 'Food'),
+          ('rw-kantin-50k', 'KANTIN50K', 'Voucher Makan Kantin Rp 50.000', 'Potongan langsung Rp 50.000 untuk seluruh menu kantin WarmingUp / Ngolab.', 5000, 50, 0, '2026-01-01 00:00:00', '2027-12-31 23:59:59', 'ACTIVE', 'VOUCHER', 'FIXED', 50000, '/uploads/default_voucher.png', 'Food')
+        `);
+      }
+
+      // Pastikan katalog coin_promos aktif & memiliki masa berlaku valid + kode promo NGOLABin88 / NGOLABID
+      await connection.query(`
+        UPDATE coin_promos SET valid_until = '2027-12-31 23:59:59', is_active = 1
+        WHERE id IN ('cp-1780646073298', 'cp-1781605494257', 'cp-1789530889514') AND valid_until < NOW()
+      `);
+      await connection.query(`
+        INSERT IGNORE INTO coin_promos (id, title, description, coin_cost, discount_type, discount_value, min_order, max_usage, used_count, valid_until, is_active, image_url, category, promo_code, limit_per_user)
+        VALUES
+        ('cp-1780649192893', 'Voucher Diskon Spesial NGOLABin88', 'Diskon ekstra 20% all menu menggunakan kode promo khusus mahasiswa.', 200, 'percentage', 20, 10000, 500, 0, '2027-12-31 23:59:59', 1, '/uploads/default_voucher.png', 'Makanan', 'NGOLABin88', 5),
+        ('cp-1781704530917', 'Cashback 20% Nasi Goreng Gila', 'Cashback koin 20% khusus pembelian Nasi Goreng Gila terfavorit.', 150, 'percentage', 20, 10000, 500, 0, '2027-12-31 23:59:59', 1, '/uploads/default_voucher.png', 'Makanan', 'GILACASH20', 5),
+        ('cp-kantin-50k', 'Voucher Makan Kantin Rp 50.000', 'Potongan langsung Rp 50.000 untuk seluruh menu kantin WarmingUp / Ngolab.', 5000, 'fixed', 50000, 50000, 100, 0, '2027-12-31 23:59:59', 1, '/uploads/default_voucher.png', 'Makanan', 'KANTIN50K', 2)
+      `);
+
+      // Sinkronkan saldo awal antara users.coin_balance dan loyalty_accounts.current_points
+      await connection.query(`
+        UPDATE users u
+        JOIN members m ON m.user_id = u.id
+        JOIN loyalty_accounts la ON la.member_id = m.id
+        SET u.coin_balance = GREATEST(u.coin_balance, la.current_points),
+            la.current_points = GREATEST(u.coin_balance, la.current_points),
+            la.lifetime_earned_points = GREATEST(la.lifetime_earned_points, GREATEST(u.coin_balance, la.current_points))
+        WHERE u.coin_balance <> la.current_points
+      `);
+
+      // Tabel feedbacks & reviews untuk PointLab
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`feedbacks\` (
+          \`id\` VARCHAR(50) NOT NULL,
+          \`user_id\` VARCHAR(50) DEFAULT NULL,
+          \`user_name\` VARCHAR(100) DEFAULT 'Member',
+          \`category\` VARCHAR(50) NOT NULL DEFAULT 'Umum',
+          \`message\` TEXT NOT NULL,
+          \`rating\` INT DEFAULT NULL,
+          \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`),
+          KEY \`idx_feedbacks_user_id\` (\`user_id\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+      `);
+
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`reviews\` (
+          \`id\` VARCHAR(50) NOT NULL,
+          \`user_id\` VARCHAR(50) DEFAULT NULL,
+          \`user_name\` VARCHAR(100) DEFAULT 'Member',
+          \`order_id\` VARCHAR(50) DEFAULT NULL,
+          \`menu_item_id\` VARCHAR(50) DEFAULT NULL,
+          \`rating\` INT NOT NULL DEFAULT 5,
+          \`review_text\` TEXT DEFAULT NULL,
+          \`created_at\` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`),
+          KEY \`idx_reviews_user_id\` (\`user_id\`),
+          KEY \`idx_reviews_order_id\` (\`order_id\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+      `);
+
+      // Pastikan kolom user_name pada feedbacks & reviews tersedia jika tabel dibuat oleh PointLab legacy
+      const [fbCols]: any = await connection.query("SHOW COLUMNS FROM `feedbacks`");
+      if (!fbCols.some((c: any) => c.Field === "user_name")) {
+        await connection.query("ALTER TABLE `feedbacks` ADD COLUMN `user_name` VARCHAR(100) DEFAULT 'Member' AFTER `user_id`");
+      }
+      const [revCols]: any = await connection.query("SHOW COLUMNS FROM `reviews`");
+      if (!revCols.some((c: any) => c.Field === "user_name")) {
+        await connection.query("ALTER TABLE `reviews` ADD COLUMN `user_name` VARCHAR(100) DEFAULT 'Member' AFTER `user_id`");
+      }
+
+      // Pastikan avatar_url mendukung data URL maupun path file
+      await connection.query("ALTER TABLE `users` MODIFY COLUMN `avatar_url` MEDIUMTEXT NULL").catch(() => {});
 
       console.log("✅ Membership and Loyalty Upgrade tables verified/created");
     } catch (err: any) {
