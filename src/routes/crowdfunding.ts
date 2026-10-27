@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/db.js";
+import { requireAuthenticated } from "../middleware/authSession.js";
 
 const router = Router();
 
@@ -14,12 +15,18 @@ router.get("/", async (_req: Request, res: Response) => {
 });
 
 // POST /api/patungan-rooms/:room_id/contribute — Urunan Poin ke Ruangan Patungan
-router.post("/:room_id/contribute", async (req: Request, res: Response) => {
+router.post("/:room_id/contribute", requireAuthenticated, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const { room_id } = req.params;
     const { user_id, amount } = req.body;
+    const currentAuth = (req as any).auth;
+
+    if (currentAuth?.role === 'Pelanggan' && String(currentAuth.id) !== String(user_id)) {
+      await connection.rollback();
+      return res.status(403).json({ message: "Anda hanya dapat berkontribusi menggunakan koin akun sendiri" });
+    }
 
     const parsedAmount = parseInt(amount);
     if (!user_id || isNaN(parsedAmount) || parsedAmount <= 0) {

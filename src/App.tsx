@@ -5,6 +5,7 @@
 
 import Layout from './components/Layout';
 import Login from './components/Login';
+import ErrorBoundary from './components/ErrorBoundary';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
@@ -29,12 +30,15 @@ function AppContent() {
 
 export default function App() {
   return (
-    <SettingsProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <AppContent />
-        </BrowserRouter>
-      </AuthProvider>
-    </SettingsProvider>
+    <ErrorBoundary>
+      <SettingsProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <AppContent />
+          </BrowserRouter>
+        </AuthProvider>
+      </SettingsProvider>
+    </ErrorBoundary>
   );
 }
+

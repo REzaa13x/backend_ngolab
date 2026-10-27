@@ -79,8 +79,8 @@ export default function Dashboard() {
     doc.text('RINGKASAN FINANSIAL', 20, 55);
     
     doc.setFontSize(10);
-    doc.text(`Total Pemasukan: Rp ${stats.totalRevenue.toLocaleString()}`, 20, 65);
-    doc.text(`Koin Terdistribusi: ${stats.distributedCoins.toLocaleString()}`, 100, 65);
+    doc.text(`Total Pemasukan: Rp ${(stats?.totalRevenue ?? 0).toLocaleString()}`, 20, 65);
+    doc.text(`Koin Terdistribusi: ${(stats?.distributedCoins ?? 0).toLocaleString()}`, 100, 65);
 
     // Table
     autoTable(doc, {
@@ -121,17 +121,36 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchData = () => {
       authFetch('/api/stats')
-        .then(res => res.json())
-        .then(data => setStats(data))
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (data && typeof data === 'object' && typeof data.totalRevenue !== 'undefined') {
+            setStats({
+              totalRevenue: Number(data.totalRevenue || 0),
+              pendingOrders: Number(data.pendingOrders || 0),
+              distributedCoins: Number(data.distributedCoins || 0),
+            });
+          }
+        })
         .catch(err => console.error("Failed to fetch stats:", err));
 
       authFetch('/api/sales-data')
-        .then(res => res.json())
-        .then(data => setSalesData(data))
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (Array.isArray(data)) setSalesData(data);
+        })
         .catch(err => console.error("Failed to fetch sales data:", err));
 
       authFetch('/api/orders')
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
         .then((rows: any[]) => {
           if (!Array.isArray(rows)) return;
           setTransactions(rows.slice(0, 8).map(o => ({
@@ -165,7 +184,7 @@ export default function Dashboard() {
   const summaryCards = [
     { 
       label: 'Total Pemasukan', 
-      value: `Rp ${stats.totalRevenue.toLocaleString()}`, 
+      value: `Rp ${(stats?.totalRevenue ?? 0).toLocaleString()}`, 
       change: '+12.5%', 
       isPositive: true, 
       icon: TrendingUp,
@@ -173,7 +192,7 @@ export default function Dashboard() {
     },
     { 
       label: 'Pesanan Tertunda', 
-      value: stats.pendingOrders.toString(), 
+      value: (stats?.pendingOrders ?? 0).toString(), 
       change: '-2.4%', 
       isPositive: true, 
       icon: ShoppingBag,
@@ -181,7 +200,7 @@ export default function Dashboard() {
     },
     { 
       label: 'Koin Terdistribusi', 
-      value: stats.distributedCoins.toLocaleString(), 
+      value: (stats?.distributedCoins ?? 0).toLocaleString(), 
       change: '+18.2%', 
       isPositive: true, 
       icon: Wallet,
@@ -216,7 +235,7 @@ export default function Dashboard() {
                 fontSize: '12px',
                 fontWeight: 'bold'
               }}
-              formatter={(value) => [`Rp ${value.toLocaleString()}`, 'Penjualan']}
+              formatter={(value: any) => [`Rp ${Number(value || 0).toLocaleString()}`, 'Penjualan']}
             />
             <Line 
               type="monotone" 
@@ -241,7 +260,7 @@ export default function Dashboard() {
               dataKey="sales"
               nameKey="day"
             >
-              {salesData.map((entry, index) => (
+              {Array.isArray(salesData) && salesData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={['#4F46E5', '#6366F1', '#818CF8', '#A5B4FC', '#C7D2FE', '#E0E7FF', '#EEF2FF'][index % 7]} />
               ))}
             </Pie>
@@ -253,7 +272,7 @@ export default function Dashboard() {
                 fontSize: '12px',
                 fontWeight: 'bold'
               }}
-              formatter={(value) => [`Rp ${value.toLocaleString()}`, 'Penjualan']}
+              formatter={(value: any) => [`Rp ${Number(value || 0).toLocaleString()}`, 'Penjualan']}
             />
           </PieChart>
         );
@@ -283,10 +302,10 @@ export default function Dashboard() {
                 fontSize: '12px',
                 fontWeight: 'bold'
               }}
-              formatter={(value) => [`Rp ${value.toLocaleString()}`, 'Penjualan']}
+              formatter={(value: any) => [`Rp ${Number(value || 0).toLocaleString()}`, 'Penjualan']}
             />
             <Bar dataKey="sales" radius={[6, 6, 0, 0]} barSize={40}>
-              {salesData.map((entry, index) => (
+              {Array.isArray(salesData) && salesData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={index === salesData.length - 1 ? '#4F46E5' : '#E2E8F0'} />
               ))}
             </Bar>

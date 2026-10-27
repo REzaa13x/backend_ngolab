@@ -8,6 +8,7 @@ import { requireAuthenticated, requireRoles, getVerifiedActor } from '../middlew
 
 const router = Router();
 const requireCoinAdmin = requireRoles('Super Admin');
+const requireCashierOrAdmin = requireRoles('Super Admin', 'Admin', 'Kasir');
 
 // ─── Upload Directory ────────────────────────────────────────────────────────
 const uploadDir = path.join(process.cwd(), "public", "uploads", "promos");
@@ -222,6 +223,14 @@ router.post("/:id/redeem", requireAuthenticated, async (req: Request, res: Respo
       [txId, user_id, user.nama, promo.coin_cost, `Tukar: ${promo.title}`, id]
     );
 
+    // FIX: Generate dan simpan record ke user_vouchers agar hak voucher tercatat di database
+    const voucherId = `uv-${Date.now()}`;
+    const voucherCode = `NGLB-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    await connection.query(
+      "INSERT INTO user_vouchers (id, user_id, promo_id, voucher_code, status) VALUES (?, ?, ?, ?, 'unused')",
+      [voucherId, user_id, id, voucherCode]
+    );
+
     await connection.commit();
 
     const [updatedUser]: any = await db.query("SELECT coin_balance FROM users WHERE id = ?", [user_id]);
@@ -234,6 +243,7 @@ router.post("/:id/redeem", requireAuthenticated, async (req: Request, res: Respo
     res.json({ 
       message: "Promo berhasil ditukar!", 
       transaction: { id: txId, amount: promo.coin_cost, type: 'redeem' }, 
+      voucher: { id: voucherId, voucher_code: voucherCode },
       new_balance: updatedUser[0].coin_balance 
     });
   } catch (err: any) {
@@ -247,9 +257,13 @@ router.post("/:id/redeem", requireAuthenticated, async (req: Request, res: Respo
 // ─── NEW USER-FACING VOUCHER ENDPOINTS (Fore Coffee inspired) ──────────────────
 
 // 1. GET /api/coin-promos/user-vouchers/:user_id - Ambil semua voucher aktif milik seorang user yang belum digunakan (unused)
-router.get("/user-vouchers/:user_id", async (req: Request, res: Response) => {
+router.get("/user-vouchers/:user_id", requireAuthenticated, async (req: Request, res: Response) => {
   try {
     const { user_id } = req.params;
+    const currentAuth = (req as any).auth;
+    if (currentAuth?.role === 'Pelanggan' && String(currentAuth.id) !== String(user_id)) {
+      return res.status(403).json({ message: 'Anda hanya dapat melihat voucher akun sendiri' });
+    }
     const query = `
       SELECT uv.id AS voucher_id, uv.voucher_code, uv.status, uv.created_at AS claimed_at,
              cp.id AS promo_id, cp.title, cp.description, cp.discount_type, cp.discount_value,
@@ -268,11 +282,16 @@ router.get("/user-vouchers/:user_id", async (req: Request, res: Response) => {
 });
 
 // 2. POST /api/coin-promos/claim-code - Mengklaim voucher menggunakan kode promo
-router.post("/claim-code", async (req: Request, res: Response) => {
+router.post("/claim-code", requireAuthenticated, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
     const { user_id, promo_code } = req.body;
+    const currentAuth = (req as any).auth;
+    if (currentAuth?.role === 'Pelanggan' && String(currentAuth.id) !== String(user_id)) {
+      await connection.rollback();
+      return res.status(403).json({ message: 'Anda hanya dapat mengklaim voucher untuk akun sendiri' });
+    }
 
     if (!user_id || !promo_code) {
       await connection.rollback();
@@ -472,7 +491,7 @@ router.post("/validate-voucher", async (req: Request, res: Response) => {
 });
 
 // 4. POST /api/coin-promos/use-voucher - Gunakan voucher (ubah status menjadi used)
-router.post("/use-voucher", async (req: Request, res: Response) => {
+router.post("/use-voucher", requireCashierOrAdmin, async (req: Request, res: Response) => {
   try {
     const { user_id, voucher_code } = req.body;
 

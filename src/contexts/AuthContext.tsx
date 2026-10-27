@@ -61,6 +61,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
     setIsLoading(false);
+
+    const handleUnauthorized = () => {
+      setUser(null);
+      setActiveRoleState(null);
+      localStorage.removeItem('tangolab_admin_user');
+      localStorage.removeItem('tangolab_active_role');
+      localStorage.removeItem('tangolab_login_timestamp');
+      localStorage.removeItem('tangolab_auth_token');
+      socket.disconnect();
+    };
+    window.addEventListener('tangolab:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('tangolab:unauthorized', handleUnauthorized);
   }, []);
 
   const login = (userData: User, token: string) => {
