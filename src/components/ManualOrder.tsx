@@ -300,7 +300,13 @@ export default function ManualOrder() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+          <div className="px-5 pt-3 xl:hidden">
+            <a href="#manual-order-checkout" className="flex items-center justify-between gap-3 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">
+              <span>Lihat pesanan & pembayaran</span>
+              <span>Rp {manualOrderTotal.toLocaleString()}</span>
+            </a>
+          </div>
+          <div className="flex-1 max-h-[40vh] xl:max-h-none overflow-y-auto p-5 custom-scrollbar">
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm font-semibold text-slate-700">Produk</p>
               <p className="text-xs text-slate-500">{filteredMenu.length} produk tersedia</p>
@@ -363,7 +369,7 @@ export default function ManualOrder() {
           </div>
         </section>
 
-        <aside className="min-h-[520px] xl:min-h-0 bg-white flex flex-col xl:overflow-y-auto">
+        <aside id="manual-order-checkout" className="min-h-0 bg-white flex flex-col xl:overflow-y-auto">
           <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingBag size={18} className="text-primary" />
@@ -397,7 +403,7 @@ export default function ManualOrder() {
             {orderMode === 'preorder' && <label className="block"><span className="text-xs font-medium text-slate-600 mb-1.5 block">Nomor WhatsApp pelanggan</span><input type="tel" placeholder="08xxxxxxxxxx" value={manualCustomerPhone} onChange={event => setManualCustomerPhone(event.target.value)} className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10" /></label>}
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+          <div className="flex-1 min-h-0 max-h-48 overflow-y-auto custom-scrollbar">
             {selectedItems.length === 0 ? (
               <div className="h-full min-h-52 flex flex-col items-center justify-center text-center px-8">
                 <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-3">
@@ -454,7 +460,8 @@ export default function ManualOrder() {
             )}
           </div>
 
-          <div className="border-t border-slate-200 p-5 space-y-4 bg-white">
+          <div className="border-t border-slate-200 p-4 space-y-3 bg-white">
+            <h3 className="text-sm font-semibold text-slate-900">Konfirmasi pembayaran</h3>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { value: 'Tunai', label: 'Tunai', icon: Banknote },

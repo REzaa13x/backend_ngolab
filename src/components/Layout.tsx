@@ -22,7 +22,7 @@ import PreorderOrders from './PreorderOrders';
 import ApiDocumentation from './ApiDocumentation';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bell, Search, Settings, User, HelpCircle, Volume2, VolumeX } from 'lucide-react';
+import { Menu, Volume2, VolumeX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import socket from '../lib/socket';
@@ -53,6 +53,16 @@ const DEFAULT_TAB_BY_ROLE: Record<string, string> = {
     return saved !== 'false';
   });
   const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileNavOpen]);
 
   // Sync sound settings across tabs and components
   useEffect(() => {
@@ -208,38 +218,29 @@ const DEFAULT_TAB_BY_ROLE: Record<string, string> = {
   };
 
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+    <div className="flex h-dvh bg-slate-50 text-slate-900 overflow-hidden">
+      {mobileNavOpen && <button type="button" aria-label="Tutup navigasi" onClick={() => setMobileNavOpen(false)} className="fixed inset-0 z-30 bg-black/50 md:hidden" />}
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
       
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Header */}
-        <header className="h-16 border-b border-slate-100 bg-white/80 dark:bg-[#0f172a]/80 backdrop-blur-md flex items-center justify-between px-8 shrink-0 z-10">
-          <div className="flex items-center gap-4 flex-1">
-            <h1 className="text-base font-bold text-slate-900">
+        <header className="h-16 border-b border-slate-100 bg-white/80 dark:bg-[#0f172a]/80 backdrop-blur-md flex items-center justify-between px-4 sm:px-8 shrink-0 z-10 gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+            <button type="button" aria-label="Buka navigasi" aria-controls="main-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-slate-100 text-slate-600"><Menu size={22} /></button>
+            <h1 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
               {tabTitles[activeTab] || activeTab}
             </h1>
           </div>
 
-          <div className="flex items-center gap-6">
-            <LiveClock />
-            <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Cari data..."
-                className="w-64 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 rounded-lg pl-10 pr-4 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
-              />
-            </div>
-            
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <div className="hidden lg:block"><LiveClock /></div>
             <div className="flex items-center gap-2">
-              <button className="p-2 text-slate-400 hover:text-indigo-600 transition-colors">
-                <HelpCircle className="w-5 h-5" />
-              </button>
-              
               {/* Global Kitchen Bell Toggle Button */}
               <button
                 onClick={toggleSound}
                 title={soundEnabled ? 'Matikan suara bel' : 'Aktifkan suara bel'}
+                aria-label={soundEnabled ? 'Matikan suara bel' : 'Aktifkan suara bel'}
+                aria-pressed={soundEnabled}
                 className={cn(
                   "p-2 rounded-lg transition-colors flex items-center justify-center relative",
                   soundEnabled
@@ -253,10 +254,7 @@ const DEFAULT_TAB_BY_ROLE: Record<string, string> = {
                 )}
               </button>
 
-              <button className="relative p-2 text-slate-400 hover:text-indigo-600 transition-colors">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-2 right-2 w-2 h-2 bg-indigo-600 rounded-full border-2 border-white" />
-              </button>
+
             </div>
             
             <div className="h-6 w-[1px] bg-slate-100 mx-1" />
@@ -274,7 +272,7 @@ const DEFAULT_TAB_BY_ROLE: Record<string, string> = {
         </header>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

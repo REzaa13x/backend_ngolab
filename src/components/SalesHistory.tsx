@@ -291,13 +291,16 @@ export default function SalesHistory() {
       </div>
 
       {/* ── Filters & Search ── */}
-      <div className="flex flex-col xl:flex-row items-stretch xl:items-center gap-4">
+      <section aria-label="Filter transaksi" className="bg-white rounded-[2rem] border border-slate-100 p-5 space-y-4">
+        <div><h3 className="font-black text-slate-900">Filter transaksi</h3><p className="text-xs text-slate-500">Filter berlaku untuk ringkasan, daftar, dan ekspor.</p></div>
+      <div className="flex flex-col gap-4">
 
         {/* Search */}
         <div className="relative flex-1 group">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
+            aria-label="Cari nama pelanggan atau nomor invoice"
             placeholder="Cari nama pelanggan atau nomor invoice..."
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -306,11 +309,12 @@ export default function SalesHistory() {
         </div>
 
         {/* Source filter */}
-        <div className="flex gap-1 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+        <div><p className="text-xs font-bold text-slate-600 mb-2">Sumber transaksi</p><div role="group" aria-label="Sumber transaksi" className="flex gap-1 p-1 bg-slate-100 rounded-2xl border border-slate-200 overflow-x-auto">
           {(['semua', 'ngolab', 'coworking', 'manual', 'smart_tag'] as FilterSource[]).map(s => (
             <button
               key={s}
               onClick={() => setFilterSource(s)}
+              aria-pressed={filterSource === s}
               className={cn(
                 'px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap',
                 filterSource === s ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400 hover:text-slate-700'
@@ -325,12 +329,14 @@ export default function SalesHistory() {
           ))}
         </div>
 
+        </div>
         {/* Status filter */}
-        <div className="flex gap-1 p-1 bg-white border border-slate-100 rounded-2xl overflow-x-auto scrollbar-hide">
+        <div><p className="text-xs font-bold text-slate-600 mb-2">Status pembayaran</p><div role="group" aria-label="Status pembayaran" className="flex gap-1 p-1 bg-white border border-slate-100 rounded-2xl overflow-x-auto scrollbar-hide">
           {(['semua', 'lunas', 'pending_verifikasi', 'belum_bayar', 'ditolak'] as FilterStatus[]).map(s => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
+              aria-pressed={filterStatus === s}
               className={cn(
                 'px-3 py-2 rounded-xl text-[10px] font-bold whitespace-nowrap transition-all',
                 filterStatus === s ? 'bg-violet-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'
@@ -345,6 +351,9 @@ export default function SalesHistory() {
         </div>
       </div>
 
+      </div>
+      </section>
+
       {/* ── Period summary ── */}
       <section className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -352,11 +361,12 @@ export default function SalesHistory() {
             <div className="p-2.5 bg-orange-50 rounded-xl"><CalendarDays size={18} className="text-orange-600" /></div>
             <div><h3 className="font-black text-slate-900">Ringkasan Pendapatan</h3><p className="text-xs text-slate-400">Hanya transaksi berstatus Lunas</p></div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="flex p-1 bg-slate-100 rounded-xl">
-              {(['hari', 'minggu', 'bulan', 'semua'] as const).map(value => <button key={value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase', period === value ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400')}>{value === 'hari' ? 'Harian' : value === 'minggu' ? 'Mingguan' : value === 'bulan' ? 'Bulanan' : 'Semua Periode'}</button>)}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-slate-600">Periode</span>
+            <div role="group" aria-label="Periode" className="flex p-1 bg-slate-100 rounded-xl overflow-x-auto">
+              {(['hari', 'minggu', 'bulan', 'semua'] as const).map(value => <button key={value} aria-pressed={period === value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase', period === value ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400')}>{value === 'hari' ? 'Harian' : value === 'minggu' ? 'Mingguan' : value === 'bulan' ? 'Bulanan' : 'Semua Periode'}</button>)}
             </div>
-            <input aria-label="Tanggal acuan WIB" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" />
+            <label className="text-xs font-bold text-slate-600">Tanggal acuan (WIB) <input aria-label="Tanggal acuan WIB" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" /></label>
           </div>
         </div>
         <p className="text-xs text-slate-500">Waktu WIB (Asia/Jakarta); mingguan Senin–Minggu. Timestamp tanpa zona dianggap WIB; tanggal tidak valid hanya muncul pada Semua Periode.</p>

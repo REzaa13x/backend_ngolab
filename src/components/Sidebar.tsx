@@ -22,7 +22,8 @@ import {
   CalendarClock,
   CalendarCheck,
   CheckCircle2,
-  Webhook
+  Webhook,
+  X
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
@@ -35,6 +36,8 @@ import socket from '../lib/socket';
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
 }
 
 export type UserRole = 'Super Admin' | 'Kasir' | 'Koki' | 'Support';
@@ -61,7 +64,7 @@ const navItems = [
   { id: 'settings', label: 'Pengaturan Admin', icon: Settings, section: 'Sistem', roles: ['Super Admin'] },
 ];
 
-export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, mobileOpen, onCloseMobile }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { user, activeRole, setActiveRole, logout } = useAuth();
   const { settings } = useSettings();
@@ -114,10 +117,10 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const sections = Array.from(new Set(filteredNavItems.map(item => item.section)));
 
   return (
-    <motion.aside
-      initial={false}
-      animate={{ width: isCollapsed ? '80px' : '260px' }}
-      className="h-screen bg-slate-50 dark:bg-[#0f172a] border-r border-slate-100 dark:border-slate-800 flex flex-col relative z-20 shadow-premium"
+    <aside
+      id="main-navigation"
+      aria-label="Navigasi utama"
+      className={cn('h-dvh bg-slate-50 dark:bg-[#0f172a] border-r border-slate-100 dark:border-slate-800 flex-col fixed inset-y-0 left-0 z-40 shadow-premium md:relative md:flex md:shrink-0 w-[260px]', mobileOpen ? 'flex' : 'hidden', isCollapsed ? 'md:w-20' : 'md:w-[260px]')}
     >
       {/* Logo Section */}
       <div className="p-6 flex items-center gap-3 overflow-hidden border-b border-slate-100 dark:border-slate-800">
@@ -130,7 +133,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         ) : (
           <img src="/geasture-x-ngolab.png" alt="Geasture X Ngolab" className="w-10 h-10 rounded-xl object-contain shrink-0 shadow-sm border border-slate-200 dark:border-slate-700" />
         )}
-        {!isCollapsed && (
+        {(!isCollapsed || mobileOpen) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -146,8 +149,10 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         )}
       </div>
 
+      <button type="button" onClick={onCloseMobile} aria-label="Tutup navigasi" className="absolute right-3 top-4 p-2 rounded-lg text-slate-500 hover:bg-slate-100 md:hidden"><X size={20} /></button>
+
       {/* Role Switcher for Admin */}
-      {!isCollapsed && user?.role === 'Super Admin' && (
+      {(!isCollapsed || mobileOpen) && user?.role === 'Super Admin' && (
         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800">
           <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2">
             Tampilan Peran:
@@ -156,6 +161,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             {(['Super Admin', 'Kasir', 'Koki', 'Support'] as UserRole[]).map(r => (
               <button
                 key={r}
+                aria-pressed={currentRole === r}
                 onClick={() => {
                   setActiveRole(r);
                   // Auto navigate to the default page of the new role
@@ -179,10 +185,10 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       )}
 
       {/* Navigation */}
-      <div className="flex-1 overflow-y-auto py-6 space-y-8 custom-scrollbar">
+      <nav aria-label="Menu" className="flex-1 overflow-y-auto py-6 space-y-8 custom-scrollbar">
         {sections.map(section => (
           <div key={section} className="space-y-2">
-            {!isCollapsed && (
+            {(!isCollapsed || mobileOpen) && (
               <h3 className="px-6 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">
                 {section}
               </h3>
@@ -193,7 +199,10 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                 .map(item => (
                   <button
                     key={item.id}
-                    onClick={() => setActiveTab(item.id)}
+                    onClick={() => { setActiveTab(item.id); onCloseMobile(); }}
+                    title={item.label}
+                    aria-label={item.label}
+                    aria-current={activeTab === item.id ? 'page' : undefined}
                     className={cn(
                       "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative text-sm font-medium",
                       activeTab === item.id 
@@ -207,21 +216,21 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                         ? "text-white" 
                         : "text-slate-500 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-white"
                     )} />
-                    {!isCollapsed && (
+                    {(!isCollapsed || mobileOpen) && (
                       <span className="whitespace-nowrap">{item.label}</span>
                     )}
                     {item.id === 'kds' && kdsPendingCount > 0 && (
                       <span className={cn(
                         'ml-auto min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center animate-pulse',
                         activeTab === item.id && 'bg-white text-rose-600',
-                        isCollapsed && 'absolute -top-1 -right-1'
+                        isCollapsed && !mobileOpen && 'absolute -top-1 -right-1'
                       )}>{kdsPendingCount > 99 ? '99+' : kdsPendingCount}</span>
                     )}
                     {item.id === 'stock' && stockAlertCount > 0 && (
                       <span className={cn(
                         'ml-auto min-w-5 h-5 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center',
                         activeTab === item.id && 'bg-white text-rose-600',
-                        isCollapsed && 'absolute -top-1 -right-1'
+                        isCollapsed && !mobileOpen && 'absolute -top-1 -right-1'
                       )}>{stockAlertCount > 99 ? '99+' : stockAlertCount}</span>
                     )}
                     {activeTab === item.id && (
@@ -235,7 +244,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             </div>
           </div>
         ))}
-      </div>
+      </nav>
 
       {/* Footer / Profile */}
       <div className="p-4 border-t border-slate-100 dark:border-slate-800">
@@ -246,7 +255,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             </div>
             <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white dark:border-slate-800" />
           </div>
-          {!isCollapsed && (
+          {(!isCollapsed || mobileOpen) && (
             <div className="flex-1 min-w-0">
               <p className="text-xs font-bold text-slate-900 dark:text-white truncate">{user?.name}</p>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
@@ -263,19 +272,22 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             isCollapsed ? "px-0" : ""
           )}
           title="Keluar"
+          aria-label="Keluar"
         >
           <LogOut size={16} />
-          {!isCollapsed && <span className="text-xs font-bold">Keluar</span>}
+          {(!isCollapsed || mobileOpen) && <span className="text-xs font-bold">Keluar</span>}
         </button>
       </div>
 
       {/* Collapse Toggle */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute -right-3 top-20 w-6 h-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-orange-500 dark:hover:text-orange-400 transition-colors z-30 shadow-premium"
+        aria-label={isCollapsed ? 'Perluas navigasi' : 'Ringkas navigasi'}
+        aria-expanded={!isCollapsed}
+        className="hidden md:flex absolute -right-3 top-20 w-6 h-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full items-center justify-center text-slate-500 dark:text-slate-400 hover:text-orange-500 dark:hover:text-orange-400 transition-colors z-30 shadow-premium"
       >
         {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
       </button>
-    </motion.aside>
+    </aside>
   );
 }

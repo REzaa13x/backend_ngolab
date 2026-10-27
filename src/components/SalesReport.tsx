@@ -257,10 +257,10 @@ export default function SalesReport() {
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-xl shadow-inner">
+          <div role="group" aria-label="Periode" className="flex max-w-full overflow-x-auto bg-slate-50 border border-slate-100 p-1 rounded-xl shadow-inner">
             {[
               { id: 'day', label: 'Hari' },
-              { id: 'week', label: 'Minggu' },
+              { id: 'week', label: '7 hari terakhir' },
               { id: 'month', label: 'Bulan' },
               { id: 'year', label: 'Tahun' },
               { id: 'all', label: 'Semua' }
@@ -268,6 +268,7 @@ export default function SalesReport() {
               <button
                 key={p.id}
                 onClick={() => setPeriod(p.id as any)}
+                aria-pressed={period === p.id}
                 className={cn(
                   "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
                   period === p.id 
@@ -303,10 +304,39 @@ export default function SalesReport() {
             className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 dark:shadow-none disabled:opacity-50"
           >
             {isExporting ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-            Eksport PDF
+            Ekspor PDF
           </button>
         </div>
       </div>
+
+      <section aria-label="Filter transaksi" className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-3">
+        <div><h3 className="font-black text-slate-900">Filter transaksi</h3><p className="text-xs text-slate-500">Sumber dan periode berlaku untuk metrik, ringkasan, daftar dan ekspor. Grafik bulanan menggunakan semua sumber tahun ini.</p></div>
+        <p className="text-xs font-bold text-slate-600">Sumber transaksi</p>
+            <div role="group" aria-label="Sumber transaksi" className="flex bg-slate-50 border border-slate-100 p-1 rounded-xl shadow-inner overflow-x-auto custom-scrollbar">
+               {[
+                 { id: 'all', label: 'Semua Sumber' },
+                 { id: 'ngolab', label: 'Gesture Eats' },
+                 { id: 'coworking', label: 'Coworking' },
+                 { id: 'smart_tag_qr', label: 'Smart Tag' },
+                 { id: 'manual', label: 'Manual' }
+               ].map((s) => (
+                 <button
+                   key={s.id}
+                   onClick={() => setSourceFilter(s.id as any)}
+                   aria-pressed={sourceFilter === s.id}
+                   className={cn(
+                     "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
+                     sourceFilter === s.id
+                       ? "bg-slate-900 text-white shadow-md"
+                       : "text-slate-500 hover:text-slate-800 hover:bg-white/50"
+                   )}
+                 >
+                   {s.label}
+                 </button>
+               ))}
+            </div>
+        <p className="text-xs text-slate-500">Transaksi lunas, ditolak, atau dibatalkan ditampilkan; metrik pendapatan hanya dari transaksi lunas.</p>
+      </section>
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -368,31 +398,10 @@ export default function SalesReport() {
                  <FileText className="text-indigo-600" size={20} />
                  Master Riwayat Transaksi
                </h3>
-                <p className="text-xs text-slate-500 font-medium">Rekam jejak seluruh pesanan berdasarkan filter sumber.</p>
+                <p className="text-xs text-slate-500 font-medium">Transaksi sesuai filter periode dan sumber di atas.</p>
             </div>
             
-            <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-xl shadow-inner overflow-x-auto custom-scrollbar">
-               {[
-                 { id: 'all', label: 'Semua Sumber' },
-                 { id: 'ngolab', label: 'Gesture Eats' },
-                 { id: 'coworking', label: 'Coworking' },
-                 { id: 'smart_tag_qr', label: 'Smart Tag' },
-                 { id: 'manual', label: 'Manual' }
-               ].map((s) => (
-                 <button
-                   key={s.id}
-                   onClick={() => setSourceFilter(s.id as any)}
-                   className={cn(
-                     "px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
-                     sourceFilter === s.id 
-                       ? "bg-slate-900 text-white shadow-md" 
-                       : "text-slate-500 hover:text-slate-800 hover:bg-white/50"
-                   )}
-                 >
-                   {s.label}
-                 </button>
-               ))}
-            </div>
+
          </div>
 
          {/* Table */}
