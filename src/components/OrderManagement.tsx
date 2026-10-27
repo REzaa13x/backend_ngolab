@@ -1,3 +1,4 @@
+import { formatWibTimestamp, wibDateKey, parseHistoryTimestamp } from '../lib/salesHistoryPeriod';
 import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -140,11 +141,12 @@ export default function OrderManagement() {
 
       if (period === 'all') return true;
 
-      const orderDate = new Date(order.created_at);
+      const orderDate = parseHistoryTimestamp(order.created_at);
+      if (!orderDate) return false;
       const now = new Date();
 
       if (period === 'day') {
-        return orderDate.toDateString() === now.toDateString();
+        return wibDateKey(orderDate) === wibDateKey(now);
       }
 
       if (period === 'week') {
@@ -154,11 +156,11 @@ export default function OrderManagement() {
       }
 
       if (period === 'month') {
-        return orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
+        return wibDateKey(orderDate).slice(0, 7) === wibDateKey(now).slice(0, 7);
       }
 
       if (period === 'year') {
-        return orderDate.getFullYear() === now.getFullYear();
+        return wibDateKey(orderDate).slice(0, 4) === wibDateKey(now).slice(0, 4);
       }
 
       return true;
@@ -309,13 +311,13 @@ export default function OrderManagement() {
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.text(`Periode: ${period.toUpperCase()}`, 14, 28);
-    doc.text(`Waktu Cetak: ${new Date().toLocaleString('id-ID')}`, 14, 33);
+    doc.text(`Waktu Cetak: ${formatWibTimestamp(new Date()) + ' WIB'}`, 14, 33);
     doc.text(`Total Pesanan: ${filteredOrders.length}`, 14, 38);
     
     const tableData = filteredOrders.map(o => [
       o.invoice_number,
       o.customer_name,
-      new Date(o.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }),
+      formatWibTimestamp(o.created_at) + ' WIB',
       o.payment_method || 'Tunai',
       o.payment_status.toUpperCase(),
       `Rp ${o.total_price.toLocaleString()}`
@@ -541,7 +543,7 @@ export default function OrderManagement() {
                         )}
                       </div>
                       <span className="text-[10px] text-slate-400 font-medium">
-                        {new Date(order.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} • {order.external_id || '-'}
+                        {formatWibTimestamp(order.created_at, { hour: '2-digit', minute: '2-digit' }) + ' WIB'} • {order.external_id || '-'}
                       </span>
                     </div>
                   </td>
@@ -647,7 +649,7 @@ export default function OrderManagement() {
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Waktu</span>
-                    <span className="text-[11px] font-bold text-slate-700">{new Date(selectedOrder.created_at).toLocaleString('id-ID')}</span>
+                    <span className="text-[11px] font-bold text-slate-700">{formatWibTimestamp(selectedOrder.created_at) + ' WIB'}</span>
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">No. Faktur</span>

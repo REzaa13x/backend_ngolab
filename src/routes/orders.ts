@@ -1,3 +1,4 @@
+import { normalizeOrderCreatedAt } from "../lib/orderTimestamp.js";
 import { Router, Request, Response } from "express";
 import { randomUUID } from "crypto";
 import fs from "fs/promises";
@@ -52,7 +53,7 @@ const ORDER_ITEM_IMAGE_SQL = `
 // GET /api/orders — Ambil semua pesanan
 router.get("/", requireOrderStaff, async (_req: Request, res: Response) => {
   try {
-    const [orders]: any = await db.query("SELECT * FROM orders ORDER BY created_at DESC");
+    const [orders]: any = await db.query("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders ORDER BY created_at DESC");
     
     // Ambil item untuk setiap order
     for (const order of orders) {
@@ -67,7 +68,7 @@ router.get("/", requireOrderStaff, async (_req: Request, res: Response) => {
       }));
     }
     
-    res.json(orders);
+    res.json(orders.map(normalizeOrderCreatedAt));
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil pesanan", error: err.message });
   }
@@ -104,7 +105,7 @@ router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Outlet tidak valid' });
     }
     const [orders]: any = await db.query(
-      `SELECT * FROM orders
+      `SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders
        WHERE outlet = ?
          AND LOWER(status) IN ('menunggu', 'sedang_diproses', 'siap')
          AND (
@@ -127,7 +128,7 @@ router.get("/kds", requireOrderStaff, async (req: Request, res: Response) => {
       }));
     }
     
-    res.json(orders);
+    res.json(orders.map(normalizeOrderCreatedAt));
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil pesanan KDS", error: err.message });
   }
@@ -264,7 +265,8 @@ router.post("/manual", requireOrderStaff, async (req: Request, res: Response) =>
     await connection.commit();
 
     // Fetch the inserted order to return
-    const [insertedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [orderId]);
+    const [insertedOrder]: any = await db.query("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id = ?", [orderId]);
+    insertedOrder.forEach((row: any, index: number) => { insertedOrder[index] = normalizeOrderCreatedAt(row); });
     insertedOrder[0].items = orderItems.map((i: any) => ({
       id: i.menu_id, name: i.item_name, quantity: i.quantity, price: i.price
     }));
@@ -389,7 +391,8 @@ router.post("/external", requireApiKeyScope('orders:write'), async (req: Request
     await connection.commit();
 
     // Fetch the inserted order to return
-    const [insertedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [orderId]);
+    const [insertedOrder]: any = await db.query("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id = ?", [orderId]);
+    insertedOrder.forEach((row: any, index: number) => { insertedOrder[index] = normalizeOrderCreatedAt(row); });
     insertedOrder[0].items = normalizedItems.map(item => ({
       id: item.menuId,
       name: item.name,
@@ -505,7 +508,8 @@ router.post(
         log: (message, error) => console.error(message, error),
       });
 
-      const [updatedOrders]: any = await db.query('SELECT * FROM orders WHERE id = ?', [req.params.id]);
+      const [updatedOrders]: any = await db.query('SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id = ?', [req.params.id]);
+      updatedOrders.forEach((row: any, index: number) => { updatedOrders[index] = normalizeOrderCreatedAt(row); });
       const updatedOrder = updatedOrders[0];
       const io = req.app.get('io');
       if (io) io.emit('order_updated', updatedOrder);
@@ -525,7 +529,7 @@ router.post(
 router.get("/external/history", requireApiKeyScope('orders:read'), async (req: Request, res: Response) => {
   try {
     const [orders]: any = await db.query(
-      `SELECT * FROM orders WHERE source IN ('ngolab', 'smart_tag_qr') ORDER BY created_at DESC LIMIT 100`
+      `SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE source IN ('ngolab', 'smart_tag_qr') ORDER BY created_at DESC LIMIT 100`
     );
     
     // Ambil item untuk setiap order
@@ -539,7 +543,7 @@ router.get("/external/history", requireApiKeyScope('orders:read'), async (req: R
       }));
     }
     
-    res.json(orders);
+    res.json(orders.map(normalizeOrderCreatedAt));
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil riwayat transaksi", error: err.message });
   }
@@ -549,7 +553,7 @@ router.get("/external/history", requireApiKeyScope('orders:read'), async (req: R
 router.get("/external/incoming", requireApiKeyScope('orders:read'), async (req: Request, res: Response) => {
   try {
     const [orders]: any = await db.query(
-      `SELECT * FROM orders WHERE status IN ('menunggu', 'sedang_diproses', 'siap') ORDER BY created_at DESC`
+      `SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE status IN ('menunggu', 'sedang_diproses', 'siap') ORDER BY created_at DESC`
     );
     
     // Ambil item untuk setiap order
@@ -563,7 +567,7 @@ router.get("/external/incoming", requireApiKeyScope('orders:read'), async (req: 
       }));
     }
     
-    res.json(orders);
+    res.json(orders.map(normalizeOrderCreatedAt));
   } catch (err: any) {
     res.status(500).json({ message: "Gagal mengambil data pesanan masuk", error: err.message });
   }
@@ -611,7 +615,8 @@ router.post("/:id/verify", requirePaymentStaff, async (req: Request, res: Respon
 
     await connection.commit();
 
-    const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [id]);
+    const [updatedOrder]: any = await db.query("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id = ?", [id]);
+    updatedOrder.forEach((row: any, index: number) => { updatedOrder[index] = normalizeOrderCreatedAt(row); });
     
     // Log to security audit
     const actor = getVerifiedActor(req);
@@ -649,7 +654,8 @@ router.post("/:id/reject", requirePaymentStaff, async (req: Request, res: Respon
     const inventoryChanges = await restoreInventoryForOrder(connection, req.params.id, actor);
     await connection.query("UPDATE orders SET payment_status = 'ditolak', status = 'dibatalkan' WHERE id = ?", [req.params.id]);
     await connection.commit();
-    const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
+    const [updatedOrder]: any = await db.query("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id = ?", [req.params.id]);
+    updatedOrder.forEach((row: any, index: number) => { updatedOrder[index] = normalizeOrderCreatedAt(row); });
     await addAuditLog(actor, "Tolak Pesanan", `${updatedOrder[0].invoice_number} (Dibatalkan)`, "warning");
 
     const io = req.app.get('io');
@@ -711,7 +717,8 @@ router.patch("/:id/payment-status", requirePaymentStaff, async (req: Request, re
 
     await connection.commit();
 
-    const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [id]);
+    const [updatedOrder]: any = await db.query("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id = ?", [id]);
+    updatedOrder.forEach((row: any, index: number) => { updatedOrder[index] = normalizeOrderCreatedAt(row); });
     
     // Log to security audit
     const actor = getVerifiedActor(req);
@@ -760,7 +767,8 @@ router.patch("/:id/status", requireOrderStaff, async (req: Request, res: Respons
       await connection.query("UPDATE orders SET status = ? WHERE id = ?", [status, req.params.id]);
     }
     await connection.commit();
-    const [updatedOrder]: any = await db.query("SELECT * FROM orders WHERE id = ?", [req.params.id]);
+    const [updatedOrder]: any = await db.query("SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id = ?", [req.params.id]);
+    updatedOrder.forEach((row: any, index: number) => { updatedOrder[index] = normalizeOrderCreatedAt(row); });
     const actor = getVerifiedActor(req);
     await addAuditLog(actor, "Update Status Pesanan", `${updatedOrder[0].invoice_number} (${status})`);
 

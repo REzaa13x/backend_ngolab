@@ -11,6 +11,11 @@ export function parseHistoryTimestamp(value: string): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+export function formatWibTimestamp(value: string | Date, options: Intl.DateTimeFormatOptions = { dateStyle: 'short', timeStyle: 'short' }): string {
+  const date = typeof value === 'string' ? parseHistoryTimestamp(value) : value;
+  return date && Number.isFinite(date.getTime()) ? date.toLocaleString('id-ID', { ...options, timeZone: 'Asia/Jakarta' }) : 'Tanggal tidak valid';
+}
+
 export function wibDateKey(value: string | Date): string {
   const date = typeof value === 'string' ? parseHistoryTimestamp(value) : value;
   if (!date) return '';

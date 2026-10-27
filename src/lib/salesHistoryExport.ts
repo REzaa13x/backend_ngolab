@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { jsPDF } from 'jspdf';
 import { autoTable } from 'jspdf-autotable';
-import { parseHistoryTimestamp } from './salesHistoryPeriod';
+import { formatWibTimestamp } from './salesHistoryPeriod';
 
 export interface HistoryExportOrder {
   invoice_number: string; customer_name: string; source: string; external_id?: string;
@@ -9,9 +9,8 @@ export interface HistoryExportOrder {
 }
 export function historyExportRows(orders: HistoryExportOrder[]) {
   return orders.map(o => {
-    const date = parseHistoryTimestamp(o.created_at);
     return [o.invoice_number || '-', o.customer_name || '-', o.external_id === 'MANUAL' ? `Manual (${o.source})` : o.source || '-',
-      date ? date.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'short', timeStyle: 'short' }) + ' WIB' : 'Tanggal tidak valid',
+      formatWibTimestamp(o.created_at) + ' WIB',
       o.payment_status || '-', o.status || '-', o.payment_method || '-', Number(o.total_price) || 0] as const;
   });
 }

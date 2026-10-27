@@ -1,3 +1,4 @@
+import { formatWibTimestamp, parseHistoryTimestamp } from '../lib/salesHistoryPeriod';
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   BarChart, 
@@ -130,7 +131,7 @@ export default function SalesReport() {
       // Filter Waktu
       if (period === 'all') return true;
 
-      const orderDate = new Date(order.created_at);
+      const orderDate = parseHistoryTimestamp(order.created_at);
       const now = new Date();
 
       if (period === 'day' || period === 'month' || period === 'year') {
@@ -141,7 +142,7 @@ export default function SalesReport() {
       if (period === 'week') {
         const weekAgo = new Date();
         weekAgo.setDate(now.getDate() - 7);
-        return orderDate >= weekAgo;
+        return !!orderDate && orderDate >= weekAgo;
       }
 
       return true;
@@ -435,7 +436,7 @@ export default function SalesReport() {
                          <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-900 leading-none">{row.invoice_number}</span>
                             <span className="text-[10px] text-slate-400 font-medium mt-1">
-                               {new Date(row.created_at).toLocaleString('id-ID', { timeZone: APP_TIMEZONE, dateStyle: 'medium', timeStyle: 'short' })}
+                               {formatWibTimestamp(row.created_at, { dateStyle: 'medium', timeStyle: 'short' }) + ' WIB'}
                             </span>
                          </div>
                       </td>
@@ -644,7 +645,7 @@ export default function SalesReport() {
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Waktu</span>
-                    <span className="text-[11px] font-bold text-slate-700">{new Date(selectedOrder.created_at).toLocaleString('id-ID', { timeZone: APP_TIMEZONE })}</span>
+                    <span className="text-[11px] font-bold text-slate-700">{formatWibTimestamp(selectedOrder.created_at) + ' WIB'}</span>
                  </div>
                  <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-slate-400 uppercase">No. Faktur</span>

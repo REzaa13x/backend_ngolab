@@ -10,8 +10,10 @@ export interface MonthlyRow {
   verified: number | string;
 }
 
+import { wibDateKey } from './salesHistoryPeriod';
+
 export function reportDateInJakarta(value: string | Date): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+  return wibDateKey(value);
 }
 
 export function buildDailyReport(orders: (OrderSummaryRow & { created_at: string })[]) {

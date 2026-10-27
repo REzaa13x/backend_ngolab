@@ -7,7 +7,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { authFetch } from '../lib/authFetch';
-import { HistoryPeriod, matchesHistoryPeriod, parseHistoryTimestamp, wibDateKey } from '../lib/salesHistoryPeriod';
+import { HistoryPeriod, matchesHistoryPeriod, parseHistoryTimestamp, wibDateKey, formatWibTimestamp } from '../lib/salesHistoryPeriod';
 import { exportHistoryExcel, exportHistoryPdf } from '../lib/salesHistoryExport';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -57,8 +57,7 @@ function fmtRp(n: number) {
 const APP_TIMEZONE = 'Asia/Jakarta';
 
 function fmtDate(value: string) {
-  const date = parseHistoryTimestamp(value);
-  return date ? date.toLocaleString('id-ID', { timeZone: APP_TIMEZONE, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Tanggal tidak valid';
+  return formatWibTimestamp(value, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 function periodKey(value: string, monthOnly = false) {
   const key = wibDateKey(value);
