@@ -7,6 +7,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { authFetch } from '../lib/authFetch';
+import { HistoryPeriod, matchesHistoryPeriod, parseHistoryTimestamp, wibDateKey } from '../lib/salesHistoryPeriod';
+import { exportHistoryExcel, exportHistoryPdf } from '../lib/salesHistoryExport';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface OrderItem {
@@ -26,6 +28,7 @@ interface Order {
   created_at: string;
   source: 'ngolab' | 'smart_tag' | 'coworking' | string;
   items?: OrderItem[];
+  external_id?: string;
 }
 
 type FilterSource = 'semua' | 'ngolab' | 'coworking' | 'manual' | 'smart_tag';
@@ -53,22 +56,14 @@ function fmtRp(n: number) {
 
 const APP_TIMEZONE = 'Asia/Jakarta';
 
-function partsWib(value: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(value));
-  return Object.fromEntries(parts.filter(p => p.type !== 'literal').map(p => [p.type, p.value])) as { year: string; month: string; day: string };
+function fmtDate(value: string) {
+  const date = parseHistoryTimestamp(value);
+  return date ? date.toLocaleString('id-ID', { timeZone: APP_TIMEZONE, day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Tanggal tidak valid';
 }
-
-function fmtDate(d: string) {
-  return new Date(d).toLocaleString('id-ID', {
-    timeZone: APP_TIMEZONE, day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  });
-} 
-
 function periodKey(value: string, monthOnly = false) {
-  const p = partsWib(value);
-  return monthOnly ? `${p.year}-${p.month}` : `${p.year}-${p.month}-${p.day}`;
-} 
+  const key = wibDateKey(value);
+  return monthOnly ? key.slice(0, 7) : key;
+}
 
 function fmtDay(key: string) {
   return new Date(`${key}T00:00:00+07:00`).toLocaleDateString('id-ID', { timeZone: APP_TIMEZONE, day: '2-digit', month: 'short', year: 'numeric' });
@@ -80,23 +75,30 @@ export default function SalesHistory() {
   const [friendOrders, setFriendOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [friendStatus, setFriendStatus] = useState<'loading' | 'online' | 'offline'>('loading');
+  const [localStatus, setLocalStatus] = useState<'loading' | 'online' | 'offline'>('loading');
   const [refreshing, setRefreshing] = useState(false);
 
   const [search, setSearch] = useState('');
   const [filterSource, setFilterSource] = useState<FilterSource>('semua');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('semua');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [period, setPeriod] = useState<'semua' | 'bulan'>('bulan');
-  const [selectedMonth, setSelectedMonth] = useState('');
+  const [period, setPeriod] = useState<HistoryPeriod>('bulan');
+  const [selectedDate, setSelectedDate] = useState(() => wibDateKey(new Date()));
+  const [exportError, setExportError] = useState('');
 
   // ── Fetch our orders ─────────────────────────────────────────────────────
   const fetchOurOrders = async () => {
+    setLocalStatus('loading');
     try {
       const res = await authFetch('/api/orders');
       if (!res.ok) throw new Error('API error');
       const data: Order[] = await res.json();
+      if (!Array.isArray(data)) throw new Error('Respons order lokal tidak valid');
       setOurOrders(data.map(o => ({ ...o, source: o.source || 'ngolab' })));
+      setLocalStatus('online');
     } catch (err) {
+      setOurOrders([]);
+      setLocalStatus('offline');
       console.error('Failed to fetch our orders:', err);
     }
   };
@@ -118,7 +120,7 @@ export default function SalesHistory() {
         payment_status:   o.payment_status || (o.status === 'paid' ? 'lunas' : 'belum_bayar'),
         payment_method:   o.payment_method || o.metode_bayar || 'QRIS',
         status:           o.status || o.order_status || 'selesai',
-        created_at:       o.created_at || o.createdAt || o.date || new Date().toISOString(),
+        created_at:       o.created_at || o.createdAt || o.date || '',
         source:           'smart_tag',
         items:            (o.items || o.order_items || []).map((i: any) => ({
           name:     i.name || i.item_name || i.menu_name || 'Item',
@@ -149,15 +151,8 @@ export default function SalesHistory() {
 
   // ── Merge + filter ───────────────────────────────────────────────────────
   const allOrders = [...ourOrders, ...friendOrders].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    (a, b) => (parseHistoryTimestamp(b.created_at)?.getTime() || 0) - (parseHistoryTimestamp(a.created_at)?.getTime() || 0)
   );
-
-  useEffect(() => {
-    if (!selectedMonth && allOrders.length) {
-      const latestPaid = allOrders.find(o => o.payment_status === 'lunas') || allOrders[0];
-      setSelectedMonth(periodKey(latestPaid.created_at, true))
-    }
-  }, [allOrders.length, selectedMonth]);
 
   const filtered = allOrders.filter(o => {
     const isManualOrder = o.external_id === 'MANUAL';
@@ -173,19 +168,20 @@ export default function SalesHistory() {
       !search ||
       o.customer_name.toLowerCase().includes(search.toLowerCase()) ||
       o.invoice_number.toLowerCase().includes(search.toLowerCase());
-    const matchPeriod = period === 'semua' || periodKey(o.created_at, true) === selectedMonth;
+    const matchPeriod = matchesHistoryPeriod(o.created_at, period, selectedDate);
     return matchSrc && matchStatus && matchSearch && matchPeriod;
   });
 
   const paidOrders = filtered.filter(o => o.payment_status === 'lunas');
   const dailyTotals = Object.entries(paidOrders.reduce<Record<string, { revenue: number; orders: number }>>((acc, o) => {
     const key = periodKey(o.created_at);
+    if (!key) return acc;
     acc[key] = acc[key] || { revenue: 0, orders: 0 };
     acc[key].revenue += Number(o.total_price) || 0;
     acc[key].orders += 1;
     return acc;
   }, {})).sort(([a], [b]) => b.localeCompare(a));
-  const monthlyTotals = Object.entries(allOrders.filter(o => o.payment_status === 'lunas').reduce<Record<string, { revenue: number; orders: number }>>((acc, o) => {
+  const monthlyTotals = Object.entries(paidOrders.filter(o => periodKey(o.created_at)).reduce<Record<string, { revenue: number; orders: number }>>((acc, o) => {
     const key = periodKey(o.created_at, true);
     acc[key] = acc[key] || { revenue: 0, orders: 0 };
     acc[key].revenue += Number(o.total_price) || 0;
@@ -195,12 +191,12 @@ export default function SalesHistory() {
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = {
-    totalRevenue:  allOrders.filter(o => o.payment_status === 'lunas').reduce((s, o) => s + o.total_price, 0),
-    ourRevenue:    allOrders.filter(o => o.source === 'ngolab' && o.payment_status === 'lunas' && o.external_id !== 'MANUAL').reduce((s, o) => s + o.total_price, 0),
-    friendRevenue: allOrders.filter(o => (o.source === 'smart_tag' || o.source === 'smart_tag_qr') && o.payment_status === 'lunas').reduce((s, o) => s + o.total_price, 0),
-    totalOrders:   allOrders.length,
-    ourOrders:     allOrders.filter(o => o.source === 'ngolab' && o.external_id !== 'MANUAL').length,
-    friendOrders:  allOrders.filter(o => o.source === 'smart_tag' || o.source === 'smart_tag_qr').length,
+    totalRevenue:  filtered.filter(o => o.payment_status === 'lunas').reduce((s, o) => s + (Number(o.total_price) || 0), 0),
+    ourRevenue:    filtered.filter(o => o.source === 'ngolab' && o.payment_status === 'lunas' && o.external_id !== 'MANUAL').reduce((s, o) => s + (Number(o.total_price) || 0), 0),
+    friendRevenue: filtered.filter(o => (o.source === 'smart_tag' || o.source === 'smart_tag_qr') && o.payment_status === 'lunas').reduce((s, o) => s + (Number(o.total_price) || 0), 0),
+    totalOrders:   filtered.length,
+    ourOrders:     filtered.filter(o => o.source === 'ngolab' && o.external_id !== 'MANUAL').length,
+    friendOrders:  filtered.filter(o => o.source === 'smart_tag' || o.source === 'smart_tag_qr').length,
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -244,6 +240,7 @@ export default function SalesHistory() {
         </div>
       </div>
 
+      {(localStatus === 'offline' || friendStatus === 'offline') && <div role="alert" className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm font-bold text-amber-800">Data tidak lengkap: {localStatus === 'offline' ? 'order lokal gagal dimuat. ' : ''}{friendStatus === 'offline' ? 'Smart Tag tidak terhubung.' : ''} Total dan ekspor hanya mencakup sumber yang berhasil dimuat.</div>}
       {/* ── Stats Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
 
@@ -357,11 +354,13 @@ export default function SalesHistory() {
           </div>
           <div className="flex items-center gap-2">
             <div className="flex p-1 bg-slate-100 rounded-xl">
-              {(['bulan', 'semua'] as const).map(value => <button key={value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase', period === value ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400')}>{value === 'bulan' ? 'Per Bulan' : 'Semua Periode'}</button>)}
+              {(['hari', 'minggu', 'bulan', 'semua'] as const).map(value => <button key={value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase', period === value ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400')}>{value === 'hari' ? 'Harian' : value === 'minggu' ? 'Mingguan' : value === 'bulan' ? 'Bulanan' : 'Semua Periode'}</button>)}
             </div>
-            <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" />
+            <input aria-label="Tanggal acuan WIB" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" />
           </div>
         </div>
+        <p className="text-xs text-slate-500">Waktu WIB (Asia/Jakarta); mingguan Senin–Minggu. Timestamp tanpa zona dianggap WIB; tanggal tidak valid hanya muncul pada Semua Periode.</p>
+        <div className="flex gap-2">{(['PDF', 'Excel'] as const).map(format => <button key={format} disabled={loading || !filtered.length} onClick={async () => { try { setExportError(''); const description = `Periode: ${period} ${period === 'semua' ? '' : selectedDate} | Sumber: ${filterSource} | Status: ${filterStatus} | Pencarian: ${search || '-'} | WIB${localStatus !== 'online' || friendStatus !== 'online' ? ` | DATA TIDAK LENGKAP: ${localStatus !== 'online' ? 'order lokal tidak tersedia; ' : ''}${friendStatus !== 'online' ? 'Smart Tag tidak tersedia' : ''}` : ''}`; const filename = `Riwayat_Transaksi_${period}_${selectedDate}`; if (format === 'PDF') exportHistoryPdf(filtered, description, filename); else await exportHistoryExcel(filtered, description, filename); } catch (error) { console.error(error); setExportError('Ekspor gagal. Silakan coba lagi.'); } }} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"><Download size={14} /> Ekspor {format}</button>)}</div>{exportError && <p role="alert" className="text-red-600 text-xs">{exportError}</p>}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Hari</p><div className="max-h-52 overflow-auto space-y-2">{dailyTotals.length ? dailyTotals.map(([day, value]) => <div key={day} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-xs font-bold text-slate-600">{fmtDay(day)} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-emerald-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
           <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Bulan</p><div className="max-h-52 overflow-auto space-y-2">{monthlyTotals.length ? monthlyTotals.map(([month, value]) => <div key={month} className="flex items-center justify-between rounded-xl bg-violet-50/60 px-4 py-3"><span className="text-xs font-bold text-slate-600">{new Date(`${month}-01T00:00:00`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-violet-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>

@@ -10,6 +10,26 @@ export interface MonthlyRow {
   verified: number | string;
 }
 
+export function reportDateInJakarta(value: string | Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+}
+
+export function buildDailyReport(orders: (OrderSummaryRow & { created_at: string })[]) {
+  const days = new Map<string, { date: string; revenue: number; paid: number; failed: number }>();
+  for (const order of orders) {
+    const date = reportDateInJakarta(order.created_at);
+    const day = days.get(date) ?? { date, revenue: 0, paid: 0, failed: 0 };
+    if (order.payment_status === 'lunas') {
+      day.paid++;
+      day.revenue += Number(order.total_price || 0);
+    } else {
+      day.failed++;
+    }
+    days.set(date, day);
+  }
+  return [...days.values()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
 export function calculateReportSummary(orders: OrderSummaryRow[]) {

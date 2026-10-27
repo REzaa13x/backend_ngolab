@@ -29,6 +29,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { authFetch } from '../lib/authFetch';
+import { buildDailyReport, reportDateInJakarta } from '../lib/reporting';
+import { matchesReportPeriod, reportPeriodLabel } from '../lib/salesReportPeriod';
+import { appendDailySummaryToPdf } from '../lib/salesReportPdf';
 import { PaymentProofPreview } from './PaymentProofPreview';
 import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
@@ -36,8 +39,8 @@ import autoTable from 'jspdf-autotable';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 const APP_TIMEZONE = 'Asia/Jakarta';
-const wibDate = (value: string | Date) => new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
-const wibMonth = (value: string | Date) => wibDate(value).slice(0, 7);
+const wibDate = reportDateInJakarta;
+
 
 interface OrderItem {
   name: string;
@@ -56,6 +59,7 @@ interface Order {
   payment_method?: string;
   payment_proof?: string;
   source?: string;
+  external_id?: string;
   created_at: string;
   items: OrderItem[];
 }
@@ -65,6 +69,9 @@ export default function SalesReport() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [reportData, setReportData] = useState<any>(null);
   const [period, setPeriod] = useState<'day' | 'week' | 'month' | 'year' | 'all'>('month');
+  const [selectedDate, setSelectedDate] = useState(() => wibDate(new Date()));
+  const [selectedMonth, setSelectedMonth] = useState(() => wibDate(new Date()).slice(0, 7));
+  const [selectedYear, setSelectedYear] = useState(() => wibDate(new Date()).slice(0, 4));
   const [sourceFilter, setSourceFilter] = useState<'all' | 'ngolab' | 'coworking' | 'smart_tag_qr' | 'manual'>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -126,8 +133,9 @@ export default function SalesReport() {
       const orderDate = new Date(order.created_at);
       const now = new Date();
 
-      if (period === 'day') {
-        return wibDate(order.created_at) === wibDate(now);
+      if (period === 'day' || period === 'month' || period === 'year') {
+        const selection = period === 'day' ? selectedDate : period === 'month' ? selectedMonth : selectedYear;
+        return matchesReportPeriod(order.created_at, period, selection);
       }
 
       if (period === 'week') {
@@ -136,17 +144,11 @@ export default function SalesReport() {
         return orderDate >= weekAgo;
       }
 
-      if (period === 'month') {
-        return wibMonth(order.created_at) === wibMonth(now);
-      }
-
-      if (period === 'year') {
-        return wibDate(order.created_at).slice(0, 4) === wibDate(now).slice(0, 4);
-      }
-
       return true;
     });
-  }, [orders, period, sourceFilter]);
+  }, [orders, period, sourceFilter, selectedDate, selectedMonth, selectedYear]);
+
+  const dailyReport = useMemo(() => buildDailyReport(filteredOrders), [filteredOrders]);
 
   const metrics = useMemo(() => {
     const lunasOrders = filteredOrders.filter(o => o.payment_status === 'lunas');
@@ -180,8 +182,11 @@ export default function SalesReport() {
 
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Periode: ${period.toUpperCase()} | Sumber: ${displaySourceFilter}`, 14, 32);
-    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID')}`, 14, 37);
+    const selection = period === 'day' ? selectedDate : period === 'month' ? selectedMonth : selectedYear;
+    const periodLabel = period === 'day' || period === 'month' || period === 'year'
+      ? reportPeriodLabel(period, selection) : period === 'week' ? '7 hari terakhir' : 'Semua';
+    doc.text(`Periode: ${periodLabel} | Sumber: ${displaySourceFilter}`, 14, 32);
+    doc.text(`Dicetak: ${new Date().toLocaleString('id-ID', { timeZone: APP_TIMEZONE })} WIB`, 14, 37);
 
     // Metrics Summary Box
     doc.setFillColor(248, 250, 252);
@@ -207,7 +212,7 @@ export default function SalesReport() {
         o.invoice_number,
         o.customer_name,
         o.external_id === 'MANUAL' 
-          ? `MANUAL (${o.source.toUpperCase()})` 
+          ? `MANUAL (${(o.source || 'ngolab').toUpperCase()})` 
           : o.source === 'ngolab' 
             ? 'GESTURE EATS' 
             : o.source === 'coworking' 
@@ -225,7 +230,11 @@ export default function SalesReport() {
       }
     });
 
-    doc.save(`Laporan_${period}_${sourceFilter}_${Date.now()}.pdf`);
+    if (period === 'month') {
+      const finalY = (doc as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 85;
+      appendDailySummaryToPdf(doc, dailyReport, finalY + 15);
+    }
+    doc.save(`Laporan_${period}_${period === 'day' || period === 'month' || period === 'year' ? selection + '_' : ''}${sourceFilter}_${Date.now()}.pdf`);
     setTimeout(() => setIsExporting(false), 800);
   };
 
@@ -270,6 +279,24 @@ export default function SalesReport() {
               </button>
             ))}
           </div>
+          {period === 'day' && (
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              Tanggal (WIB)
+              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2" />
+            </label>
+          )}
+          {period === 'month' && (
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              Bulan (WIB)
+              <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2" />
+            </label>
+          )}
+          {period === 'year' && (
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              Tahun (WIB)
+              <input type="number" min="1" max="9999" step="1" value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="w-24 rounded-xl border border-slate-200 px-3 py-2" />
+            </label>
+          )}
           <button 
             onClick={exportToPDF}
             disabled={isExporting || filteredOrders.length === 0}
@@ -313,6 +340,24 @@ export default function SalesReport() {
           </div>
         ))}
       </div>
+
+      {/* Ringkasan mengikuti periode dan sumber yang dipilih. */}
+      <section className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="px-8 py-6 border-b border-slate-100">
+          <h3 className="text-lg font-black text-slate-900">Hasil Transaksi per Tanggal</h3>
+          <p className="text-xs text-slate-500">Berdasarkan tanggal pesanan WIB, periode dan sumber terpilih. Pendapatan hanya dari transaksi lunas.</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-500"><tr><th className="px-8 py-3">Tanggal</th><th className="px-8 py-3">Lunas</th><th className="px-8 py-3">Gagal</th><th className="px-8 py-3 text-right">Pendapatan</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {dailyReport.length === 0 ? <tr><td colSpan={4} className="px-8 py-6 text-center text-slate-400">Tidak ada transaksi ditemukan.</td></tr> : dailyReport.map(day => (
+                <tr key={day.date}><td className="px-8 py-3">{day.date}</td><td className="px-8 py-3">{day.paid}</td><td className="px-8 py-3">{day.failed}</td><td className="px-8 py-3 text-right">Rp {day.revenue.toLocaleString('id-ID')}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* Transaction Master History */}
       <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden flex flex-col">
@@ -449,7 +494,7 @@ export default function SalesReport() {
             <div>
               <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
                 <BarChart3 className="text-indigo-600" size={20} />
-                Tren Penjualan Eksisting
+                Tren Penjualan Bulanan (semua sumber, tahun ini)
               </h3>
             </div>
           </div>

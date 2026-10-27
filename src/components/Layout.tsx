@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './Sidebar';
+import LiveClock from './LiveClock';
 import Dashboard from './Dashboard';
 import OrderManagement from './OrderManagement';
 import ManualOrder from './ManualOrder';
@@ -220,6 +221,7 @@ const DEFAULT_TAB_BY_ROLE: Record<string, string> = {
           </div>
 
           <div className="flex items-center gap-6">
+            <LiveClock />
             <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input 
