@@ -28,6 +28,7 @@ import preordersRouter from './src/routes/preorders.js';
 import apiKeysRouter from './src/routes/apiKeys.js';
 import membershipRouter, { rewardsCatalogRouter, loyaltyStaffRouter } from './src/routes/membership.js';
 import { coinsRouter, promosRouter, vouchersRouter, menusRouter, userOrdersRouter, chatRouter } from './src/routes/pointlabRoutes.js';
+import logistikRouter from './src/routes/logistik.js';
 import { authenticateAuthorization, getAuthTokenSecret, isRoleAllowed } from './src/lib/authToken.js';
 import { lookupCurrentIdentity, requireRoles, AuthenticatedRequest } from './src/middleware/authSession.js';
 import { assertPaymentProofStorageOutsideRoot, evacuateLegacyPaymentProofDirs, isPublicUploadPath, isSafePaymentProofFilename, isUploadsRequestPath, normalizeRequestPath, paymentProofPathFromUrl } from './src/lib/paymentProof.js';
@@ -224,7 +225,31 @@ async function startServer() {
   app.use('/api/coins', coinsRouter);
   app.use('/api/promos', promosRouter);
   app.use('/api/vouchers', vouchersRouter);
-  app.use('/api/menus', menusRouter);
+  // Logistik & PointLab Menus Router
+  app.use('/api/menus', (req, res, next) => {
+    if (req.method !== 'GET' || req.query.search !== undefined || req.query.kategori !== undefined || req.query.status_filter !== undefined || req.url.includes('/forecast') || req.url.includes('/toggle-status')) {
+      req.url = '/menus' + (req.url === '/' ? '' : req.url);
+      return logistikRouter(req, res, next);
+    }
+    menusRouter(req, res, next);
+  });
+  app.use('/api/logistik', logistikRouter);
+  app.use('/api/items', (req, res, next) => {
+    req.url = '/items' + (req.url === '/' ? '' : req.url);
+    logistikRouter(req, res, next);
+  });
+  app.use('/api/movements', (req, res, next) => {
+    req.url = '/movements' + (req.url === '/' ? '' : req.url);
+    logistikRouter(req, res, next);
+  });
+  app.use('/api/master', (req, res, next) => {
+    req.url = '/master' + (req.url === '/' ? '' : req.url);
+    logistikRouter(req, res, next);
+  });
+  app.use('/api/dashboard/summary', (req, res, next) => {
+    req.url = '/dashboard/summary';
+    logistikRouter(req, res, next);
+  });
   app.get('/api/me/loyalty/balance', (req, res, next) => {
     req.url = '/me/loyalty/balance';
     membershipRouter(req, res, next);

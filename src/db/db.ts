@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import mysql from "mysql2/promise";
 import { loyaltySchemaChanges } from "../lib/loyaltyHelper.js";
 import { orderItemSchemaChanges } from "../lib/orderItems.js";
@@ -8,7 +9,7 @@ export const db = mysql.createPool({
   port: parseInt(process.env.DB_PORT || "3306"),
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "gesture_eats",
+  database: process.env.DB_NAME || "ngola_geasture_adm",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -20,7 +21,7 @@ export async function testDbConnection() {
   let connection: any;
   try {
     connection = await db.getConnection();
-    console.log("✅ MySQL terhubung ke database:", process.env.DB_NAME || "gesture_eats");
+    console.log("✅ MySQL terhubung ke database:", process.env.DB_NAME || "ngola_geasture_adm");
     
     // Migration: Add columns to coin_promos if they don't exist
     try {
