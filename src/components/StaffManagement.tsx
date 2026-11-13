@@ -184,6 +184,31 @@ export default function StaffManagement() {
      s.role.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  // Pegawai yang mendaftar sendiri dari halaman login masuk sebagai 'pending'
+  // dan baru bisa dipakai setelah Super Admin menyetujui di sini.
+  const pendingStaff = staff.filter(person => person.status !== 'active');
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  const setStaffStatus = async (person: Staff, status: 'active' | 'inactive') => {
+    setApprovingId(person.id);
+    setActionError('');
+    try {
+      const res = await authFetch(`/api/staff/${person.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Gagal memperbarui status pegawai');
+      setStaff(current => current.map(item => item.id === person.id ? { ...item, status } : item));
+      showToast(status === 'active' ? `${person.name} diaktifkan dan sudah bisa masuk.` : `${person.name} dinonaktifkan.`);
+    } catch (err: any) {
+      setActionError(err.message || 'Terjadi kesalahan koneksi');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       {/* Toast */}
@@ -531,6 +556,46 @@ export default function StaffManagement() {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-6"
           >
+            {/* Persetujuan pendaftar pegawai baru */}
+            {pendingStaff.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-amber-100 rounded-xl"><UserPlus size={18} className="text-amber-700" /></div>
+                    <div>
+                      <h3 className="font-black text-amber-900">Menunggu Persetujuan ({pendingStaff.length})</h3>
+                      <p className="text-xs font-medium text-amber-700">Pegawai yang mendaftar sendiri belum bisa masuk sampai diaktifkan.</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {pendingStaff.map(person => (
+                    <div key={person.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white rounded-2xl border border-amber-100 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">{person.name} <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{person.role}</span></p>
+                        <p className="text-[11px] font-medium text-slate-500">{person.email}{person.phone ? ` · ${person.phone}` : ''} · ID {person.id}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setStaffStatus(person, 'active')}
+                          disabled={approvingId === person.id}
+                          className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          <CheckCircle2 size={12} /> {approvingId === person.id ? 'Memproses...' : 'Setujui & Aktifkan'}
+                        </button>
+                        <button
+                          onClick={() => setStaffStatus(person, 'inactive')}
+                          disabled={approvingId === person.id}
+                          className="px-3 py-2 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100 disabled:opacity-50"
+                        >
+                          Tolak
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row gap-4">
                <div className="relative flex-1">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />

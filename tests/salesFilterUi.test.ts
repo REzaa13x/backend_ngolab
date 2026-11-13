@@ -11,7 +11,12 @@ test('riwayat menjelaskan filter global dan pilihan periode', () => {
   assert.match(history, /Status pembayaran/);
   assert.match(history, /aria-pressed=\{filterSource === s\}/);
   assert.match(history, /aria-pressed=\{period === value\}/);
-  assert.match(history, /Tanggal acuan \(WIB\)/);
+  assert.match(history, /Tanggal acuan WIB/);
+  // Periode harian sampai tahunan plus rentang bebas dengan dua tanggal.
+  for (const period of ['Harian', 'Mingguan', 'Bulanan', 'Tahunan', 'Rentang']) {
+    assert.match(history, new RegExp(period));
+  }
+  assert.match(history, /Tanggal akhir WIB/);
 });
 
 test('analisis menyajikan sumber sebagai filter global dan minggu sebagai 7 hari terakhir', () => {

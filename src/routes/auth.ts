@@ -1,11 +1,12 @@
 import { Router, Request, Response } from "express";
-import { db } from "../db/db.js";
+import { db, addAuditLog } from "../db/db.js";
 import { hashPassword, needsPasswordUpgrade, verifyPassword } from "../lib/password.js";
 import { normalizeEmail } from "../lib/auth.js";
 import { upgradeLegacyPassword } from "../lib/passwordUpgrade.js";
 import { getAuthTokenSecret, issueAuthToken, isRoleAllowed } from "../lib/authToken.js";
 import { requireAuthenticated } from "../middleware/authSession.js";
 import { ensureMemberForUser, getMemberProfile } from "../lib/membershipService.js";
+import { isPublicStaffRole, PUBLIC_STAFF_ROLES } from "../lib/staffRegistration.js";
 
 const router = Router();
 
@@ -139,9 +140,79 @@ router.post("/login", async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/auth/register-staff
+// Pendaftaran mandiri untuk PEGAWAI (Kasir / Koki / Support).
+//
+// Keamanan: akun dibuat dengan status 'pending', BUKAN 'active'. Artinya
+// pendaftar belum bisa masuk dan belum mendapat izin apa pun (termasuk
+// verifikasi pembayaran) sampai Super Admin mengaktifkannya di menu
+// Tim & Shift. Role dibatasi daftar putih dan tabel users tidak pernah
+// disentuh, jadi rute ini tidak bisa dipakai membuat akun pelanggan
+// maupun Super Admin/Admin.
+router.post("/register-staff", async (req: Request, res: Response) => {
+  try {
+    const rawName = req.body.nama || req.body.name;
+    const name = rawName ? String(rawName).trim() : '';
+    const normalizedEmail = normalizeEmail(req.body.email);
+    const phone = req.body.phone ? String(req.body.phone).trim() : null;
+    const password = req.body.password;
+    const role = String(req.body.role || '').trim();
+
+    if (!name) {
+      return res.status(400).json({ success: false, message: "Nama pegawai wajib diisi" });
+    }
+    if (!normalizedEmail) {
+      return res.status(400).json({ success: false, message: "Email pegawai wajib diisi" });
+    }
+    if (!isPublicStaffRole(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `Peran tidak valid. Pilih salah satu: ${PUBLIC_STAFF_ROLES.join(', ')}`,
+      });
+    }
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ success: false, message: "Password wajib diisi dan minimal 6 karakter" });
+    }
+
+    const [existingStaff]: any = await db.query("SELECT id FROM staff WHERE email = ?", [normalizedEmail]);
+    if (existingStaff.length > 0) {
+      return res.status(400).json({ success: false, message: "Email sudah terdaftar sebagai pegawai" });
+    }
+    const [existingCustomer]: any = await db.query("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+    if (existingCustomer.length > 0) {
+      return res.status(400).json({ success: false, message: "Email sudah terdaftar sebagai pelanggan" });
+    }
+
+    const newId = `S${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+    const hashedPassword = await hashPassword(password);
+    // password_plain disimpan agar Super Admin bisa membacakan kredensial ke
+    // pegawai, sama seperti alur /api/staff. Hanya akun staf, bukan pelanggan.
+    await db.query(
+      "INSERT INTO staff (id, name, role, email, phone, password_hash, password_plain, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+      [newId, name, role, normalizedEmail, phone, hashedPassword, String(password)]
+    );
+
+    const [created]: any = await db.query(
+      "SELECT id, name, role, email, phone, status FROM staff WHERE id = ?",
+      [newId]
+    );
+    await addAuditLog(name, "Pendaftaran Pegawai Menunggu Persetujuan", `${name} (${role})`, "info");
+
+    // Tanpa token: akun belum aktif, jadi pendaftar tidak langsung masuk.
+    return res.status(201).json({
+      success: true,
+      requires_approval: true,
+      message: "Pendaftaran terkirim. Akun pegawai menunggu persetujuan Super Admin sebelum bisa dipakai masuk.",
+      staff: created[0],
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: "Gagal mendaftarkan pegawai", error: err.message });
+  }
+});
+
 // POST /api/auth/register
-// CATATAN KEAMANAN: Registrasi publik HANYA membuat akun Pelanggan/Member.
-// Pembuatan staf (Kasir, Koki, Support, Admin) hanya diperbolehkan melalui rute terproteksi /api/staff oleh Super Admin.
+// Registrasi publik untuk PELANGGAN/MEMBER (aplikasi pemesanan & loyalty).
+// Panel admin memakai /register-staff di atas.
 router.post("/register", async (req: Request, res: Response) => {
   try {
     const rawName = req.body.nama || req.body.name;

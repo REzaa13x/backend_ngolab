@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mail, Lock, User, Phone, LogIn, UserPlus, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, User, Phone, LogIn, UserPlus, Eye, EyeOff, ChefHat, Wallet, Headset, BadgeCheck } from 'lucide-react';
+import { PUBLIC_STAFF_ROLES, type PublicStaffRole } from '../lib/staffRegistration';
+
+const ROLE_DESCRIPTIONS: Record<PublicStaffRole, { icon: React.ElementType; hint: string }> = {
+  Kasir:   { icon: Wallet,   hint: 'Verifikasi pembayaran & transaksi' },
+  Koki:    { icon: ChefHat,  hint: 'Tampilan dapur & inventori' },
+  Support: { icon: Headset,  hint: 'Pesanan manual & antrean' },
+};
 
 export default function Login() {
   const { login } = useAuth();
@@ -9,6 +16,7 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   // Login Form State
   const [email, setEmail] = useState('');
@@ -19,13 +27,13 @@ export default function Login() {
   const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regPassword, setRegPassword] = useState('');
-  const [regRole, setRegRole] = useState('Kasir');
-  const PUBLIC_STAFF_ROLES = ['Kasir', 'Koki', 'Support'] as const;
+  const [regRole, setRegRole] = useState<PublicStaffRole>('Kasir');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setErrorMsg('');
+    setSuccessMsg('');
 
     try {
       const res = await fetch('/api/auth/login', {
@@ -49,18 +57,29 @@ export default function Login() {
     e.preventDefault();
     setIsLoading(true);
     setErrorMsg('');
+    setSuccessMsg('');
 
     try {
-      const res = await fetch('/api/auth/register', {
+      // Endpoint pegawai, bukan /api/auth/register: registrasi pelanggan
+      // memakai role 'Pelanggan' dan tidak boleh muncul di panel admin.
+      const res = await fetch('/api/auth/register-staff', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: regName, email: regEmail, phone: regPhone, password: regPassword, role: regRole })
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Registrasi gagal');
+      if (!res.ok) throw new Error(data.message || 'Registrasi pegawai gagal');
 
-      // Setelah register, langsung login
+      if (data.requires_approval) {
+        // Akun sengaja belum aktif: jangan login otomatis, tampilkan status
+        // supaya pegawai tidak bingung kenapa tidak bisa masuk.
+        setSuccessMsg(data.message || 'Pendaftaran terkirim. Menunggu persetujuan Super Admin.');
+        setIsLoginView(true);
+        setRegName(''); setRegEmail(''); setRegPhone(''); setRegPassword('');
+        return;
+      }
+
       login(data.user, data.token);
     } catch (err: any) {
       setErrorMsg(err.message);
@@ -130,6 +149,13 @@ export default function Login() {
                   </div>
                 )}
 
+                {successMsg && (
+                  <div role="status" className="p-3 mb-6 bg-emerald-50 text-emerald-700 rounded-lg text-sm border border-emerald-100 flex items-start gap-2">
+                    <BadgeCheck className="w-4 h-4 mt-0.5 shrink-0" />
+                    {successMsg}
+                  </div>
+                )}
+
                 <form onSubmit={handleLogin} className="space-y-5">
                   <div>
                     <label className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 block">Email</label>
@@ -196,9 +222,15 @@ export default function Login() {
                 exit={{ opacity: 0, x: -20 }}
                 className="h-full flex flex-col justify-center"
               >
-                <div className="mb-8">
-                  <h2 className="text-2xl font-bold text-slate-900">Registrasi Staf Baru</h2>
-                  <p className="text-slate-500 text-sm mt-1">Buat akun untuk masuk ke dalam tim</p>
+                <div className="mb-6">
+                  <h2 className="text-2xl font-bold text-slate-900">Registrasi Pegawai</h2>
+                  <p className="text-slate-500 text-sm mt-1">Buat akun staf untuk masuk ke panel admin</p>
+                  <div className="mt-3 flex items-start gap-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2.5">
+                    <BadgeCheck className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
+                    <p className="text-[11px] font-medium text-indigo-800">
+                      Khusus pegawai (Kasir, Koki, Support). Ini bukan pendaftaran pelanggan — akun pelanggan dibuat dari aplikasi pemesanan.
+                    </p>
+                  </div>
                 </div>
 
                 {errorMsg && (
@@ -218,36 +250,42 @@ export default function Login() {
                       </div>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Peran Akun Baru</label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {PUBLIC_STAFF_ROLES.map(role => (
-                          <button
-                            key={role}
-                            type="button"
-                            onClick={() => setRegRole(role)}
-                            className={`rounded-lg border px-2 py-2.5 text-xs font-bold transition-colors ${regRole === role ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-indigo-300'}`}
-                          >
-                            {role}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Email</label>
+                      <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Email Pegawai</label>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input type="email" required value={regEmail} onChange={(e) => setRegEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900" placeholder="email@contoh.com" />
                       </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">No. Telepon (Opsional)</label>
-                      <div className="relative">
-                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                        <input type="text" value={regPhone} onChange={(e) => setRegPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900" placeholder="08..." />
-                      </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Peran Pegawai</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {PUBLIC_STAFF_ROLES.map(role => {
+                        const RoleIcon = ROLE_DESCRIPTIONS[role].icon;
+                        const active = regRole === role;
+                        return (
+                          <button
+                            key={role}
+                            type="button"
+                            onClick={() => setRegRole(role)}
+                            aria-pressed={active}
+                            className={`rounded-xl border px-2 py-2.5 text-left transition-colors ${active ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-indigo-300'}`}
+                          >
+                            <RoleIcon className="w-4 h-4 mb-1" />
+                            <span className="block text-xs font-bold leading-none">{role}</span>
+                            <span className={`mt-1 block text-[9px] leading-tight ${active ? 'text-indigo-100' : 'text-slate-400'}`}>{ROLE_DESCRIPTIONS[role].hint}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">No. Telepon (Opsional)</label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input type="text" value={regPhone} onChange={(e) => setRegPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900" placeholder="08..." />
                     </div>
                   </div>
 
@@ -255,7 +293,7 @@ export default function Login() {
                     <label className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Buat Kata Sandi</label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                      <input type={showPassword ? 'text' : 'password'} required value={regPassword} onChange={(e) => setRegPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-9 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900" placeholder="••••••••" />
+                      <input type={showPassword ? 'text' : 'password'} required minLength={6} value={regPassword} onChange={(e) => setRegPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-9 py-2.5 text-sm focus:outline-none focus:border-indigo-500 text-slate-900" placeholder="Minimal 6 karakter" />
                       <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
@@ -270,12 +308,12 @@ export default function Login() {
                     {isLoading ? (
                       <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
-                      <>Daftar Akun <UserPlus className="w-4 h-4" /></>
+                      <>Daftar sebagai {regRole} <UserPlus className="w-4 h-4" /></>
                     )}
                   </button>
                 </form>
 
-                <div className="mt-8 text-center text-sm text-slate-500">
+                <div className="mt-6 text-center text-sm text-slate-500">
                   Sudah memiliki akun?{' '}
                   <button onClick={() => setIsLoginView(true)} className="text-indigo-600 font-bold hover:underline">
                     Masuk di sini

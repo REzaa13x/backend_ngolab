@@ -2,13 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   History, RefreshCcw, Search, TrendingUp, ShoppingBag,
   CheckCircle2, XCircle, Clock, AlertCircle, ChevronDown, ChevronUp,
-  Wifi, WifiOff, Package, Coffee, ExternalLink, Download, FileText, CalendarDays
+  Wifi, WifiOff, Package, Coffee, ExternalLink, Download, FileText, CalendarDays,
+  UtensilsCrossed, Calculator, ShieldCheck, ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { authFetch } from '../lib/authFetch';
-import { HistoryPeriod, matchesHistoryPeriod, parseHistoryTimestamp, wibDateKey, formatWibTimestamp } from '../lib/salesHistoryPeriod';
+import { HistoryPeriod, matchesHistoryPeriod, parseHistoryTimestamp, wibDateKey, formatWibTimestamp, historyPeriodLabel, historyPeriodRange } from '../lib/salesHistoryPeriod';
 import { exportHistoryExcel, exportHistoryPdf } from '../lib/salesHistoryExport';
+import { aggregateSoldMenus, soldMenusTotals, summarizeTotalValidation, reconcileOrderTotal } from '../lib/menuSales';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface OrderItem {
@@ -83,6 +85,7 @@ export default function SalesHistory() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [period, setPeriod] = useState<HistoryPeriod>('bulan');
   const [selectedDate, setSelectedDate] = useState(() => wibDateKey(new Date()));
+  const [rangeEnd, setRangeEnd] = useState(() => wibDateKey(new Date()));
   const [exportError, setExportError] = useState('');
 
   // ── Fetch our orders ─────────────────────────────────────────────────────
@@ -167,7 +170,7 @@ export default function SalesHistory() {
       !search ||
       o.customer_name.toLowerCase().includes(search.toLowerCase()) ||
       o.invoice_number.toLowerCase().includes(search.toLowerCase());
-    const matchPeriod = matchesHistoryPeriod(o.created_at, period, selectedDate);
+    const matchPeriod = matchesHistoryPeriod(o.created_at, period, selectedDate, rangeEnd);
     return matchSrc && matchStatus && matchSearch && matchPeriod;
   });
 
@@ -197,6 +200,13 @@ export default function SalesHistory() {
     ourOrders:     filtered.filter(o => o.source === 'ngolab' && o.external_id !== 'MANUAL').length,
     friendOrders:  filtered.filter(o => o.source === 'smart_tag' || o.source === 'smart_tag_qr').length,
   };
+
+  // Rekap produk terjual + validasi total. Keduanya hanya dari transaksi LUNAS
+  // agar angkanya sebanding dengan pendapatan yang dilaporkan di atas.
+  const soldMenus = aggregateSoldMenus(paidOrders);
+  const soldTotals = soldMenusTotals(soldMenus);
+  const validation = summarizeTotalValidation(paidOrders);
+  const mismatchChecks = validation.checks.filter(check => !check.matches);
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -363,20 +373,115 @@ export default function SalesHistory() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-600">Periode</span>
             <div role="group" aria-label="Periode" className="flex p-1 bg-slate-100 rounded-xl overflow-x-auto">
-              {(['hari', 'minggu', 'bulan', 'semua'] as const).map(value => <button key={value} aria-pressed={period === value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase', period === value ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400')}>{value === 'hari' ? 'Harian' : value === 'minggu' ? 'Mingguan' : value === 'bulan' ? 'Bulanan' : 'Semua Periode'}</button>)}
+              {([['hari', 'Harian'], ['minggu', 'Mingguan'], ['bulan', 'Bulanan'], ['tahun', 'Tahunan'], ['rentang', 'Rentang'], ['semua', 'Semua']] as [HistoryPeriod, string][]).map(([value, label]) => <button key={value} aria-pressed={period === value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase whitespace-nowrap', period === value ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400')}>{label}</button>)}
             </div>
-            <label className="text-xs font-bold text-slate-600">Tanggal acuan (WIB) <input aria-label="Tanggal acuan WIB" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" /></label>
+            <label className="text-xs font-bold text-slate-600">{period === 'rentang' ? 'Dari' : 'Tanggal'} (WIB) <input aria-label="Tanggal acuan WIB" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" /></label>
+            {period === 'rentang' && <label className="text-xs font-bold text-slate-600">Sampai <input aria-label="Tanggal akhir WIB" type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold" /></label>}
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 text-[10px] font-black uppercase tracking-widest">{historyPeriodLabel(period, selectedDate, rangeEnd)}</span>
+          <span className="text-xs text-slate-500 font-bold">{filtered.length} transaksi · {paidOrders.length} lunas</span>
+        </div>
         <p className="text-xs text-slate-500">Waktu WIB (Asia/Jakarta); mingguan Senin–Minggu. Timestamp tanpa zona dianggap WIB; tanggal tidak valid hanya muncul pada Semua Periode.</p>
-        <div className="flex gap-2">{(['PDF', 'Excel'] as const).map(format => <button key={format} disabled={loading || !filtered.length} onClick={async () => { try { setExportError(''); const description = `Periode: ${period} ${period === 'semua' ? '' : selectedDate} | Sumber: ${filterSource} | Status: ${filterStatus} | Pencarian: ${search || '-'} | WIB${localStatus !== 'online' || friendStatus !== 'online' ? ` | DATA TIDAK LENGKAP: ${localStatus !== 'online' ? 'order lokal tidak tersedia; ' : ''}${friendStatus !== 'online' ? 'Smart Tag tidak tersedia' : ''}` : ''}`; const filename = `Riwayat_Transaksi_${period}_${selectedDate}`; if (format === 'PDF') exportHistoryPdf(filtered, description, filename); else await exportHistoryExcel(filtered, description, filename); } catch (error) { console.error(error); setExportError('Ekspor gagal. Silakan coba lagi.'); } }} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"><Download size={14} /> Ekspor {format}</button>)}</div>{exportError && <p role="alert" className="text-red-600 text-xs">{exportError}</p>}
+        <div className="flex gap-2">{(['PDF', 'Excel'] as const).map(format => <button key={format} disabled={loading || !filtered.length} onClick={async () => { try { setExportError(''); const description = `Periode: ${historyPeriodLabel(period, selectedDate, rangeEnd)} | Sumber: ${filterSource} | Status: ${filterStatus} | Pencarian: ${search || '-'} | WIB${localStatus !== 'online' || friendStatus !== 'online' ? ` | DATA TIDAK LENGKAP: ${localStatus !== 'online' ? 'order lokal tidak tersedia; ' : ''}${friendStatus !== 'online' ? 'Smart Tag tidak tersedia' : ''}` : ''}`; const filename = `Riwayat_Transaksi_${period}_${selectedDate}`; if (format === 'PDF') exportHistoryPdf(filtered, description, filename); else await exportHistoryExcel(filtered, description, filename); } catch (error) { console.error(error); setExportError('Ekspor gagal. Silakan coba lagi.'); } }} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"><Download size={14} /> Ekspor {format}</button>)}</div>{exportError && <p role="alert" className="text-red-600 text-xs">{exportError}</p>}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Hari</p><div className="max-h-52 overflow-auto space-y-2">{dailyTotals.length ? dailyTotals.map(([day, value]) => <div key={day} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-xs font-bold text-slate-600">{fmtDay(day)} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-emerald-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
           <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Bulan</p><div className="max-h-52 overflow-auto space-y-2">{monthlyTotals.length ? monthlyTotals.map(([month, value]) => <div key={month} className="flex items-center justify-between rounded-xl bg-violet-50/60 px-4 py-3"><span className="text-xs font-bold text-slate-600">{new Date(`${month}-01T00:00:00`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-violet-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
         </div>
       </section>
 
-      {/* ── Table ── */}
+      {/* ── Rekap menu terjual + validasi total ── */}
+      <section aria-label="Rekap menu terjual" className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-50 rounded-xl"><UtensilsCrossed size={18} className="text-emerald-600" /></div>
+              <div>
+                <h3 className="font-black text-slate-900">Menu Terjual</h3>
+                <p className="text-xs text-slate-400">Dari transaksi lunas pada filter aktif</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Item</p>
+              <p className="text-lg font-black text-emerald-700">{soldTotals.quantity}</p>
+            </div>
+          </div>
+          <div className="rounded-xl bg-emerald-50/60 px-4 py-2.5 flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Nilai item terjual</span>
+            <strong className="text-sm text-emerald-800">{fmtRp(soldTotals.revenue)}</strong>
+          </div>
+          <div className="max-h-72 overflow-auto">
+            {soldMenus.length ? (
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                    <th className="py-2 pr-2">Menu</th>
+                    <th className="py-2 px-2 text-right">Qty</th>
+                    <th className="py-2 pl-2 text-right">Pendapatan</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {soldMenus.map(row => (
+                    <tr key={row.name} className="text-xs">
+                      <td className="py-2 pr-2 font-bold text-slate-800">{row.name}<span className="block text-[9px] font-medium text-slate-400">{row.orders} transaksi</span></td>
+                      <td className="py-2 px-2 text-right font-black text-slate-700">{row.quantity}</td>
+                      <td className="py-2 pl-2 text-right font-black text-emerald-700 whitespace-nowrap">{fmtRp(row.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="text-xs text-slate-400 py-3">Belum ada item terjual pada filter ini.</p>}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className={cn('p-2.5 rounded-xl', validation.mismatched ? 'bg-rose-50' : 'bg-indigo-50')}>
+                <Calculator size={18} className={validation.mismatched ? 'text-rose-600' : 'text-indigo-600'} />
+              </div>
+              <div>
+                <h3 className="font-black text-slate-900">Validasi Total</h3>
+                <p className="text-xs text-slate-400">Total pesanan vs jumlah harga item</p>
+              </div>
+            </div>
+            <div className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border',
+              validation.mismatched ? 'bg-rose-50 text-rose-700 border-rose-100' : 'bg-emerald-50 text-emerald-700 border-emerald-100')}>
+              {validation.mismatched ? <ShieldAlert size={12} /> : <ShieldCheck size={12} />}
+              {validation.mismatched ? `${validation.mismatched} selisih` : 'Semua cocok'}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-slate-50 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Total pesanan</p>
+              <p className="text-sm font-black text-slate-900">{fmtRp(validation.orderTotal)}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Jumlah item</p>
+              <p className="text-sm font-black text-slate-900">{fmtRp(validation.itemSubtotal)}</p>
+            </div>
+          </div>
+          <p className="text-[11px] font-bold text-slate-500">
+            {validation.checked} pesanan diperiksa · {validation.matched} cocok · {validation.withoutItems} tanpa rincian item
+          </p>
+          {mismatchChecks.length > 0 ? (
+            <div className="space-y-2 max-h-56 overflow-auto">
+              {mismatchChecks.map(check => (
+                <div key={check.invoice_number} className="rounded-xl border border-rose-100 bg-rose-50/60 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-black font-mono text-rose-800">{check.invoice_number}</span>
+                    <span className="text-[11px] font-black text-rose-700">Selisih {fmtRp(check.difference)}</span>
+                  </div>
+                  <p className="text-[10px] font-medium text-rose-600">Total pesanan {fmtRp(check.orderTotal)} · jumlah item {fmtRp(check.itemSubtotal)}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">Tidak ada selisih: setiap total pesanan sama dengan jumlah harga item × qty.</p>
+          )}
+        </div>
+      </section>
       {loading ? (
         <div className="flex flex-col items-center justify-center py-24 gap-4">
           <div className="animate-spin w-10 h-10 border-4 border-violet-200 border-t-violet-600 rounded-full" />
@@ -559,6 +664,22 @@ export default function SalesHistory() {
                                       {fmtRp(order.total_price)}
                                     </p>
                                   </div>
+                                  {(() => {
+                                    const check = reconcileOrderTotal(order);
+                                    if (!check) return null;
+                                    return (
+                                      <div className={cn('mt-2 flex items-center justify-between rounded-xl px-3 py-2 border',
+                                        check.matches ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100')}>
+                                        <span className={cn('text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5', check.matches ? 'text-emerald-700' : 'text-rose-700')}>
+                                          {check.matches ? <ShieldCheck size={11} /> : <ShieldAlert size={11} />}
+                                          {check.matches ? 'Total sesuai rincian' : 'Total tidak sesuai rincian'}
+                                        </span>
+                                        <span className={cn('text-[11px] font-black', check.matches ? 'text-emerald-700' : 'text-rose-700')}>
+                                          {check.matches ? `${check.itemCount} item · ${fmtRp(check.itemSubtotal)}` : `Item ${fmtRp(check.itemSubtotal)} · selisih ${fmtRp(check.difference)}`}
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </motion.div>
                             </td>

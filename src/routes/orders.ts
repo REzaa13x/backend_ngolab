@@ -7,6 +7,7 @@ import multer from "multer";
 import { db, addAuditLog } from "../db/db.js";
 import { requireApiKeyScope } from "../middleware/authApiKey.js";
 import { canUseGenericOrderStatus } from "../lib/preorderRules.js";
+import { bulkCompleteMessage, planBulkComplete } from "../lib/bulkComplete.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 import { consumeInventoryForOrder, emitInventoryChanges, restoreInventoryForOrder } from "../lib/inventoryDb.js";
 import { processLoyaltyPoints, awardOrderPoints } from "../lib/loyaltyHelper.js";
@@ -739,7 +740,68 @@ router.patch("/:id/payment-status", requirePaymentStaff, async (req: Request, re
   }
 });
 
-// PATCH /api/orders/:id/status — Ubah Status Pesanan (menunggu, sedang_diproses, ready, selesai, dibatalkan)
+// POST /api/orders/complete-all — tutup semua pesanan aktif yang sudah lunas.
+// Dipakai tombol "Selesaikan Semua" agar kasir tidak mengklik satu per satu.
+// Dibatasi pada status berjalan, bukan pesanan batal/pre-order, dan baris
+// dikunci FOR UPDATE supaya klik ganda tidak menyelesaikan pesanan baru yang
+// masuk di tengah proses.
+router.post("/complete-all", requireOrderStaff, async (req: Request, res: Response) => {
+  const requestedOutlet = req.body?.outlet;
+  const outlet = requestedOutlet === 'ngolab' || requestedOutlet === 'coworking' ? requestedOutlet : undefined;
+  const paidOnly = req.body?.paid_only === false ? false : true;
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const params: any[] = [];
+    let query = `SELECT id, status, payment_status, order_type, preorder_status, outlet, invoice_number
+                 FROM orders WHERE LOWER(status) IN ('menunggu', 'sedang_diproses', 'siap')`;
+    if (outlet) { query += ' AND outlet = ?'; params.push(outlet); }
+    query += ' FOR UPDATE';
+    const [rows]: any = await connection.query(query, params);
+
+    const plan = planBulkComplete(rows, { outlet, paidOnly });
+    const ids = plan.completable.map(order => String(order.id));
+    if (ids.length) {
+      const placeholders = ids.map(() => '?').join(', ');
+      await connection.query(
+        `UPDATE orders SET status = 'selesai' WHERE id IN (${placeholders}) AND LOWER(status) IN ('menunggu', 'sedang_diproses', 'siap')`,
+        ids
+      );
+    }
+    await connection.commit();
+
+    const actor = getVerifiedActor(req);
+    const message = bulkCompleteMessage(plan);
+    if (ids.length) await addAuditLog(actor, "Selesaikan Semua Pesanan", message);
+
+    const io = req.app.get('io');
+    if (io) {
+      if (ids.length) {
+        const [updated]: any = await db.query(
+          `SELECT *, UNIX_TIMESTAMP(created_at) AS created_at_epoch FROM orders WHERE id IN (${ids.map(() => '?').join(', ')})`,
+          ids
+        );
+        updated.forEach((row: any) => io.emit("order_updated", normalizeOrderCreatedAt(row)));
+      }
+      io.emit("stats_updated");
+    }
+
+    res.json({
+      message,
+      completed: ids.length,
+      completed_ids: ids,
+      skipped: plan.skipped,
+      outlet: outlet ?? 'semua',
+    });
+  } catch (err: any) {
+    await connection.rollback();
+    res.status(500).json({ message: "Gagal menyelesaikan semua pesanan", error: err.message });
+  } finally {
+    connection.release();
+  }
+});
+
+// PATCH /api/orders/:id/status — Ubah status pesanan
 router.patch("/:id/status", requireOrderStaff, async (req: Request, res: Response) => {
   const connection = await db.getConnection();
   try {

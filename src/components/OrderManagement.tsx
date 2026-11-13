@@ -1,4 +1,4 @@
-import { formatWibTimestamp, wibDateKey, parseHistoryTimestamp } from '../lib/salesHistoryPeriod';
+import { formatWibTimestamp, wibDateKey, parseHistoryTimestamp, matchesHistoryPeriod, historyPeriodLabel, historyPeriodRange, type HistoryPeriod } from '../lib/salesHistoryPeriod';
 import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -21,13 +21,16 @@ import {
   User,
   PhoneCall,
   Receipt,
-  Printer
+  Printer,
+  CalendarDays,
+  CheckCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import socket from '../lib/socket';
 import { PaymentProofPreview } from './PaymentProofPreview';
 import { authFetch } from '../lib/authFetch';
 import { printReceipt } from '../lib/printDoc';
+import { aggregateSoldMenus, soldMenusTotals, summarizeTotalValidation } from '../lib/menuSales';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -52,6 +55,8 @@ interface Order {
   payment_proof?: string;
   payment_proof_url?: string;
   source: string;
+  outlet?: string;
+  order_type?: string;
   created_at: string;
   items: OrderItem[];
 }
@@ -69,8 +74,12 @@ export default function OrderManagement() {
   const [isExporting, setIsExporting] = useState(false);
   const [summary, setSummary] = useState<any>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [period, setPeriod] = useState<'all' | 'day' | 'week' | 'month' | 'year'>('all');
+  const [period, setPeriod] = useState<HistoryPeriod>('semua');
+  const [selectedDate, setSelectedDate] = useState(() => wibDateKey(new Date()));
+  const [rangeEnd, setRangeEnd] = useState(() => wibDateKey(new Date()));
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [completingAll, setCompletingAll] = useState(false);
+  const [completeNotice, setCompleteNotice] = useState('');
 
   const fetchOrders = () => {
     setLoading(true);
@@ -139,33 +148,14 @@ export default function OrderManagement() {
         if (!isManual) return false;
       }
 
-      if (period === 'all') return true;
+      if (period === 'semua') return true;
 
-      const orderDate = parseHistoryTimestamp(order.created_at);
-      if (!orderDate) return false;
-      const now = new Date();
-
-      if (period === 'day') {
-        return wibDateKey(orderDate) === wibDateKey(now);
-      }
-
-      if (period === 'week') {
-        const weekAgo = new Date();
-        weekAgo.setDate(now.getDate() - 7);
-        return orderDate >= weekAgo;
-      }
-
-      if (period === 'month') {
-        return wibDateKey(orderDate).slice(0, 7) === wibDateKey(now).slice(0, 7);
-      }
-
-      if (period === 'year') {
-        return wibDateKey(orderDate).slice(0, 4) === wibDateKey(now).slice(0, 4);
-      }
-
-      return true;
+      // Filter periode memakai tanggal WIB dan rentang eksplisit, bukan
+      // "7 hari terakhir" yang bergantung pada jam sekarang. Dengan begitu
+      // "Mingguan" selalu Senin–Minggu dan bisa dicek ulang kapan pun.
+      return matchesHistoryPeriod(order.created_at, period, selectedDate, rangeEnd);
     });
-  }, [orders, searchTerm, period, sourceFilter]);
+  }, [orders, searchTerm, period, selectedDate, rangeEnd, sourceFilter]);
 
   const verifyPayment = async (id: string, paymentDetails?: { method: string, amount: number }) => {
     try {
@@ -298,6 +288,35 @@ export default function OrderManagement() {
     }
   };
 
+  const completeAll = async () => {
+    const target = filteredOrders.filter(order => ['menunggu', 'sedang_diproses', 'siap'].includes(String(order.status).toLowerCase())
+      && order.payment_status === 'lunas'
+      && String(order.order_type ?? 'regular').toLowerCase() !== 'preorder');
+    if (target.length === 0) {
+      setCompleteNotice('Tidak ada pesanan lunas yang masih berjalan pada filter ini.');
+      return;
+    }
+    if (!window.confirm(`Selesaikan ${target.length} pesanan lunas sekaligus?\n\nHanya pesanan berstatus Menunggu / Diproses / Siap dan sudah lunas yang ditutup. Pre-order dan pesanan belum lunas dilewati.`)) return;
+    setCompletingAll(true);
+    setCompleteNotice('');
+    try {
+      const res = await authFetch('/api/orders/complete-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-name': user?.name || 'Kasir' },
+        body: JSON.stringify({ outlet: sourceFilter === 'ngolab' || sourceFilter === 'coworking' ? sourceFilter : undefined })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || res.statusText);
+      setCompleteNotice(data.message || `${data.completed ?? 0} pesanan diselesaikan.`);
+      fetchOrders();
+      fetchSummary();
+    } catch (err: any) {
+      setCompleteNotice(`Gagal menyelesaikan semua pesanan: ${err.message}`);
+    } finally {
+      setCompletingAll(false);
+    }
+  };
+
   const exportToPDF = () => {
     if (filteredOrders.length === 0) return;
     setIsExporting(true);
@@ -310,7 +329,7 @@ export default function OrderManagement() {
     
     doc.setFontSize(10);
     doc.setTextColor(100);
-    doc.text(`Periode: ${period.toUpperCase()}`, 14, 28);
+    doc.text(`Periode: ${historyPeriodLabel(period, selectedDate, rangeEnd)}`, 14, 28);
     doc.text(`Waktu Cetak: ${formatWibTimestamp(new Date()) + ' WIB'}`, 14, 33);
     doc.text(`Total Pesanan: ${filteredOrders.length}`, 14, 38);
     
@@ -337,7 +356,35 @@ export default function OrderManagement() {
       }
     });
 
-    const fileName = `Laporan_Transaksi_${period}_${new Date().toISOString().split('T')[0]}.pdf`;
+    // Rincian menu terjual: menjawab "produk apa saja yang laku dan berapa totalnya".
+    const sold = aggregateSoldMenus(filteredOrders);
+    const soldTotals = soldMenusTotals(sold);
+    doc.addPage();
+    doc.setFontSize(15); doc.setTextColor(15, 23, 42);
+    doc.text('MENU TERJUAL', 14, 18);
+    doc.setFontSize(9); doc.setTextColor(100);
+    doc.text(`${sold.length} jenis menu | ${soldTotals.quantity} item terjual | Nilai item: Rp ${soldTotals.revenue.toLocaleString('id-ID')}`, 14, 25);
+    autoTable(doc, {
+      startY: 30,
+      head: [['Nama Menu', 'Qty', 'Pendapatan (Rp)', 'Transaksi']],
+      body: sold.map(row => [row.name, String(row.quantity), row.revenue.toLocaleString('id-ID'), String(row.orders)]),
+      foot: [['TOTAL', String(soldTotals.quantity), soldTotals.revenue.toLocaleString('id-ID'), '']],
+      headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
+      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+      theme: 'grid', styles: { fontSize: 8 },
+      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } }
+    });
+
+    // Validasi: total pesanan vs jumlah harga item, supaya selisih langsung terlihat.
+    const validation = summarizeTotalValidation(filteredOrders);
+    const afterSold = (doc as any).lastAutoTable?.finalY ?? 30;
+    doc.setFontSize(13);
+    doc.text('VALIDASI TOTAL', 14, afterSold + 12);
+    doc.setFontSize(9);
+    doc.text(`${validation.checked} diperiksa | ${validation.matched} cocok | ${validation.mismatched} selisih | ${validation.withoutItems} tanpa rincian item`, 14, afterSold + 19);
+    doc.text(`Total pesanan Rp ${validation.orderTotal.toLocaleString('id-ID')} vs jumlah item Rp ${validation.itemSubtotal.toLocaleString('id-ID')} (selisih Rp ${validation.difference.toLocaleString('id-ID')})`, 14, afterSold + 25);
+
+    const fileName = `Laporan_Transaksi_${period}_${selectedDate}.pdf`;
     doc.save(fileName);
     setTimeout(() => setIsExporting(false), 800);
   };
@@ -357,6 +404,15 @@ export default function OrderManagement() {
           </h2>
         </div>
         <div className="flex items-center gap-3">
+          <button 
+            onClick={completeAll}
+            disabled={completingAll || loading}
+            title="Selesaikan semua pesanan lunas yang masih berjalan"
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 dark:shadow-none disabled:opacity-50 disabled:shadow-none"
+          >
+            {completingAll ? <RefreshCw size={14} className="animate-spin" /> : <CheckCheck size={14} />}
+            Selesaikan Semua
+          </button>
           <button 
             onClick={exportToPDF}
             disabled={isExporting || filteredOrders.length === 0}
@@ -447,6 +503,41 @@ export default function OrderManagement() {
                  ))}
               </div>
            </div>
+        </div>
+
+        {/* Filter periode dengan tanggal acuan: harian, mingguan, bulanan, tahunan, rentang */}
+        <div className="px-5 pb-5 -mt-1 border-t border-slate-50 pt-4 space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <CalendarDays size={16} className="text-indigo-600" />
+              <span className="text-xs font-black uppercase tracking-widest text-slate-500">Periode transaksi</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div role="group" aria-label="Periode transaksi" className="flex p-1 bg-slate-100 rounded-xl overflow-x-auto">
+                {([['semua', 'Semua'], ['hari', 'Harian'], ['minggu', 'Mingguan'], ['bulan', 'Bulanan'], ['tahun', 'Tahunan'], ['rentang', 'Rentang']] as [HistoryPeriod, string][]).map(([value, label]) => (
+                  <button key={value} aria-pressed={period === value} onClick={() => setPeriod(value)} className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase whitespace-nowrap', period === value ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400')}>{label}</button>
+                ))}
+              </div>
+              <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
+                {period === 'rentang' ? 'Dari' : 'Tanggal'}
+                <input type="date" aria-label="Tanggal acuan WIB" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} disabled={period === 'semua'} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-40" />
+              </label>
+              {period === 'rentang' && (
+                <label className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
+                  Sampai
+                  <input type="date" aria-label="Tanggal akhir WIB" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold" />
+                </label>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-[11px]">
+            <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-black uppercase tracking-widest">{historyPeriodLabel(period, selectedDate, rangeEnd)}</span>
+            <span className="text-slate-500 font-bold">{filteredOrders.length} pesanan · Total Rp {filteredOrders.reduce((sum, o) => sum + (Number(o.total_price) || 0), 0).toLocaleString('id-ID')}</span>
+            {period === 'rentang' && historyPeriodRange(period, selectedDate, rangeEnd) && (
+              <span className="text-slate-400 font-medium">{historyPeriodRange(period, selectedDate, rangeEnd)!.start} → {historyPeriodRange(period, selectedDate, rangeEnd)!.end} (WIB)</span>
+            )}
+          </div>
+          {completeNotice && <p role="status" className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">{completeNotice}</p>}
         </div>
 
         <div className="overflow-x-auto">
@@ -543,8 +634,9 @@ export default function OrderManagement() {
                         )}
                       </div>
                       <span className="text-[10px] text-slate-400 font-medium">
-                        {formatWibTimestamp(order.created_at, { hour: '2-digit', minute: '2-digit' }) + ' WIB'} • {order.external_id || '-'}
+                        {formatWibTimestamp(order.created_at, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB'}
                       </span>
+                      <span className="text-[9px] text-slate-300 font-bold mt-0.5">{order.external_id || '-'}</span>
                     </div>
                   </td>
                   <td className="px-6 py-5 text-right">

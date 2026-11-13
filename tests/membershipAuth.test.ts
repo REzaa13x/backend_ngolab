@@ -6,10 +6,33 @@ const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('registrasi publik tidak boleh membuat akun staf (Kasir, Koki, Support, Admin)', async () => {
   const auth = await read('../src/routes/auth.ts');
-  // Pastikan tidak ada lagi pembuatan staff di rute register publik
-  assert.doesNotMatch(auth, /INSERT INTO staff\s*\([^)]*\)\s*VALUES/i, 'registrasi publik tidak boleh insert ke tabel staff');
+  // Blok endpoint pelanggan dibatasi penanda kode, karena nama komentar
+  // register-staff juga berawalan "// POST /api/auth/register".
+  const customerStart = auth.indexOf('router.post("/register"');
+  const customerEnd = auth.indexOf('// POST /api/auth/change-password');
+  assert.ok(customerStart > 0 && customerEnd > customerStart, 'blok register pelanggan harus ditemukan');
+  const customerRegister = auth.slice(customerStart, customerEnd);
+  assert.doesNotMatch(customerRegister, /INSERT INTO staff/i, 'registrasi publik tidak boleh insert ke tabel staff');
   // Pastikan role selalu Pelanggan
-  assert.match(auth, /role.*'Pelanggan'/i, 'registrasi publik harus menetapkan role Pelanggan');
+  assert.match(customerRegister, /'Pelanggan'/i, 'registrasi publik harus menetapkan role Pelanggan');
+});
+
+test('pendaftaran pegawai mandiri wajib berstatus pending dan tidak langsung memberi sesi', async () => {
+  const auth = await read('../src/routes/auth.ts');
+  const start = auth.indexOf('// POST /api/auth/register-staff');
+  const end = auth.indexOf('router.post("/register"');
+  assert.ok(start > 0 && end > start, 'blok register-staff harus ditemukan');
+  const staffRegister = auth.slice(start, end);
+  // Akun pegawai baru harus menunggu persetujuan Super Admin, bukan langsung aktif.
+  const insert = /INSERT INTO staff[\s\S]*?VALUES\s*\([^)]*\)/i.exec(staffRegister);
+  assert.ok(insert, 'pernyataan INSERT staff harus ditemukan');
+  assert.match(insert[0], /'pending'/, 'akun pegawai mandiri harus berstatus pending');
+  assert.doesNotMatch(insert[0], /'active'/, 'pendaftaran mandiri tidak boleh langsung mengaktifkan akun');
+  // Tanpa token: pendaftar tidak boleh langsung masuk sebelum disetujui.
+  assert.doesNotMatch(staffRegister, /\.\.\.authenticatedUser/, 'pendaftaran mandiri tidak boleh mengeluarkan token sesi');
+  assert.match(staffRegister, /requires_approval/, 'respons harus menandai perlunya persetujuan');
+  // Role dibatasi daftar putih pegawai, bukan pelanggan/admin.
+  assert.match(staffRegister, /isPublicStaffRole/);
 });
 
 test('registrasi publik tidak menyimpan password_plain baru', async () => {
