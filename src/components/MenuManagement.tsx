@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Archive, CheckCircle2, Coffee, Image as ImageIcon, Package, Pencil, Plus, RefreshCw, Search, Trash2, UtensilsCrossed, X } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Archive, CheckCircle2, Coffee, Download, Image as ImageIcon, Package, Pencil, Plus, RefreshCw, Search, Trash2, UtensilsCrossed, X } from 'lucide-react';
 import { authFetch } from '../lib/authFetch';
+import { exportMenuExcel } from '../lib/menuExport';
 
 type Outlet = 'ngolab' | 'coworking';
 type MenuItem = {
@@ -18,6 +19,9 @@ export default function MenuManagement({ onNavigate }: { onNavigate?: (tab: stri
   const [outlet, setOutlet] = useState<Outlet>('ngolab');
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadedOutlet, setLoadedOutlet] = useState<Outlet | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const requestId = useRef(0);
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('Semua');
@@ -29,6 +33,8 @@ export default function MenuManagement({ onNavigate }: { onNavigate?: (tab: stri
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
+    const currentRequest = ++requestId.current;
+    setLoadedOutlet(null);
     setLoading(true); setError('');
     try {
       const query = outlet === 'ngolab'
@@ -37,9 +43,12 @@ export default function MenuManagement({ onNavigate }: { onNavigate?: (tab: stri
       const response = await authFetch(query);
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || 'Gagal mengambil menu.');
-      setItems(Array.isArray(data) ? data : []);
-    } catch (requestError: any) { setError(requestError.message); }
-    finally { setLoading(false); }
+      if (currentRequest === requestId.current) {
+        setItems(Array.isArray(data) ? data : []);
+        setLoadedOutlet(outlet);
+      }
+    } catch (requestError: any) { if (currentRequest === requestId.current) setError(requestError.message); }
+    finally { if (currentRequest === requestId.current) setLoading(false); }
   }, [outlet]);
   useEffect(() => { setForm(emptyForm(outlet)); setEditingId(null); setModal(false); load(); }, [outlet, load]);
 
@@ -81,15 +90,22 @@ export default function MenuManagement({ onNavigate }: { onNavigate?: (tab: stri
   };
 
   const visibleCategories = useMemo(() => ['Semua', ...Array.from(new Set(items.map(item => item.category).filter(Boolean)))], [items]);
-  const filtered = useMemo(() => items.filter(item => (outlet === 'ngolab' || showArchived || item.isActive) && (categoryFilter === 'Semua' || item.category === categoryFilter) && `${item.name} ${item.category}`.toLowerCase().includes(search.toLowerCase())), [items, outlet, showArchived, search, categoryFilter]);
+  const filtered = useMemo(() => items.filter(item => item.outlet === outlet && (outlet === 'ngolab' || showArchived || item.isActive) && (categoryFilter === 'Semua' || item.category === categoryFilter) && `${item.name} ${item.category}`.toLowerCase().includes(search.toLowerCase())), [items, outlet, showArchived, search, categoryFilter]);
+  const exportMenu = async () => {
+    setExporting(true); setError('');
+    try { await exportMenuExcel(filtered, outlet); }
+    catch { setError('Gagal mengunduh menu XLSX. Silakan coba lagi.'); }
+    finally { setExporting(false); }
+  };
   const activeCount = items.filter(item => item.isActive).length;
   const archivedCount = items.length - activeCount;
   const availableCount = items.filter(item => item.inStock).length;
 
   return <div className="space-y-6 pb-20">
     <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4"><div><div className="flex items-center gap-3"><div className="p-2.5 rounded-xl bg-violet-50 text-violet-600"><UtensilsCrossed/></div><h2 className="text-2xl font-bold dark:text-white">Manajemen Menu</h2></div><p className="text-sm text-slate-500 ml-12 mt-1">{outlet === 'ngolab' ? 'Menu Ngolab berasal langsung dari Smart Tag.' : 'Master menu Coworking dikelola secara lokal. Stok dikelola melalui Inventori.'}</p></div><div className="flex gap-2"><button onClick={() => onNavigate?.('menu-availability')} className="px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-sm">Ketersediaan Menu</button>{outlet === 'ngolab' ? <a href="https://smarttag.ngolab.online/" target="_blank" rel="noopener noreferrer" className="px-4 py-2.5 rounded-xl bg-violet-600 text-white font-bold text-sm">Kelola di Smart Tag</a> : <button onClick={openNew} className="px-4 py-2.5 rounded-xl bg-violet-600 text-white font-bold text-sm flex gap-2"><Plus size={17}/> Tambah Menu</button>}</div></div>
+    <div className="flex items-center gap-3"><button type="button" onClick={exportMenu} disabled={loading || loadedOutlet !== outlet || exporting || filtered.length === 0} className="px-4 py-2.5 rounded-xl bg-indigo-50 text-indigo-700 font-bold text-sm flex items-center gap-2 disabled:opacity-50"><Download size={17}/> {exporting ? 'Menyiapkan XLSX...' : 'Unduh Menu XLSX'}</button><span className="text-xs text-slate-500">Mengunduh menu sesuai outlet dan filter yang ditampilkan.</span></div>
     {(message || error) && <div className={`p-4 rounded-xl border ${error ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>{error || message}</div>}
-    <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl w-fit">{(['ngolab','coworking'] as Outlet[]).map(value => <button key={value} onClick={() => setOutlet(value)} className={`px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 ${outlet === value ? 'bg-white dark:bg-slate-800 text-violet-600 shadow-sm' : 'text-slate-500'}`}>{value === 'ngolab' ? <Package size={16}/> : <Coffee size={16}/>} {value === 'ngolab' ? 'Ngolab' : 'Coworking'}</button>)}</div>
+    <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl w-fit">{(['ngolab','coworking'] as Outlet[]).map(value => <button key={value} onClick={() => { if (value !== outlet) { requestId.current++; setLoadedOutlet(null); setLoading(true); setOutlet(value); } }} className={`px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 ${outlet === value ? 'bg-white dark:bg-slate-800 text-violet-600 shadow-sm' : 'text-slate-500'}`}>{value === 'ngolab' ? <Package size={16}/> : <Coffee size={16}/>} {value === 'ngolab' ? 'Ngolab' : 'Coworking'}</button>)}</div>
     <div className="grid grid-cols-3 gap-3">{(outlet === 'ngolab' ? [['Total',items.length,'bg-violet-50 text-violet-700'],['Tersedia',availableCount,'bg-emerald-50 text-emerald-700'],['Tidak Tersedia',items.length-availableCount,'bg-rose-50 text-rose-700']] : [['Total',items.length,'bg-violet-50 text-violet-700'],['Aktif',activeCount,'bg-emerald-50 text-emerald-700'],['Diarsipkan',archivedCount,'bg-slate-100 text-slate-600']]).map(([label,value,color]) => <div key={String(label)} className={`p-4 rounded-2xl ${color}`}><p className="text-xs font-bold uppercase opacity-70">{label}</p><p className="text-3xl font-black">{value}</p></div>)}</div>
     <div className="flex flex-col md:flex-row gap-3"><div className="relative flex-1"><Search className="absolute left-4 top-3.5 text-slate-400" size={18}/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Cari nama atau kategori menu..." className="w-full pl-11 pr-4 py-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 dark:text-white"/></div><select value={categoryFilter} onChange={event=>setCategoryFilter(event.target.value)} className="px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border dark:border-slate-800 dark:text-white"><option value="Semua">Semua kategori</option>{visibleCategories.filter(category => category !== 'Semua').map(category => <option key={category}>{category}</option>)}</select>{outlet === 'coworking' && <label className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border dark:border-slate-800 text-sm dark:text-white"><input type="checkbox" checked={showArchived} onChange={event=>setShowArchived(event.target.checked)}/> Tampilkan arsip</label>}<button onClick={load} className="px-4 py-3 rounded-xl bg-white dark:bg-slate-900 border dark:border-slate-800"><RefreshCw size={18}/></button></div>
     {loading ? <p className="text-center py-16 text-slate-500">Memuat menu...</p> : <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{filtered.map(item => <div key={item.id} className={`bg-white dark:bg-slate-900 rounded-2xl border dark:border-slate-800 overflow-hidden ${!item.isActive ? 'opacity-60' : ''}`}><div className="h-40 bg-slate-100 dark:bg-slate-800">{item.image && <img src={item.image} alt={item.name} className="w-full h-full object-cover"/>}</div><div className="p-5"><div className="flex justify-between gap-3"><div><span className="text-xs text-slate-500">{item.category}</span><h3 className="font-bold text-lg dark:text-white mt-1">{item.name}</h3><p className="font-black text-violet-600 mt-1">Rp {Number(item.price).toLocaleString('id-ID')}</p></div><span className={`self-start px-2 py-1 rounded-full text-[10px] font-bold ${item.inStock ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>{outlet === 'ngolab' ? (item.inStock ? 'TERSEDIA' : 'TIDAK TERSEDIA') : (item.isActive ? 'AKTIF' : 'ARSIP')}</span></div><p className="text-xs text-slate-500 mt-3 line-clamp-2 min-h-8">{item.description || 'Belum ada deskripsi.'}</p>{outlet === 'ngolab' ? <div className="mt-4 text-xs font-bold text-indigo-600 bg-indigo-50 rounded-xl px-3 py-2 text-center">Dikelola oleh Smart Tag</div> : <div className="flex gap-2 mt-4"><button onClick={() => openEdit(item)} className="flex-1 py-2.5 rounded-xl bg-violet-50 text-violet-700 font-bold text-sm flex justify-center gap-2"><Pencil size={15}/> Edit</button>{item.isActive ? <button onClick={() => setArchived(item,false)} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm flex justify-center gap-2"><Archive size={15}/> Arsipkan</button> : <button onClick={() => setArchived(item,true)} className="flex-1 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-sm flex justify-center gap-2"><CheckCircle2 size={15}/> Pulihkan</button>}<button onClick={() => remove(item)} title="Hapus permanen" className="px-3 py-2.5 rounded-xl bg-rose-50 text-rose-600 font-bold text-sm flex justify-center"><Trash2 size={15}/></button></div>}</div></div>)}</div>}
