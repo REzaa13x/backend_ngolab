@@ -11,6 +11,7 @@ import { authFetch } from '../lib/authFetch';
 import { HistoryPeriod, matchesHistoryPeriod, parseHistoryTimestamp, wibDateKey, formatWibTimestamp, historyPeriodLabel, historyPeriodRange } from '../lib/salesHistoryPeriod';
 import { exportHistoryExcel, exportHistoryPdf } from '../lib/salesHistoryExport';
 import { aggregateSoldMenus, soldMenusTotals, summarizeTotalValidation, reconcileOrderTotal } from '../lib/menuSales';
+import { dailyBreakdown, weekBreakdown, weekdayBreakdown, weekdayMenuBreakdown, monthBreakdown, yearBreakdown, salesSummary } from '../lib/salesBreakdown';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface OrderItem {
@@ -87,6 +88,7 @@ export default function SalesHistory() {
   const [selectedDate, setSelectedDate] = useState(() => wibDateKey(new Date()));
   const [rangeEnd, setRangeEnd] = useState(() => wibDateKey(new Date()));
   const [exportError, setExportError] = useState('');
+  const [detailView, setDetailView] = useState<'harian' | 'mingguan' | 'perhari' | 'bulanan' | 'tahunan'>('harian');
 
   // ── Fetch our orders ─────────────────────────────────────────────────────
   const fetchOurOrders = async () => {
@@ -207,6 +209,19 @@ export default function SalesHistory() {
   const soldTotals = soldMenusTotals(soldMenus);
   const validation = summarizeTotalValidation(paidOrders);
   const mismatchChecks = validation.checks.filter(check => !check.matches);
+
+  // Rekap bertingkat. Semua turunan memakai transaksi lunas yang sudah
+  // difilter, jadi angkanya konsisten dengan panel di atas dan dengan ekspor.
+  const activeRange = historyPeriodRange(period, selectedDate, rangeEnd);
+  const paidBreakdown = paidOrders as unknown as Parameters<typeof dailyBreakdown>[0];
+  const dayRows = dailyBreakdown(paidBreakdown);
+  const weekdayRows = weekdayBreakdown(paidBreakdown);
+  const weekdayMenuRows = weekdayMenuBreakdown(paidBreakdown);
+  const weekRows = weekBreakdown(paidBreakdown, activeRange);
+  const monthRows = monthBreakdown(paidBreakdown);
+  const yearRows = yearBreakdown(paidBreakdown);
+  const overall = salesSummary(paidBreakdown, paidBreakdown);
+  const weekdayLabel = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (
@@ -384,11 +399,179 @@ export default function SalesHistory() {
           <span className="text-xs text-slate-500 font-bold">{filtered.length} transaksi · {paidOrders.length} lunas</span>
         </div>
         <p className="text-xs text-slate-500">Waktu WIB (Asia/Jakarta); mingguan Senin–Minggu. Timestamp tanpa zona dianggap WIB; tanggal tidak valid hanya muncul pada Semua Periode.</p>
-        <div className="flex gap-2">{(['PDF', 'Excel'] as const).map(format => <button key={format} disabled={loading || !filtered.length} onClick={async () => { try { setExportError(''); const description = `Periode: ${historyPeriodLabel(period, selectedDate, rangeEnd)} | Sumber: ${filterSource} | Status: ${filterStatus} | Pencarian: ${search || '-'} | WIB${localStatus !== 'online' || friendStatus !== 'online' ? ` | DATA TIDAK LENGKAP: ${localStatus !== 'online' ? 'order lokal tidak tersedia; ' : ''}${friendStatus !== 'online' ? 'Smart Tag tidak tersedia' : ''}` : ''}`; const filename = `Riwayat_Transaksi_${period}_${selectedDate}`; if (format === 'PDF') exportHistoryPdf(filtered, description, filename); else await exportHistoryExcel(filtered, description, filename); } catch (error) { console.error(error); setExportError('Ekspor gagal. Silakan coba lagi.'); } }} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"><Download size={14} /> Ekspor {format}</button>)}</div>{exportError && <p role="alert" className="text-red-600 text-xs">{exportError}</p>}
+        <div className="flex gap-2">{(['PDF', 'Excel'] as const).map(format => <button key={format} disabled={loading || !filtered.length} onClick={async () => { try { setExportError(''); const description = `Periode: ${historyPeriodLabel(period, selectedDate, rangeEnd)} | Sumber: ${filterSource} | Status: ${filterStatus} | Pencarian: ${search || '-'} | WIB${localStatus !== 'online' || friendStatus !== 'online' ? ` | DATA TIDAK LENGKAP: ${localStatus !== 'online' ? 'order lokal tidak tersedia; ' : ''}${friendStatus !== 'online' ? 'Smart Tag tidak tersedia' : ''}` : ''}`; const filename = `Riwayat_Transaksi_${period}_${selectedDate}`; const exportOptions = { period, range: activeRange }; if (format === 'PDF') exportHistoryPdf(filtered, description, filename, exportOptions); else await exportHistoryExcel(filtered, description, filename, exportOptions); } catch (error) { console.error(error); setExportError('Ekspor gagal. Silakan coba lagi.'); } }} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"><Download size={14} /> Ekspor {format}</button>)}</div>{exportError && <p role="alert" className="text-red-600 text-xs">{exportError}</p>}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Hari</p><div className="max-h-52 overflow-auto space-y-2">{dailyTotals.length ? dailyTotals.map(([day, value]) => <div key={day} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-xs font-bold text-slate-600">{fmtDay(day)} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-emerald-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
           <div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Total per Bulan</p><div className="max-h-52 overflow-auto space-y-2">{monthlyTotals.length ? monthlyTotals.map(([month, value]) => <div key={month} className="flex items-center justify-between rounded-xl bg-violet-50/60 px-4 py-3"><span className="text-xs font-bold text-slate-600">{new Date(`${month}-01T00:00:00`).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} <small className="text-slate-400">({value.orders} transaksi)</small></span><strong className="text-sm text-violet-700">{fmtRp(value.revenue)}</strong></div>) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas.</p>}</div></div>
         </div>
+      </section>
+
+      {/* ── Rekap bertingkat: harian, mingguan, per hari dalam seminggu, bulanan, tahunan ── */}
+      <section aria-label="Rekap penjualan bertingkat" className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-50 rounded-xl"><CalendarDays size={18} className="text-indigo-600" /></div>
+            <div>
+              <h3 className="font-black text-slate-900">Rekap Detail</h3>
+              <p className="text-xs text-slate-400">Hanya transaksi lunas pada filter aktif · dihitung per tanggal WIB</p>
+            </div>
+          </div>
+          <div role="group" aria-label="Jenis rekap" className="flex p-1 bg-slate-100 rounded-xl overflow-x-auto">
+            {([['harian', 'Per Hari'], ['mingguan', 'Per Minggu'], ['perhari', 'Menu per Hari'], ['bulanan', 'Per Bulan'], ['tahunan', 'Per Tahun']] as const).map(([value, label]) => (
+              <button key={value} aria-pressed={detailView === value} onClick={() => setDetailView(value)}
+                className={cn('px-3 py-2 rounded-lg text-[10px] font-black uppercase whitespace-nowrap', detailView === value ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400')}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Ringkasan angka kunci */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: 'Hari ada transaksi', value: String(overall.days) },
+            { label: 'Rata-rata per hari', value: fmtRp(overall.averagePerDay) },
+            { label: 'Rata-rata per transaksi', value: fmtRp(overall.averagePerTransaction) },
+            { label: 'Hari terbaik', value: overall.bestDay ? `${overall.bestDay.label} (${overall.bestDay.weekday})` : '-' },
+          ].map(item => (
+            <div key={item.label} className="rounded-xl bg-slate-50 px-4 py-3">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{item.label}</p>
+              <p className="text-sm font-black text-slate-900">{item.value}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="max-h-96 overflow-auto">
+          {detailView === 'harian' && (
+            dayRows.length ? (
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                    <th className="py-2 pr-2">Tanggal</th><th className="py-2 px-2">Hari</th>
+                    <th className="py-2 px-2 text-right">Pesanan</th><th className="py-2 px-2 text-right">Qty</th>
+                    <th className="py-2 px-2 text-right">Pendapatan</th><th className="py-2 pl-2">Menu Teratas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {dayRows.map(row => (
+                    <tr key={row.date} className="text-xs">
+                      <td className="py-2 pr-2 font-bold text-slate-800 whitespace-nowrap">{row.label}</td>
+                      <td className="py-2 px-2 font-medium text-slate-500">{row.weekday}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.orders}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.items}</td>
+                      <td className="py-2 px-2 text-right font-black text-emerald-700 whitespace-nowrap">{fmtRp(row.revenue)}</td>
+                      <td className="py-2 pl-2 font-medium text-slate-600">{row.topMenu} <span className="text-slate-400">({row.topMenuQty})</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas pada filter ini.</p>
+          )}
+
+          {detailView === 'mingguan' && (
+            weekRows.length ? (
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                    <th className="py-2 pr-2">Minggu</th><th className="py-2 px-2">Rentang Tanggal</th>
+                    <th className="py-2 px-2 text-right">Pesanan</th><th className="py-2 px-2 text-right">Qty</th>
+                    <th className="py-2 px-2 text-right">Pendapatan</th><th className="py-2 pl-2">Menu Teratas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {weekRows.map(row => (
+                    <tr key={row.start} className="text-xs">
+                      <td className="py-2 pr-2 font-black text-indigo-700 whitespace-nowrap">{row.label}</td>
+                      <td className="py-2 px-2 font-bold text-slate-700 whitespace-nowrap">{row.rangeLabel}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.orders}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.items}</td>
+                      <td className="py-2 px-2 text-right font-black text-emerald-700 whitespace-nowrap">{fmtRp(row.revenue)}</td>
+                      <td className="py-2 pl-2 font-medium text-slate-600">{row.topMenu} <span className="text-slate-400">({row.topMenuQty})</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas pada filter ini.</p>
+          )}
+
+          {detailView === 'perhari' && (
+            <div className="space-y-3">
+              <p className="text-xs text-slate-500">Menu yang laku tiap hari dalam seminggu (Senin–Minggu), urut dari yang paling laku.</p>
+              {weekdayMenuRows.map(day => (
+                <div key={day.weekday} className="rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-between px-4 py-2 bg-slate-50 rounded-t-xl">
+                    <span className="text-xs font-black text-slate-800">{day.name}</span>
+                    <span className="text-[10px] font-bold text-slate-500">{day.orders} pesanan · {day.items} item · {fmtRp(day.revenue)}</span>
+                  </div>
+                  {day.menus.length ? (
+                    <div className="divide-y divide-slate-50">
+                      {day.menus.map(menu => (
+                        <div key={`${day.weekday}-${menu.name}`} className="flex items-center justify-between px-4 py-2 text-xs">
+                          <span className="font-bold text-slate-700">{menu.name}</span>
+                          <span className="font-black text-slate-600">{menu.quantity} <span className="font-medium text-emerald-700">· {fmtRp(menu.revenue)}</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="px-4 py-2 text-xs text-slate-400">Tidak ada transaksi pada hari ini.</p>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {detailView === 'bulanan' && (
+            monthRows.length ? (
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                    <th className="py-2 pr-2">Bulan</th><th className="py-2 px-2 text-right">Pesanan</th>
+                    <th className="py-2 px-2 text-right">Qty</th><th className="py-2 px-2 text-right">Pendapatan</th>
+                    <th className="py-2 pl-2">Menu Teratas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {monthRows.map(row => (
+                    <tr key={row.month} className="text-xs">
+                      <td className="py-2 pr-2 font-bold text-slate-800 capitalize whitespace-nowrap">{row.label}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.orders}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.items}</td>
+                      <td className="py-2 px-2 text-right font-black text-emerald-700 whitespace-nowrap">{fmtRp(row.revenue)}</td>
+                      <td className="py-2 pl-2 font-medium text-slate-600">{row.topMenu} <span className="text-slate-400">({row.topMenuQty})</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas pada filter ini.</p>
+          )}
+
+          {detailView === 'tahunan' && (
+            yearRows.length ? (
+              <table className="w-full text-left">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-[9px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                    <th className="py-2 pr-2">Tahun</th><th className="py-2 px-2 text-right">Pesanan</th>
+                    <th className="py-2 px-2 text-right">Qty</th><th className="py-2 px-2 text-right">Pendapatan</th>
+                    <th className="py-2 pl-2">Menu Teratas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {yearRows.map(row => (
+                    <tr key={row.year} className="text-xs">
+                      <td className="py-2 pr-2 font-bold text-slate-800">{row.year}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.orders}</td>
+                      <td className="py-2 px-2 text-right font-bold text-slate-700">{row.items}</td>
+                      <td className="py-2 px-2 text-right font-black text-emerald-700 whitespace-nowrap">{fmtRp(row.revenue)}</td>
+                      <td className="py-2 pl-2 font-medium text-slate-600">{row.topMenu} <span className="text-slate-400">({row.topMenuQty})</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : <p className="text-xs text-slate-400 py-3">Belum ada transaksi lunas pada filter ini.</p>
+          )}
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Minggu dihitung Senin–Minggu. Minggu ke-1 dimulai dari Senin pada tanggal awal periode, jadi rentangnya selalu ditampilkan.
+          Menu teratas dihitung dari qty terjual, bukan jumlah transaksi.
+        </p>
       </section>
 
       {/* ── Rekap menu terjual + validasi total ── */}

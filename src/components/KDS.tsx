@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
-import { 
+import {
   Clock, 
   User, 
   ChefHat, 
@@ -15,7 +15,8 @@ import {
   VolumeX,
   Printer,
   Copy,
-  Trash2
+  Trash2,
+  CheckCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
@@ -59,6 +60,9 @@ export default function KDS() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [queueEstimate, setQueueEstimate] = useState<{ minutes: number; message: string } | null>(null);
   const [toast, setToast] = useState('');
+  const [completingAll, setCompletingAll] = useState(false);
+  const [includeQueue, setIncludeQueue] = useState(false);
+  const [completeNotice, setCompleteNotice] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const saved = localStorage.getItem('tangolab_sound_enabled');
     return saved !== 'false';
@@ -302,6 +306,41 @@ export default function KDS() {
     window.setTimeout(() => setToast(''), 3500);
   };
 
+  // Selesaikan semua pesanan yang sedang dimasak dan siap diambil sekaligus.
+  // Memakai endpoint yang sama dengan Verifikasi & Transaksi, tapi dengan
+  // `statuses` terbatas supaya antrean "Pesanan Masuk" tidak ikut tertutup
+  // tanpa pernah dimasak. Antrean hanya ikut bila koki mencentang opsinya.
+  const completeAll = async () => {
+    const statuses = includeQueue ? ['menunggu', 'sedang_diproses', 'siap'] : ['sedang_diproses', 'siap'];
+    const target = orders.filter(order => statuses.includes(
+      order.status === 'ready' ? 'siap' : order.status === 'cooking' ? 'sedang_diproses' : 'menunggu'
+    ) && order.paymentStatus === 'lunas' && order.orderType !== 'preorder');
+    if (!target.length) {
+      setCompleteNotice('Tidak ada pesanan lunas di kolom Sedang Dimasak / Siap Diambil pada outlet ini.');
+      window.setTimeout(() => setCompleteNotice(''), 5000);
+      return;
+    }
+    if (!window.confirm(`Selesaikan ${target.length} pesanan sekaligus?\n\nYang ditutup: ${includeQueue ? 'Pesanan Masuk, Sedang Dimasak, Siap Diambil' : 'Sedang Dimasak dan Siap Diambil'} yang sudah lunas.\nPre-order dan pesanan belum lunas dilewati.`)) return;
+    setCompletingAll(true);
+    setCompleteNotice('');
+    try {
+      const res = await authFetch('/api/orders/complete-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outlet: selectedOutlet, statuses })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || res.statusText);
+      setCompleteNotice(data.message || `${data.completed ?? 0} pesanan diselesaikan.`);
+      fetchOrders();
+      window.setTimeout(() => setCompleteNotice(''), 6000);
+    } catch (err: any) {
+      setCompleteNotice(`Gagal menyelesaikan semua pesanan: ${err.message}`);
+    } finally {
+      setCompletingAll(false);
+    }
+  };
+
   const Column = ({ title, status, icon: Icon, color }: { title: string, status: string, icon: any, color: string }) => {
     const count = orders.filter(o => o.status === status).length;
     return (
@@ -503,6 +542,11 @@ export default function KDS() {
           {toast}
         </div>
       )}
+      {completeNotice && (
+        <div role="status" className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm font-bold text-emerald-800">
+          {completeNotice}
+        </div>
+      )}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900">Sistem Tampilan Dapur</h2>
@@ -525,13 +569,37 @@ export default function KDS() {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-100 rounded-xl text-xs font-bold text-slate-600 shadow-sm">
             <Timer size={14} className="text-indigo-600" />
             Rata-rata Persiapan: {queueEstimate ? `${queueEstimate.minutes}m` : '—'}
             {queueEstimate && queueEstimate.message !== 'Normal' && (
               <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-50 text-[9px] font-black uppercase text-amber-700">{queueEstimate.message}</span>
             )}
+          </div>
+          {/* Selesaikan semua pesanan dapur: Sedang Dimasak + Siap Diambil.
+              Antrean "Pesanan Masuk" hanya ikut bila dicentang, karena menutup
+              pesanan yang belum dimasak akan menghilangkan pekerjaan dapur. */}
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-100 rounded-xl text-[10px] font-bold text-slate-600 shadow-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeQueue}
+                onChange={event => setIncludeQueue(event.target.checked)}
+                className="w-3.5 h-3.5 accent-emerald-600"
+              />
+              Ikut antrean masuk
+            </label>
+            <button
+              type="button"
+              onClick={completeAll}
+              disabled={completingAll}
+              title="Selesaikan semua pesanan lunas di kolom Sedang Dimasak dan Siap Diambil"
+              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 dark:shadow-none disabled:opacity-50"
+            >
+              <CheckCheck size={15} />
+              {completingAll ? 'Menyelesaikan...' : 'Selesaikan Semua'}
+            </button>
           </div>
           {/* Tombol Mute Bell */}
           <button

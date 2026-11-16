@@ -7,7 +7,7 @@ import multer from "multer";
 import { db, addAuditLog } from "../db/db.js";
 import { requireApiKeyScope } from "../middleware/authApiKey.js";
 import { canUseGenericOrderStatus } from "../lib/preorderRules.js";
-import { bulkCompleteMessage, planBulkComplete } from "../lib/bulkComplete.js";
+import { bulkCompleteMessage, normalizeBulkStatuses, planBulkComplete } from "../lib/bulkComplete.js";
 import { getVerifiedActor, requireRoles } from "../middleware/authSession.js";
 import { consumeInventoryForOrder, emitInventoryChanges, restoreInventoryForOrder } from "../lib/inventoryDb.js";
 import { processLoyaltyPoints, awardOrderPoints } from "../lib/loyaltyHelper.js";
@@ -741,7 +741,9 @@ router.patch("/:id/payment-status", requirePaymentStaff, async (req: Request, re
 });
 
 // POST /api/orders/complete-all — tutup semua pesanan aktif yang sudah lunas.
-// Dipakai tombol "Selesaikan Semua" agar kasir tidak mengklik satu per satu.
+// Dipakai tombol "Selesaikan Semua" di Verifikasi & Transaksi dan di layar
+// dapur (KDS). Layar dapur mengirim `statuses` agar hanya kolom yang dipilih
+// (mis. Sedang Dimasak + Siap Diambil) yang ditutup, bukan seluruh antrean.
 // Dibatasi pada status berjalan, bukan pesanan batal/pre-order, dan baris
 // dikunci FOR UPDATE supaya klik ganda tidak menyelesaikan pesanan baru yang
 // masuk di tengah proses.
@@ -749,6 +751,10 @@ router.post("/complete-all", requireOrderStaff, async (req: Request, res: Respon
   const requestedOutlet = req.body?.outlet;
   const outlet = requestedOutlet === 'ngolab' || requestedOutlet === 'coworking' ? requestedOutlet : undefined;
   const paidOnly = req.body?.paid_only === false ? false : true;
+  const requestedStatuses: string[] | undefined = Array.isArray(req.body?.statuses)
+    ? req.body.statuses.map((status: any) => String(status))
+    : undefined;
+  const statuses = normalizeBulkStatuses(requestedStatuses);
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
@@ -759,7 +765,7 @@ router.post("/complete-all", requireOrderStaff, async (req: Request, res: Respon
     query += ' FOR UPDATE';
     const [rows]: any = await connection.query(query, params);
 
-    const plan = planBulkComplete(rows, { outlet, paidOnly });
+    const plan = planBulkComplete(rows, { outlet, paidOnly, statuses });
     const ids = plan.completable.map(order => String(order.id));
     if (ids.length) {
       const placeholders = ids.map(() => '?').join(', ');
