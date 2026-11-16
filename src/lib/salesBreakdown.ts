@@ -205,6 +205,11 @@ function mondayOf(dateKey: string): string {
 // Nomor minggu dihitung dari awal periode ekspor, bukan nomor minggu ISO —
 // tujuannya supaya laporan mingguan selalu mulai dari "Minggu ke-1" beserta
 // tanggal awalnya, sesuai permintaan laporan manual.
+//
+// Rentang tiap minggu DIPOTONG ke batas periode. Contoh: ekspor Oktober 2026
+// dimulai Kamis 01 Okt, jadi Minggu ke-1 ditulis "01 Okt – 04 Okt 2026",
+// bukan "28 Sep – 04 Okt" — kalau tidak, label akan menjanjikan data akhir
+// September yang memang tidak ikut diekspor.
 export function weekBreakdown(orders: BreakdownOrder[], range?: { start: string; end: string } | null): WeekRow[] {
   const keys = orders.map(order => wibDateKey(order.created_at ?? '')).filter(Boolean).sort();
   const start = range?.start && /^\d{4}-\d{2}-\d{2}$/.test(range.start) ? range.start : keys[0];
@@ -226,10 +231,13 @@ export function weekBreakdown(orders: BreakdownOrder[], range?: { start: string;
   let cursor = firstMonday;
   let index = 1;
   while (cursor <= end) {
-    const weekEnd = shiftDateKey(cursor, 6);
+    const rawEnd = shiftDateKey(cursor, 6);
+    // Potong ke batas periode agar label rentang selalu sama dengan data.
+    const weekStart = cursor < start ? start : cursor;
+    const weekEnd = rawEnd > end ? end : rawEnd;
     const agg = emptyAgg();
     for (const [date, dayAgg] of byDate) {
-      if (date < cursor || date > weekEnd) continue;
+      if (date < weekStart || date > weekEnd) continue;
       agg.orders += dayAgg.orders;
       agg.items += dayAgg.items;
       agg.revenue += dayAgg.revenue;
@@ -244,9 +252,11 @@ export function weekBreakdown(orders: BreakdownOrder[], range?: { start: string;
     rows.push({
       index,
       label: `Minggu ke-${index}`,
-      start: cursor,
+      start: weekStart,
       end: weekEnd,
-      rangeLabel: `${formatWibDateKey(cursor)} – ${formatWibDateKey(weekEnd)}`,
+      rangeLabel: weekStart === weekEnd
+        ? formatWibDateKey(weekStart)
+        : `${formatWibDateKey(weekStart)} – ${formatWibDateKey(weekEnd)}`,
       orders: agg.orders,
       items: agg.items,
       revenue: agg.revenue,

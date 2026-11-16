@@ -285,6 +285,32 @@ export async function makeHistoryWorkbook(orders: HistoryExportOrder[], descript
   [12, 12, 12, 18, 20, 34, 12].forEach((width, i) => { yearSheet.getColumn(i + 1).width = width; });
   yearSheet.autoFilter = 'A4:G4';
 
+  // Sheet: Rincian Bulanan per Tahun — versi paling detail untuk ekspor tahunan,
+  // supaya total setahun bisa ditelusuri sampai bulan dan menu teratasnya.
+  const yearDetailSheet = workbook.addWorksheet('Rincian Bulanan per Tahun', { views: [{ state: 'frozen', ySplit: 4 }] });
+  title(yearDetailSheet, 'RINCIAN BULANAN PER TAHUN', 8);
+  subtitle(yearDetailSheet, description, 8);
+  summaryLine(yearDetailSheet, 'Tiap baris adalah satu bulan di dalam tahunnya, lengkap dengan hari aktif dan rata-rata harian.', 8);
+  styleHeader(yearDetailSheet.addRow(['Tahun', 'Bulan', 'Hari Aktif', 'Pesanan', 'Qty Item', 'Pendapatan (Rp)', 'Rata-rata/Hari (Rp)', 'Menu Teratas']));
+  let yearDetailIndex = 0;
+  for (const year of years) {
+    const monthsInYear = months.filter(month => month.month.startsWith(year.year));
+    if (!monthsInYear.length) {
+      const row = yearDetailSheet.addRow([year.year, '(tidak ada transaksi)', 0, 0, 0, 0, 0, '-']);
+      if (yearDetailIndex++ % 2 === 0) row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } };
+      continue;
+    }
+    for (const month of monthsInYear) {
+      const activeDays = days.filter(day => day.date.startsWith(month.month)).length;
+      const row = yearDetailSheet.addRow([year.year, month.label, activeDays, month.orders, month.items, month.revenue,
+        activeDays ? Math.round(month.revenue / activeDays) : 0, `${month.topMenu} (${month.topMenuQty})`]);
+      if (yearDetailIndex++ % 2 === 0) row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } };
+      row.getCell(6).numFmt = '#,##0';
+      row.getCell(7).numFmt = '#,##0';
+    }
+  }
+  [12, 22, 12, 12, 12, 18, 20, 30].forEach((width, i) => { yearDetailSheet.getColumn(i + 1).width = width; });
+
   return workbook;
 }
 export async function exportHistoryExcel(orders: HistoryExportOrder[], description: string, filename: string, options: ExportOptions = {}) {
@@ -469,6 +495,32 @@ export function makeHistoryPdf(orders: HistoryExportOrder[], description: string
     }),
     theme: 'striped', headStyles: { fillColor: [79, 70, 229] }, styles: { fontSize: 8 },
     columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 6: { halign: 'right' } }, didDrawPage: pageFooter,
+  });
+
+  // Halaman rincian bulanan per tahun: menelusuri total setahun sampai bulan.
+  doc.addPage();
+  doc.setFontSize(15); doc.text('RINCIAN BULANAN PER TAHUN', 14, 17);
+  doc.setFontSize(9); doc.text('Tiap baris satu bulan: hari aktif, pesanan, pendapatan, dan menu teratas.', 14, 24);
+  const yearDetailBody: string[][] = [];
+  for (const year of years) {
+    const monthsInYear = months.filter(month => month.month.startsWith(year.year));
+    if (!monthsInYear.length) {
+      yearDetailBody.push([year.year, '(tidak ada transaksi)', '0', '0', '0', '0', '0', '-']);
+      continue;
+    }
+    for (const month of monthsInYear) {
+      const activeDays = days.filter(day => day.date.startsWith(month.month)).length;
+      yearDetailBody.push([year.year, month.label, String(activeDays), String(month.orders), String(month.items),
+        month.revenue.toLocaleString('id-ID'), (activeDays ? Math.round(month.revenue / activeDays) : 0).toLocaleString('id-ID'),
+        `${month.topMenu} (${month.topMenuQty})`]);
+    }
+  }
+  autoTable(doc, {
+    startY: 30,
+    head: [['Tahun', 'Bulan', 'Hari Aktif', 'Pesanan', 'Qty Item', 'Pendapatan (Rp)', 'Rata-rata/Hari (Rp)', 'Menu Teratas']],
+    body: yearDetailBody,
+    theme: 'striped', headStyles: { fillColor: [79, 70, 229] }, styles: { fontSize: 8, overflow: 'linebreak' },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } }, didDrawPage: pageFooter,
   });
   return doc;
 }

@@ -69,16 +69,19 @@ test('rekap mingguan memberi nomor minggu beserta rentang tanggal', () => {
   const weeks = weekBreakdown(orders, { start: '2026-01-01', end: '2026-01-31' });
   assert.ok(weeks.length >= 4);
   assert.equal(weeks[0].label, 'Minggu ke-1');
-  // 01 Jan 2026 = Kamis, jadi minggu ke-1 mulai Senin 29 Des 2025.
-  assert.equal(weeks[0].start, '2025-12-29');
+  // 01 Jan 2026 = Kamis. Rentang dipotong ke awal periode supaya label tidak
+  // menjanjikan data akhir Desember yang tidak ikut diekspor.
+  assert.equal(weeks[0].start, '2026-01-01');
   assert.equal(weeks[0].end, '2026-01-04');
-  assert.match(weeks[0].rangeLabel, /29 Des 2025 – 04 Jan 2026/);
+  assert.equal(weeks[0].rangeLabel, '01 Jan 2026 – 04 Jan 2026');
   const weekWithSenin = weeks.find(week => week.start === '2026-01-05')!;
   assert.equal(weekWithSenin.orders, 3);
   assert.equal(weekWithSenin.revenue, 100000);
-  // Minggu ke-1 = 29 Des–04 Jan, jadi 05–11 Jan adalah Minggu ke-2.
+  // Minggu ke-1 = 01–04 Jan, jadi 05–11 Jan adalah Minggu ke-2.
   assert.equal(weekWithSenin.label, 'Minggu ke-2');
   assert.equal(weeks[2].label, 'Minggu ke-3');
+  // Minggu terakhir juga dipotong ke akhir periode (31 Jan), bukan 01 Feb.
+  assert.equal(weeks[weeks.length - 1].end, '2026-01-31');
 });
 
 test('rekap mingguan tanpa rentang memakai tanggal transaksi pertama dan terakhir', () => {

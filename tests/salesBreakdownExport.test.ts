@@ -30,7 +30,7 @@ test('Excel bulanan memuat sheet Ringkasan, Rekap Harian, Menu per Hari, Rekap M
   const restored = new ExcelJS.Workbook();
   await restored.xlsx.load(await book.xlsx.writeBuffer());
   const names = restored.worksheets.map(sheet => sheet.name);
-  for (const expected of ['Ringkasan', 'Rekap Harian', 'Menu per Hari', 'Rekap Mingguan', 'Rincian Harian per Minggu', 'Rekap Bulanan', 'Rekap Tahunan']) {
+  for (const expected of ['Ringkasan', 'Rekap Harian', 'Menu per Hari', 'Rekap Mingguan', 'Rincian Harian per Minggu', 'Rekap Bulanan', 'Rekap Tahunan', 'Rincian Bulanan per Tahun']) {
     assert.ok(names.includes(expected), `sheet ${expected} harus ada, dapat: ${names.join(', ')}`);
   }
 });
@@ -54,11 +54,11 @@ test('sheet Rekap Mingguan menyebut minggu ke-1 sampai berapa tanggal', async ()
   await restored.xlsx.load(await book.xlsx.writeBuffer());
   const sheet = restored.getWorksheet('Rekap Mingguan')!;
   assert.equal(sheet.getCell('A5').value, 'Minggu ke-1');
-  // 01 Jan 2026 hari Kamis → minggu ke-1 mulai Senin 29 Des 2025.
-  assert.equal(sheet.getCell('B5').value, '29 Des 2025 – 04 Jan 2026');
-  assert.equal(sheet.getCell('C5').value, '2025-12-29');
+  // 01 Jan 2026 hari Kamis; rentang dipotong ke awal periode (01 Jan), bukan 29 Des.
+  assert.equal(sheet.getCell('B5').value, '01 Jan 2026 – 04 Jan 2026');
+  assert.equal(sheet.getCell('C5').value, '2026-01-01');
   assert.equal(sheet.getCell('D5').value, '2026-01-04');
-  // Minggu ke-2 memuat 05–11 Jan dengan tiga transaksi.
+  // Minggu ke-2 memuat 05–11 Jan dengan dua transaksi.
   assert.equal(sheet.getCell('A6').value, 'Minggu ke-2');
   assert.equal(sheet.getCell('B6').value, '05 Jan 2026 – 11 Jan 2026');
   assert.equal(sheet.getCell('E6').value, 2);
@@ -121,9 +121,10 @@ test('PDF memuat halaman rekap harian, mingguan, menu per hari, dan bulanan/tahu
   assert.match(pdf, /REKAP MINGGUAN/);
   assert.match(pdf, /RINCIAN HARIAN PER MINGGU/);
   assert.match(pdf, /REKAP BULANAN & TAHUNAN/);
+  assert.match(pdf, /RINCIAN BULANAN PER TAHUN/);
   assert.match(pdf, /Minggu ke-1/);
   assert.match(pdf, /Nasi Goreng/);
-  assert.ok(doc.getNumberOfPages() >= 10, `halaman PDF minimal 10, dapat ${doc.getNumberOfPages()}`);
+  assert.ok(doc.getNumberOfPages() >= 11, `halaman PDF minimal 11, dapat ${doc.getNumberOfPages()}`);
 });
 
 test('ekspor tetap memakai transaksi belum lunas hanya di daftar transaksi, bukan rekap', async () => {
