@@ -84,7 +84,7 @@ export default function SalesHistory() {
   const [filterSource, setFilterSource] = useState<FilterSource>('semua');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('semua');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [period, setPeriod] = useState<HistoryPeriod>('bulan');
+  const [period, setPeriod] = useState<HistoryPeriod>('semua');
   const [selectedDate, setSelectedDate] = useState(() => wibDateKey(new Date()));
   const [rangeEnd, setRangeEnd] = useState(() => wibDateKey(new Date()));
   const [exportError, setExportError] = useState('');
@@ -397,6 +397,13 @@ export default function SalesHistory() {
         <div className="flex flex-wrap items-center gap-3">
           <span className="px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 text-[10px] font-black uppercase tracking-widest">{historyPeriodLabel(period, selectedDate, rangeEnd)}</span>
           <span className="text-xs text-slate-500 font-bold">{filtered.length} transaksi · {paidOrders.length} lunas</span>
+          {/* Tanpa penanda ini, filter periode terasa seperti data hilang: pengguna
+              hanya melihat bulan berjalan lalu menyimpulkan riwayat lama terhapus. */}
+          {filtered.length < allOrders.length && (
+            <span role="status" className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-black uppercase tracking-widest">
+              {allOrders.length - filtered.length} transaksi lain disembunyikan filter — pilih “Semua” untuk melihat semuanya
+            </span>
+          )}
         </div>
         <p className="text-xs text-slate-500">Waktu WIB (Asia/Jakarta); mingguan Senin–Minggu. Timestamp tanpa zona dianggap WIB; tanggal tidak valid hanya muncul pada Semua Periode.</p>
         <div className="flex gap-2">{(['PDF', 'Excel'] as const).map(format => <button key={format} disabled={loading || !filtered.length} onClick={async () => { try { setExportError(''); const description = `Periode: ${historyPeriodLabel(period, selectedDate, rangeEnd)} | Sumber: ${filterSource} | Status: ${filterStatus} | Pencarian: ${search || '-'} | WIB${localStatus !== 'online' || friendStatus !== 'online' ? ` | DATA TIDAK LENGKAP: ${localStatus !== 'online' ? 'order lokal tidak tersedia; ' : ''}${friendStatus !== 'online' ? 'Smart Tag tidak tersedia' : ''}` : ''}`; const filename = `Riwayat_Transaksi_${period}_${selectedDate}`; const exportOptions = { period, range: activeRange }; if (format === 'PDF') exportHistoryPdf(filtered, description, filename, exportOptions); else await exportHistoryExcel(filtered, description, filename, exportOptions); } catch (error) { console.error(error); setExportError('Ekspor gagal. Silakan coba lagi.'); } }} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-50"><Download size={14} /> Ekspor {format}</button>)}</div>{exportError && <p role="alert" className="text-red-600 text-xs">{exportError}</p>}
