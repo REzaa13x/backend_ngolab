@@ -22,7 +22,9 @@ import {
   CalendarClock,
   CalendarCheck,
   CheckCircle2,
-  Webhook
+  Webhook,
+  Calculator,
+  ExternalLink
 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
@@ -235,6 +237,35 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
             </div>
           </div>
         ))}
+
+        {/* Ekosistem Ngolab Integration */}
+        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+          {!isCollapsed && (
+            <h3 className="px-6 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-400">
+              Ekosistem Terintegrasi
+            </h3>
+          )}
+          <div className="px-3 space-y-1">
+            <a
+              href="https://hpp.ngolab.online"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative text-sm font-medium",
+                "text-slate-600 dark:text-slate-400 hover:bg-orange-500 hover:text-white dark:hover:bg-orange-500 dark:hover:text-white"
+              )}
+              title="Kalkulator HPP & Finansial"
+            >
+              <Calculator className="w-4.5 h-4.5 shrink-0 text-orange-500 group-hover:text-white transition-colors" />
+              {!isCollapsed && (
+                <div className="flex-1 flex items-center justify-between min-w-0">
+                  <span className="truncate">Kalkulator HPP</span>
+                  <ExternalLink className="w-3.5 h-3.5 opacity-60 ml-1 shrink-0" />
+                </div>
+              )}
+            </a>
+          </div>
+        </div>
       </div>
 
       {/* Footer / Profile */}
