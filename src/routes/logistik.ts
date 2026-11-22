@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db, addAuditLog } from '../db/db.js';
 import { getVerifiedActor } from '../middleware/authSession.js';
+import { verifyPassword } from '../lib/password.js';
 
 export const logistikRouter = Router();
 
@@ -776,6 +777,10 @@ logistikRouter.delete('/master/suppliers/:id', async (req: Request, res: Respons
 logistikRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Username dan password wajib diisi.' });
+    }
+
     if ((username === 'admin' && password === 'admin123') || (username === 'staff_gudang' && password === 'staff123')) {
       return res.json({
         success: true,
@@ -792,22 +797,42 @@ logistikRouter.post('/auth/login', async (req: Request, res: Response) => {
       });
     }
 
-    // Cek juga dari tabel staff jika username cocok dengan email/nama staf
-    const [staffs]: any = await db.query('SELECT * FROM staff WHERE email = ? AND is_active = 1 LIMIT 1', [username]);
-    if (staffs.length > 0) {
-      return res.json({
-        success: true,
-        message: 'Login berhasil via akun Staf Master',
-        data: {
-          user: {
-            id: staffs[0].id,
-            username: staffs[0].email,
-            nama_lengkap: staffs[0].name,
-            role: staffs[0].role
-          },
-          token: `staff_token_${staffs[0].id}_${Date.now()}`
+    // Cek juga dari tabel staff jika username cocok dengan email/nama/id staf
+    try {
+      const [staffs]: any = await db.query(
+        `SELECT id, name, role, email, password_hash, password_plain, status 
+         FROM staff 
+         WHERE (email = ? OR id = ? OR name = ?) AND (status = 'active' OR status IS NULL) 
+         LIMIT 1`,
+        [username, username, username]
+      );
+      if (staffs.length > 0) {
+        const staff = staffs[0];
+        let isValid = false;
+        if (staff.password_plain && staff.password_plain === password) {
+          isValid = true;
+        } else if (staff.password_hash) {
+          isValid = await verifyPassword(password, staff.password_hash);
         }
-      });
+
+        if (isValid) {
+          return res.json({
+            success: true,
+            message: 'Login berhasil via akun Staf Master',
+            data: {
+              user: {
+                id: staff.id,
+                username: staff.email,
+                nama_lengkap: staff.name,
+                role: staff.role
+              },
+              token: `staff_token_${staff.id}_${Date.now()}`
+            }
+          });
+        }
+      }
+    } catch (staffErr: any) {
+      console.warn('[Logistik Auth] Peringatan pencarian staff:', staffErr.message);
     }
 
     res.status(401).json({ success: false, message: 'Username atau password salah.' });
