@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS `hpp_recipes` (
   `id` VARCHAR(64) NOT NULL PRIMARY KEY,
   `menu_id` VARCHAR(64) NULL,
   `name` VARCHAR(150) NOT NULL,
-  `category` ENUM('makanan_berat', 'camilan', 'minuman', 'bakso_mie', 'subassembly') NOT NULL DEFAULT 'makanan_berat',
+  `category` VARCHAR(64) NOT NULL DEFAULT 'makanan_berat',
   `portion_yield` DECIMAL(8,2) DEFAULT 1.00,
   `packaging_cost` DECIMAL(10,2) DEFAULT 0,
   `cooking_gas_cost` DECIMAL(10,2) DEFAULT 0,
