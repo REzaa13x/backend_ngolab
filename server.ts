@@ -12,6 +12,9 @@ import orderSimulationRouter from './src/routes/orderSimulation.js';
 import usersRouter from './src/routes/users.js';
 import coinPromosRouter from './src/routes/coinPromos.js';
 import authRouter from './src/routes/auth.js';
+import { createDapuropsIntegration } from './src/routes/dapuropsIntegration.js';
+import { verifyPassword } from './src/lib/password.js';
+import { db as integrationDb } from './src/db/db.js';
 import staffRouter from './src/routes/staff.js';
 import menuRouter from './src/routes/menu.js';
 import shiftsRouter from './src/routes/shifts.js';
@@ -212,6 +215,7 @@ async function startServer() {
   preorderTimer.unref();
 
   // API routes. Routers with specific endpoints are mounted before generic routers.
+  app.use('/api/integrations/dapurops', createDapuropsIntegration({ key: () => process.env.DAPUROPS_INTEGRATION_KEY || '', query: (sql, params) => integrationDb.query(sql, params), verify: verifyPassword }));
   app.use('/api/auth', authRateLimit, authRouter);
   app.use('/api/staff', staffRouter);
   app.use('/api/shifts', shiftsRouter);

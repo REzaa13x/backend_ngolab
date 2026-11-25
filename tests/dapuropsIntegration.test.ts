@@ -1,0 +1,8 @@
+import assert from 'node:assert/strict';
+import express from 'express';
+import {createDapuropsIntegration} from '../src/routes/dapuropsIntegration.ts';
+const app=express();app.use(express.json());let inactive=false;const row={id:'S1',name:'Staff',email:'staff@example.com',phone:null,role:'Koki',status:'active',password_hash:'secret',password_plain:'NEVER'};
+app.use(createDapuropsIntegration({key:()=> 'integration-secret',query:async()=>[[{...row,status:inactive?'inactive':'active'}]],verify:async(p:string)=>p==='correct-password'}));
+const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const base=`http://127.0.0.1:${(server.address() as any).port}`;
+const call=(path:string,body?:unknown,key='integration-secret')=>fetch(base+path,{method:body?'POST':'GET',headers:{'x-api-key':key,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+try{assert.equal((await call('/staff',undefined,'')).status,401);assert.equal((await call('/staff',undefined,'bad')).status,403);let r=await call('/staff');assert.equal(r.status,200);assert(!JSON.stringify(await r.json()).match(/password|secret|token/));assert.equal((await call('/login',{email:row.email,password:'wrong'})).status,401);r=await call('/login',{email:row.email,password:'correct-password'});assert.equal(r.status,200);assert.equal((await r.json()).staff.id,'S1');inactive=true;assert.equal((await call('/login',{email:row.email,password:'correct-password'})).status,403);console.log('PASS dedicated staff roster/login, key authorization, inactive denial, credential redaction');}finally{server.close();}
